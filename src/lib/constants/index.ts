@@ -1,2 +1,2 @@
 // Re-export all constants
-export { pipelineColumns, defaultTemplates, demoLeads, demoInteractions } from "./defaults";
+export { pipelineColumns } from "./defaults";
