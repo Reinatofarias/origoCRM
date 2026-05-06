@@ -54,7 +54,6 @@ import {
 type View = "dashboard" | "pipeline" | "leads" | "templates";
 type AuthUser = { id: string; email?: string };
 type Toast = { id: string; text: string };
-type AuthMode = "login" | "signup";
 
 const emptyLead: LeadInput = {
   name: "",
@@ -121,7 +120,6 @@ function MissingSupabaseConfig() {
 
 function AuthScreen() {
   const supabase = useMemo(() => createSupabaseClient(), []);
-  const [mode, setMode] = useState<AuthMode>("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
@@ -134,24 +132,13 @@ function AuthScreen() {
     setMessage("");
     setLoading(true);
 
-    const { error } =
-      mode === "login"
-        ? await supabase.auth.signInWithPassword({ email, password })
-        : await supabase.auth.signUp({
-            email,
-            password,
-            options: { emailRedirectTo: window.location.origin },
-          });
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
 
     setLoading(false);
 
     if (error) {
       setMessage(error.message);
       return;
-    }
-
-    if (mode === "signup") {
-      setMessage("Conta criada. Se o Supabase pedir confirmacao, verifique seu email.");
     }
   }
 
@@ -173,30 +160,8 @@ function AuthScreen() {
           <div className="mb-6">
             <h2 className="text-2xl font-semibold">Entrar</h2>
             <p className="mt-2 text-sm text-zinc-400">
-              Acesse com email e senha. Os dados ficam salvos no Supabase.
+              Acesse com seu usuario autorizado.
             </p>
-          </div>
-          <div className="mb-5 grid grid-cols-2 gap-2 rounded-lg border border-white/10 bg-black/20 p-1">
-            {[
-              ["login", "Entrar"],
-              ["signup", "Criar conta"],
-            ].map(([key, label]) => (
-              <button
-                className={`h-10 rounded-md text-sm font-medium transition ${
-                  mode === key
-                    ? "bg-[#7C3AED] text-white"
-                    : "text-zinc-400 hover:bg-white/[0.06] hover:text-white"
-                }`}
-                key={key}
-                onClick={() => {
-                  setMode(key as AuthMode);
-                  setMessage("");
-                }}
-                type="button"
-              >
-                {label}
-              </button>
-            ))}
           </div>
           <form className="space-y-4" onSubmit={handleAuth}>
             <label className="block text-sm text-zinc-300">
@@ -204,7 +169,7 @@ function AuthScreen() {
               <input
                 className="mt-2 h-12 w-full rounded-lg border border-white/10 bg-black/30 px-4 text-white outline-none ring-[#7C3AED]/50 transition focus:border-[#7C3AED] focus:ring-4"
                 onChange={(event) => setEmail(event.target.value)}
-                placeholder="voce@empresa.com"
+                placeholder="email"
                 required
                 type="email"
                 value={email}
@@ -228,7 +193,7 @@ function AuthScreen() {
               type="submit"
             >
               {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-              {mode === "login" ? "Entrar" : "Criar conta"}
+              Entrar
             </button>
           </form>
           {message && <p className="mt-4 text-sm text-zinc-300">{message}</p>}
