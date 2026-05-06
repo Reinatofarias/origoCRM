@@ -35,15 +35,9 @@ import {
 } from "lucide-react";
 import { FormEvent, MouseEvent, useEffect, useMemo, useState } from "react";
 
-import {
-  defaultTemplates,
-  demoInteractions,
-  demoLeads,
-  pipelineColumns,
-} from "@/lib/constants";
+import { pipelineColumns } from "@/lib/constants";
 import { createSupabaseClient, isSupabaseConfigured } from "@/lib/db";
 import type { Interaction, Lead, LeadInput, LeadStatus, MessageTemplate } from "@/lib/types";
-import { useLocalState } from "@/lib/hooks";
 import {
   newId,
   normalizePhone,
@@ -60,6 +54,7 @@ import {
 type View = "dashboard" | "pipeline" | "leads" | "templates";
 type AuthUser = { id: string; email?: string };
 type Toast = { id: string; text: string };
+type AuthMode = "login" | "signup";
 
 const emptyLead: LeadInput = {
   name: "",
@@ -75,7 +70,9 @@ export function CrmApp() {
   const [authLoading, setAuthLoading] = useState(isSupabaseConfigured);
 
   useEffect(() => {
-    if (!supabase) return;
+    if (!supabase) {
+      return;
+    }
 
     supabase.auth.getUser().then(({ data }) => {
       setUser(data.user ? { id: data.user.id, email: data.user.email ?? undefined } : null);
@@ -101,31 +98,61 @@ export function CrmApp() {
     );
   }
 
-  if (!user) return <AuthScreen onDemo={() => setUser({ id: "demo", email: "demo@origocrm.app" })} />;
+  if (!supabase) return <MissingSupabaseConfig />;
+
+  if (!user) return <AuthScreen />;
 
   return <Workspace user={user} onLogout={() => setUser(null)} />;
 }
 
-function AuthScreen({ onDemo }: { onDemo: () => void }) {
+function MissingSupabaseConfig() {
+  return (
+    <main className="flex min-h-screen items-center justify-center bg-[#0B0B0F] px-5 text-white">
+      <section className="w-full max-w-lg rounded-xl border border-white/10 bg-white/[0.04] p-6">
+        <h1 className="text-2xl font-semibold">Supabase nao configurado</h1>
+        <p className="mt-3 text-sm leading-6 text-zinc-400">
+          Configure as variaveis `NEXT_PUBLIC_SUPABASE_URL` e
+          `NEXT_PUBLIC_SUPABASE_ANON_KEY` na Vercel para ativar login e banco real.
+        </p>
+      </section>
+    </main>
+  );
+}
+
+function AuthScreen() {
   const supabase = useMemo(() => createSupabaseClient(), []);
+  const [mode, setMode] = useState<AuthMode>("login");
   const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
 
-  async function handleMagicLink(event: FormEvent<HTMLFormElement>) {
+  async function handleAuth(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!supabase) {
-      onDemo();
+    if (!supabase) return;
+
+    setMessage("");
+    setLoading(true);
+
+    const { error } =
+      mode === "login"
+        ? await supabase.auth.signInWithPassword({ email, password })
+        : await supabase.auth.signUp({
+            email,
+            password,
+            options: { emailRedirectTo: window.location.origin },
+          });
+
+    setLoading(false);
+
+    if (error) {
+      setMessage(error.message);
       return;
     }
 
-    setLoading(true);
-    const { error } = await supabase.auth.signInWithOtp({
-      email,
-      options: { emailRedirectTo: window.location.origin },
-    });
-    setLoading(false);
-    setMessage(error ? error.message : "Magic link enviado. Verifique seu email.");
+    if (mode === "signup") {
+      setMessage("Conta criada. Se o Supabase pedir confirmacao, verifique seu email.");
+    }
   }
 
   return (
@@ -146,19 +173,53 @@ function AuthScreen({ onDemo }: { onDemo: () => void }) {
           <div className="mb-6">
             <h2 className="text-2xl font-semibold">Entrar</h2>
             <p className="mt-2 text-sm text-zinc-400">
-              Use magic link com Supabase Auth. Sem variaveis de ambiente, use a demo local.
+              Acesse com email e senha. Os dados ficam salvos no Supabase.
             </p>
           </div>
-          <form className="space-y-4" onSubmit={handleMagicLink}>
+          <div className="mb-5 grid grid-cols-2 gap-2 rounded-lg border border-white/10 bg-black/20 p-1">
+            {[
+              ["login", "Entrar"],
+              ["signup", "Criar conta"],
+            ].map(([key, label]) => (
+              <button
+                className={`h-10 rounded-md text-sm font-medium transition ${
+                  mode === key
+                    ? "bg-[#7C3AED] text-white"
+                    : "text-zinc-400 hover:bg-white/[0.06] hover:text-white"
+                }`}
+                key={key}
+                onClick={() => {
+                  setMode(key as AuthMode);
+                  setMessage("");
+                }}
+                type="button"
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <form className="space-y-4" onSubmit={handleAuth}>
             <label className="block text-sm text-zinc-300">
               Email
               <input
                 className="mt-2 h-12 w-full rounded-lg border border-white/10 bg-black/30 px-4 text-white outline-none ring-[#7C3AED]/50 transition focus:border-[#7C3AED] focus:ring-4"
                 onChange={(event) => setEmail(event.target.value)}
                 placeholder="voce@empresa.com"
-                required={isSupabaseConfigured}
+                required
                 type="email"
                 value={email}
+              />
+            </label>
+            <label className="block text-sm text-zinc-300">
+              Senha
+              <input
+                className="mt-2 h-12 w-full rounded-lg border border-white/10 bg-black/30 px-4 text-white outline-none ring-[#7C3AED]/50 transition focus:border-[#7C3AED] focus:ring-4"
+                minLength={6}
+                onChange={(event) => setPassword(event.target.value)}
+                placeholder="minimo 6 caracteres"
+                required
+                type="password"
+                value={password}
               />
             </label>
             <button
@@ -167,17 +228,8 @@ function AuthScreen({ onDemo }: { onDemo: () => void }) {
               type="submit"
             >
               {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-              Enviar magic link
+              {mode === "login" ? "Entrar" : "Criar conta"}
             </button>
-            {!isSupabaseConfigured && (
-              <button
-                className="h-12 w-full rounded-lg border border-white/10 bg-white/[0.03] px-4 font-medium text-zinc-200 transition hover:bg-white/[0.07]"
-                onClick={onDemo}
-                type="button"
-              >
-                Abrir demo local
-              </button>
-            )}
           </form>
           {message && <p className="mt-4 text-sm text-zinc-300">{message}</p>}
         </section>
@@ -196,24 +248,17 @@ function Workspace({ user, onLogout }: { user: AuthUser; onLogout: () => void })
   const [editingLead, setEditingLead] = useState<Lead | null>(null);
   const [toast, setToast] = useState<Toast | null>(null);
   const [recentLeadId, setRecentLeadId] = useState<string | null>(null);
-  const [localLeads, setLocalLeads] = useLocalState("origocrm:leads", demoLeads);
-  const [localTemplates, setLocalTemplates] = useLocalState("origocrm:templates", defaultTemplates);
-  const [localInteractions, setLocalInteractions] = useLocalState(
-    "origocrm:interactions",
-    demoInteractions,
-  );
   const [remoteLeads, setRemoteLeads] = useState<Lead[]>([]);
   const [remoteTemplates, setRemoteTemplates] = useState<MessageTemplate[]>([]);
   const [remoteInteractions, setRemoteInteractions] = useState<Interaction[]>([]);
-  const isRemote = Boolean(supabase && user.id !== "demo");
-  const leads = isRemote ? remoteLeads : localLeads;
-  const templates = isRemote ? remoteTemplates : localTemplates;
-  const interactions = isRemote ? remoteInteractions : localInteractions;
+  const leads = remoteLeads;
+  const templates = remoteTemplates;
+  const interactions = remoteInteractions;
   const priorityLeads = useMemo(() => getPriorityLeads(leads), [leads]);
 
   useEffect(() => {
     async function loadRemoteData() {
-      if (!supabase || user.id === "demo") {
+      if (!supabase) {
         setLoading(false);
         return;
       }
@@ -225,8 +270,15 @@ function Workspace({ user, onLogout }: { user: AuthUser; onLogout: () => void })
         supabase.from("interactions").select("*").order("created_at", { ascending: false }),
       ]);
 
+      if (leadResult.error || templateResult.error || interactionResult.error) {
+        setToast({
+          id: newId("toast"),
+          text: "Nao foi possivel carregar os dados do Supabase",
+        });
+      }
+
       setRemoteLeads((leadResult.data as Lead[] | null) ?? []);
-      setRemoteTemplates((templateResult.data as MessageTemplate[] | null) ?? defaultTemplates);
+      setRemoteTemplates((templateResult.data as MessageTemplate[] | null) ?? []);
       setRemoteInteractions((interactionResult.data as Interaction[] | null) ?? []);
       setLoading(false);
     }
@@ -258,58 +310,51 @@ function Workspace({ user, onLogout }: { user: AuthUser; onLogout: () => void })
   }).length;
   const activeLeads = leads.filter((lead) => lead.status !== "fechado").length;
 
+  function showToast(text: string) {
+    setToast({ id: newId("toast"), text });
+  }
+
   function patchLeadOptimistic(id: string, patch: Partial<Lead>) {
-    if (isRemote) {
-      setRemoteLeads((items) => items.map((lead) => (lead.id === id ? { ...lead, ...patch } : lead)));
-    } else {
-      setLocalLeads((items) => items.map((lead) => (lead.id === id ? { ...lead, ...patch } : lead)));
-    }
+    setRemoteLeads((items) => items.map((lead) => (lead.id === id ? { ...lead, ...patch } : lead)));
     setRecentLeadId(id);
     window.setTimeout(() => setRecentLeadId((current) => (current === id ? null : current)), 1400);
   }
 
   function addInteractionOptimistic(interaction: Interaction) {
-    if (isRemote) setRemoteInteractions((items) => [interaction, ...items]);
-    else setLocalInteractions((items) => [interaction, ...items]);
+    setRemoteInteractions((items) => [interaction, ...items]);
   }
 
   async function saveLead(input: LeadInput, id?: string) {
     const timestamp = new Date().toISOString();
 
-    if (isRemote && supabase) {
-      if (id) {
-        patchLeadOptimistic(id, { ...input, updated_at: timestamp });
-        supabase.from("leads").update(input).eq("id", id).then();
-      } else {
-        const { data } = await supabase
-          .from("leads")
-          .insert({ ...input, user_id: user.id })
-          .select()
-          .single();
-        if (data) setRemoteLeads((items) => [data as Lead, ...items]);
-      }
+    if (!supabase) {
+      showToast("Supabase nao configurado");
       return;
     }
 
     if (id) {
-      setLocalLeads((items) =>
-        items.map((lead) =>
-          lead.id === id ? { ...lead, ...input, updated_at: timestamp } : lead,
-        ),
-      );
-    } else {
-      setLocalLeads((items) => [
-        {
-          id: newId("lead"),
-          ...input,
-          last_contact_at: null,
-          next_followup_at: null,
-          created_at: timestamp,
-          updated_at: timestamp,
-        },
-        ...items,
-      ]);
+      const previous = remoteLeads;
+      patchLeadOptimistic(id, { ...input, updated_at: timestamp });
+      const { error } = await supabase.from("leads").update(input).eq("id", id);
+      if (error) {
+        setRemoteLeads(previous);
+        showToast("Erro ao atualizar lead");
+      }
+      return;
     }
+
+    const { data, error } = await supabase
+      .from("leads")
+      .insert({ ...input, user_id: user.id })
+      .select()
+      .single();
+
+    if (error) {
+      showToast("Erro ao criar lead");
+      return;
+    }
+
+    if (data) setRemoteLeads((items) => [data as Lead, ...items]);
   }
 
   async function updateLeadStatus(id: string, status: LeadStatus) {
@@ -318,11 +363,12 @@ function Workspace({ user, onLogout }: { user: AuthUser; onLogout: () => void })
     if (before && before.status !== status) {
       const interaction = makeInteraction(id, `Status alterado para ${status}`, "status_changed");
       addInteractionOptimistic(interaction);
-      if (isRemote && supabase) {
-        supabase.from("interactions").insert({ ...interaction, user_id: user.id }).then();
-      }
+      if (supabase) await supabase.from("interactions").insert({ ...interaction, user_id: user.id });
     }
-    if (isRemote && supabase) supabase.from("leads").update({ status }).eq("id", id).then();
+    if (supabase) {
+      const { error } = await supabase.from("leads").update({ status }).eq("id", id);
+      if (error) showToast("Erro ao atualizar status");
+    }
   }
 
   async function scheduleFollowup(lead: Lead, nextFollowupAt: string) {
@@ -333,11 +379,14 @@ function Workspace({ user, onLogout }: { user: AuthUser; onLogout: () => void })
       "followup_created",
     );
     addInteractionOptimistic(interaction);
-    setToast({ id: newId("toast"), text: "Follow-up agendado" });
+    showToast("Follow-up agendado");
 
-    if (isRemote && supabase) {
-      supabase.from("leads").update({ next_followup_at: nextFollowupAt }).eq("id", lead.id).then();
-      supabase.from("interactions").insert({ ...interaction, user_id: user.id }).then();
+    if (supabase) {
+      const [{ error: leadError }, { error: interactionError }] = await Promise.all([
+        supabase.from("leads").update({ next_followup_at: nextFollowupAt }).eq("id", lead.id),
+        supabase.from("interactions").insert({ ...interaction, user_id: user.id }),
+      ]);
+      if (leadError || interactionError) showToast("Erro ao salvar follow-up");
     }
   }
 
@@ -346,8 +395,9 @@ function Workspace({ user, onLogout }: { user: AuthUser; onLogout: () => void })
   async function addInteraction(leadId: string, note: string) {
     const interaction = makeInteraction(leadId, note, "note");
     addInteractionOptimistic(interaction);
-    if (isRemote && supabase) {
-      supabase.from("interactions").insert({ ...interaction, user_id: user.id }).then();
+    if (supabase) {
+      const { error } = await supabase.from("interactions").insert({ ...interaction, user_id: user.id });
+      if (error) showToast("Erro ao registrar interacao");
     }
   }
 
@@ -363,7 +413,7 @@ function Workspace({ user, onLogout }: { user: AuthUser; onLogout: () => void })
       updated_at: now,
     });
     addInteractionOptimistic(interaction);
-    setToast({ id: newId("toast"), text: "Mensagem enviada" });
+    showToast("Mensagem enviada");
 
     window.open(
       `https://wa.me/${normalizePhone(lead.phone)}?text=${encodeURIComponent(message)}`,
@@ -373,17 +423,19 @@ function Workspace({ user, onLogout }: { user: AuthUser; onLogout: () => void })
 
     setSelectedLeadId(nextLead?.id ?? null);
 
-    if (isRemote && supabase) {
-      supabase
-        .from("leads")
-        .update({
-          status: "contatado",
-          last_contact_at: now,
-          next_followup_at: nextFollowupAt,
-        })
-        .eq("id", lead.id)
-        .then();
-      supabase.from("interactions").insert({ ...interaction, user_id: user.id }).then();
+    if (supabase) {
+      const [{ error: leadError }, { error: interactionError }] = await Promise.all([
+        supabase
+          .from("leads")
+          .update({
+            status: "contatado",
+            last_contact_at: now,
+            next_followup_at: nextFollowupAt,
+          })
+          .eq("id", lead.id),
+        supabase.from("interactions").insert({ ...interaction, user_id: user.id }),
+      ]);
+      if (leadError || interactionError) showToast("Erro ao salvar envio no Supabase");
     }
   }
 
@@ -392,24 +444,27 @@ function Workspace({ user, onLogout }: { user: AuthUser; onLogout: () => void })
   }
 
   async function addTemplate(title: string, body: string) {
-    if (isRemote && supabase) {
-      const { data } = await supabase
-        .from("message_templates")
-        .insert({ title, body, user_id: user.id })
-        .select()
-        .single();
-      if (data) setRemoteTemplates((items) => [...items, data as MessageTemplate]);
+    if (!supabase) {
+      showToast("Supabase nao configurado");
       return;
     }
 
-    setLocalTemplates((items) => [
-      ...items,
-      { id: newId("template"), title, body, created_at: new Date().toISOString() },
-    ]);
+    const { data, error } = await supabase
+      .from("message_templates")
+      .insert({ title, body, user_id: user.id })
+      .select()
+      .single();
+
+    if (error) {
+      showToast("Erro ao salvar template");
+      return;
+    }
+
+    if (data) setRemoteTemplates((items) => [...items, data as MessageTemplate]);
   }
 
   async function logout() {
-    if (supabase && user.id !== "demo") await supabase.auth.signOut();
+    if (supabase) await supabase.auth.signOut();
     onLogout();
   }
 
