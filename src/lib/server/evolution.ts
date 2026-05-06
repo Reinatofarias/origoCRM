@@ -36,6 +36,14 @@ export function isEvolutionServerConfigured() {
   return Boolean(getEvolutionServerConfig());
 }
 
+export function getEvolutionInstanceEndpoint(path: string) {
+  const config = getEvolutionServerConfig();
+  if (!config?.instanceName) return null;
+
+  const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+  return `${normalizedPath}/${encodeURIComponent(config.instanceName)}`;
+}
+
 export async function callEvolutionApi<T>(
   endpoint: string,
   data?: Record<string, unknown>,
@@ -91,8 +99,12 @@ export function validateEvolutionWebhook(signature: string) {
   if (!webhookKey || !signature) return false;
 
   const normalizedSignature = signature.replace(/^Bearer\s+/i, "");
+  if (normalizedSignature === webhookKey) return true;
+
   const expectedHash = crypto.createHash("sha256").update(webhookKey).digest();
   const receivedHash = crypto.createHash("sha256").update(normalizedSignature).digest();
+
+  if (expectedHash.length !== receivedHash.length) return false;
 
   return crypto.timingSafeEqual(expectedHash, receivedHash);
 }

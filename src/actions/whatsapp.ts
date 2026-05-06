@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 
 import {
   callEvolutionApi,
+  getEvolutionInstanceEndpoint,
   logWhatsAppEvent as persistWhatsAppEvent,
   recordOutboundWhatsAppMessage,
   updateStoredWhatsAppMessageStatus,
@@ -16,6 +17,12 @@ import type {
   WhatsAppMessage,
 } from "@/lib/types";
 import { normalizePhone } from "@/lib/utils";
+
+type EvolutionSendTextRawResponse = EvolutionSendTextResponse & {
+  key?: { id?: string };
+  message?: { key?: { id?: string } };
+  messageId?: string;
+};
 
 async function getAuthenticatedSupabase() {
   const supabase = await createSupabaseServerClient();
@@ -35,6 +42,7 @@ export async function sendWhatsAppMessage(
   leadId: string,
   phoneNumber: string,
   message: string,
+  nextFollowupAt?: string,
 ): Promise<{
   success: boolean;
   messageId?: string;
@@ -56,7 +64,13 @@ export async function sendWhatsAppMessage(
   }
 
   const normalizedPhone = normalizePhone(phoneNumber);
-  const response = await callEvolutionApi<EvolutionSendTextResponse>("/message/sendText", {
+  const endpoint = getEvolutionInstanceEndpoint("/message/sendText");
+
+  if (!endpoint) {
+    return { success: false, error: "Instancia da Evolution nao configurada" };
+  }
+
+  const response = await callEvolutionApi<EvolutionSendTextRawResponse>(endpoint, {
     number: normalizedPhone,
     text: message,
   } satisfies EvolutionSendTextRequest);
@@ -68,16 +82,25 @@ export async function sendWhatsAppMessage(
     };
   }
 
+  const messageId =
+    response.data.id ??
+    response.data.messageId ??
+    response.data.key?.id ??
+    response.data.message?.key?.id ??
+    crypto.randomUUID();
+  const status = normalizeEvolutionStatus(response.data.status);
   const now = new Date().toISOString();
+  const leadUpdate = {
+    status: "contatado",
+    last_contact_at: now,
+    updated_at: now,
+    ...(nextFollowupAt ? { next_followup_at: nextFollowupAt } : {}),
+  };
 
   await Promise.all([
     auth.supabase
       .from("leads")
-      .update({
-        status: "contatado",
-        last_contact_at: now,
-        updated_at: now,
-      })
+      .update(leadUpdate)
       .eq("id", leadId)
       .eq("user_id", auth.user.id),
     auth.supabase.from("interactions").insert({
@@ -91,18 +114,29 @@ export async function sendWhatsAppMessage(
     recordOutboundWhatsAppMessage({
       leadId,
       userId: auth.user.id,
-      messageId: response.data.id,
+      messageId,
       phoneNumber: normalizedPhone,
       content: message,
-      status: response.data.status,
+      status,
     }),
   ]);
 
   revalidatePath("/");
   return {
     success: true,
-    messageId: response.data.id,
+    messageId,
   };
+}
+
+function normalizeEvolutionStatus(status: unknown) {
+  if (typeof status === "string") {
+    const normalized = status.toLowerCase();
+    if (["pending", "sent", "delivered", "read", "failed"].includes(normalized)) {
+      return normalized as "pending" | "sent" | "delivered" | "read" | "failed";
+    }
+  }
+
+  return "sent";
 }
 
 export async function getWhatsAppHistory(leadId: string): Promise<{

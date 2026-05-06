@@ -27,17 +27,30 @@ import {
   LogOut,
   MessageCircle,
   Plus,
+  QrCode,
+  RefreshCw,
   Search,
   Send,
+  Settings,
   Sparkles,
   UserRound,
+  Wifi,
+  WifiOff,
   Zap,
 } from "lucide-react";
 import { FormEvent, MouseEvent, useEffect, useMemo, useState } from "react";
 
+import { sendWhatsAppMessage } from "@/actions/whatsapp";
 import { pipelineColumns } from "@/lib/constants";
 import { createSupabaseClient, isSupabaseConfigured } from "@/lib/db";
-import type { Interaction, Lead, LeadInput, LeadStatus, MessageTemplate } from "@/lib/types";
+import type {
+  Interaction,
+  Lead,
+  LeadInput,
+  LeadStatus,
+  MessageTemplate,
+  WhatsAppMessage,
+} from "@/lib/types";
 import {
   newId,
   normalizePhone,
@@ -51,7 +64,7 @@ import {
   getNextLeadAfterSend,
 } from "@/lib/services/leads";
 
-type View = "dashboard" | "pipeline" | "leads" | "templates";
+type View = "dashboard" | "pipeline" | "leads" | "templates" | "conversations" | "whatsapp" | "settings";
 type AuthUser = { id: string; email?: string };
 type Toast = { id: string; text: string };
 
@@ -370,6 +383,7 @@ function Workspace({ user, onLogout }: { user: AuthUser; onLogout: () => void })
     const now = new Date().toISOString();
     const interaction = makeInteraction(lead.id, "Mensagem enviada via WhatsApp", "whatsapp_sent");
     const nextLead = getNextLeadAfterSendWrapper(lead);
+    const previousLeads = remoteLeads;
 
     patchLeadOptimistic(lead.id, {
       status: "contatado",
@@ -378,30 +392,19 @@ function Workspace({ user, onLogout }: { user: AuthUser; onLogout: () => void })
       updated_at: now,
     });
     addInteractionOptimistic(interaction);
-    showToast("Mensagem enviada");
-
-    window.open(
-      `https://wa.me/${normalizePhone(lead.phone)}?text=${encodeURIComponent(message)}`,
-      "_blank",
-      "noopener,noreferrer",
-    );
+    showToast("Enviando pela Evolution");
 
     setSelectedLeadId(nextLead?.id ?? null);
 
-    if (supabase) {
-      const [{ error: leadError }, { error: interactionError }] = await Promise.all([
-        supabase
-          .from("leads")
-          .update({
-            status: "contatado",
-            last_contact_at: now,
-            next_followup_at: nextFollowupAt,
-          })
-          .eq("id", lead.id),
-        supabase.from("interactions").insert({ ...interaction, user_id: user.id }),
-      ]);
-      if (leadError || interactionError) showToast("Erro ao salvar envio no Supabase");
+    const result = await sendWhatsAppMessage(lead.id, lead.phone, message, nextFollowupAt);
+
+    if (!result.success) {
+      setRemoteLeads(previousLeads);
+      showToast(result.error ?? "Erro ao enviar pela Evolution");
+      return;
     }
+
+    showToast("Mensagem enviada pelo WhatsApp");
   }
 
   function getNextLeadAfterSendWrapper(currentLead: Lead) {
@@ -462,6 +465,9 @@ function Workspace({ user, onLogout }: { user: AuthUser; onLogout: () => void })
               ["pipeline", "Pipeline", Sparkles],
               ["leads", "Leads", UserRound],
               ["templates", "Mensagens prontas", MessageCircle],
+              ["conversations", "Conversas", MessageCircle],
+              ["whatsapp", "Conexao WhatsApp", QrCode],
+              ["settings", "Configuracoes", Settings],
             ].map(([key, label, Icon]) => (
               <button
                 className={`flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm transition lg:justify-start ${
@@ -494,9 +500,18 @@ function Workspace({ user, onLogout }: { user: AuthUser; onLogout: () => void })
                 {view === "pipeline" && "Pipeline"}
                 {view === "leads" && "Leads"}
                 {view === "templates" && "Mensagens prontas"}
+                {view === "conversations" && "Conversas"}
+                {view === "whatsapp" && "Conexao WhatsApp"}
+                {view === "settings" && "Configuracoes"}
               </h1>
               <p className="mt-1 text-sm text-zinc-500">
-                Cadencia continua: abrir, enviar, proximo.
+                {view === "conversations"
+                  ? "Mensagens salvas pelo webhook da Evolution."
+                  : view === "whatsapp"
+                    ? "Conecte a instancia ORIGOCRM pelo QR Code."
+                    : view === "settings"
+                      ? "Status das conexoes e proximos ajustes do CRM."
+                      : "Cadencia continua: abrir, enviar, proximo."}
               </p>
             </div>
             <div className="flex flex-col gap-3 sm:flex-row">
@@ -509,16 +524,18 @@ function Workspace({ user, onLogout }: { user: AuthUser; onLogout: () => void })
                   value={query}
                 />
               </div>
-              <button
-                className="flex h-11 items-center justify-center gap-2 rounded-lg bg-[#7C3AED] px-4 text-sm font-medium transition hover:bg-[#6D28D9]"
-                onClick={() => {
-                  setEditingLead(null);
-                  setLeadFormOpen(true);
-                }}
-              >
-                <Plus className="h-4 w-4" />
-                Novo lead
-              </button>
+              {view !== "whatsapp" && view !== "settings" && (
+                <button
+                  className="flex h-11 items-center justify-center gap-2 rounded-lg bg-[#7C3AED] px-4 text-sm font-medium transition hover:bg-[#6D28D9]"
+                  onClick={() => {
+                    setEditingLead(null);
+                    setLeadFormOpen(true);
+                  }}
+                >
+                  <Plus className="h-4 w-4" />
+                  Novo lead
+                </button>
+              )}
             </div>
           </header>
 
@@ -560,6 +577,9 @@ function Workspace({ user, onLogout }: { user: AuthUser; onLogout: () => void })
                   />
                 )}
                 {view === "templates" && <Templates templates={templates} onAddTemplate={addTemplate} />}
+                {view === "conversations" && <Conversations leads={leads} />}
+                {view === "whatsapp" && <WhatsAppConnection />}
+                {view === "settings" && <SettingsView />}
               </>
             )}
           </div>
@@ -958,6 +978,365 @@ function Templates({
           </article>
         ))}
       </div>
+    </div>
+  );
+}
+
+function WhatsAppConnection() {
+  const [loading, setLoading] = useState(true);
+  const [qrLoading, setQrLoading] = useState(false);
+  const [status, setStatus] = useState<{
+    configured: boolean;
+    connected: boolean;
+    state: string;
+    instanceName?: string;
+    error?: string;
+  } | null>(null);
+  const [qrCode, setQrCode] = useState<string | null>(null);
+  const [qrError, setQrError] = useState("");
+
+  async function loadStatus() {
+    setLoading(true);
+    const response = await fetch("/api/evolution/status", { cache: "no-store" });
+    const data = await response.json();
+    setStatus(data);
+    setLoading(false);
+  }
+
+  async function loadQrCode() {
+    setQrError("");
+    setQrLoading(true);
+    const response = await fetch("/api/evolution/qrcode", { cache: "no-store" });
+    const data = await response.json();
+    setQrLoading(false);
+
+    if (!response.ok || data.error) {
+      setQrError(data.error ?? "Nao foi possivel gerar o QR Code");
+      return;
+    }
+
+    setQrCode(data.base64 ?? null);
+  }
+
+  useEffect(() => {
+    let mounted = true;
+
+    fetch("/api/evolution/status", { cache: "no-store" })
+      .then((response) => response.json())
+      .then((data) => {
+        if (!mounted) return;
+        setStatus(data);
+        setLoading(false);
+      })
+      .catch(() => {
+        if (!mounted) return;
+        setStatus({
+          configured: true,
+          connected: false,
+          state: "error",
+          error: "Nao foi possivel consultar a Evolution",
+        });
+        setLoading(false);
+      });
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  const connected = status?.connected;
+
+  return (
+    <div className="grid gap-5 xl:grid-cols-[0.85fr_1.15fr]">
+      <section className="rounded-xl border border-white/10 bg-white/[0.035] p-5">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h2 className="text-lg font-semibold">Instancia</h2>
+            <p className="mt-1 text-sm text-zinc-500">
+              {status?.instanceName || "ORIGOCRM"}
+            </p>
+          </div>
+          <div
+            className={`flex items-center gap-2 rounded-full px-3 py-1 text-xs ${
+              connected ? "bg-[#25D366]/15 text-[#25D366]" : "bg-red-500/15 text-red-300"
+            }`}
+          >
+            {connected ? <Wifi className="h-4 w-4" /> : <WifiOff className="h-4 w-4" />}
+            {connected ? "Conectado" : "Desconectado"}
+          </div>
+        </div>
+
+        <div className="mt-5 rounded-lg border border-white/10 bg-black/20 p-4">
+          <div className="text-sm text-zinc-500">Estado tecnico</div>
+          <div className="mt-1 font-mono text-sm text-zinc-200">
+            {loading ? "consultando..." : status?.state ?? "indefinido"}
+          </div>
+          {status?.error && <p className="mt-3 text-sm text-red-300">{status.error}</p>}
+        </div>
+
+        <div className="mt-5 flex flex-col gap-3 sm:flex-row">
+          <button
+            className="flex h-11 items-center justify-center gap-2 rounded-lg border border-white/10 px-4 text-sm text-zinc-200 transition hover:bg-white/[0.06]"
+            onClick={loadStatus}
+            type="button"
+          >
+            <RefreshCw className="h-4 w-4" />
+            Atualizar
+          </button>
+          {!connected && (
+            <button
+              className="flex h-11 items-center justify-center gap-2 rounded-lg bg-[#7C3AED] px-4 text-sm font-medium transition hover:bg-[#6D28D9] disabled:opacity-60"
+              disabled={qrLoading}
+              onClick={loadQrCode}
+              type="button"
+            >
+              {qrLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <QrCode className="h-4 w-4" />}
+              Gerar QR Code
+            </button>
+          )}
+        </div>
+      </section>
+
+      <section className="rounded-xl border border-white/10 bg-white/[0.035] p-5">
+        <h2 className="text-lg font-semibold">Conectar WhatsApp</h2>
+        <div className="mt-5 flex min-h-80 items-center justify-center rounded-lg border border-dashed border-white/10 bg-black/20 p-5">
+          {connected ? (
+            <div className="text-center text-sm text-zinc-400">
+              <Wifi className="mx-auto mb-3 h-8 w-8 text-[#25D366]" />
+              WhatsApp conectado. As conversas novas chegam pelo webhook.
+            </div>
+          ) : qrCode ? (
+            // QR Code vem como data URL da Evolution, entao nao passa pelo otimizador de imagem.
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              alt="QR Code para conectar WhatsApp"
+              className="h-72 w-72 rounded-lg bg-white p-3"
+              src={qrCode}
+            />
+          ) : (
+            <div className="max-w-sm text-center text-sm leading-6 text-zinc-500">
+              Gere o QR Code e leia com o app do WhatsApp no celular. Depois clique em Atualizar
+              para confirmar o status conectado.
+            </div>
+          )}
+        </div>
+        {qrError && <p className="mt-3 text-sm text-red-300">{qrError}</p>}
+      </section>
+    </div>
+  );
+}
+
+function Conversations({ leads }: { leads: Lead[] }) {
+  const supabase = useMemo(() => createSupabaseClient(), []);
+  const [messages, setMessages] = useState<WhatsAppMessage[]>([]);
+  const [loading, setLoading] = useState(Boolean(supabase));
+  const [selectedPhone, setSelectedPhone] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!supabase) {
+      return;
+    }
+
+    let mounted = true;
+
+    supabase
+      .from("whatsapp_messages")
+      .select("*")
+      .order("created_at", { ascending: true })
+      .then(({ data }) => {
+        if (!mounted) return;
+        setMessages((data as WhatsAppMessage[] | null) ?? []);
+        setLoading(false);
+      });
+
+    const channel = supabase
+      .channel("whatsapp-messages")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "whatsapp_messages" },
+        (payload) => {
+          setMessages((current) => applyMessageRealtimeEvent(current, payload));
+        },
+      )
+      .subscribe();
+
+    return () => {
+      mounted = false;
+      supabase.removeChannel(channel);
+    };
+  }, [supabase]);
+
+  const conversations = useMemo(() => {
+    const grouped = new Map<string, WhatsAppMessage[]>();
+
+    for (const message of messages) {
+      const key = message.phone_number;
+      grouped.set(key, [...(grouped.get(key) ?? []), message]);
+    }
+
+    return Array.from(grouped.entries())
+      .map(([phone, items]) => {
+        const lastMessage = items[items.length - 1];
+        const lead = leads.find((item) => item.id === lastMessage.lead_id);
+        return { phone, lead, messages: items, lastMessage };
+      })
+      .sort(
+        (a, b) =>
+          new Date(b.lastMessage.created_at).getTime() -
+          new Date(a.lastMessage.created_at).getTime(),
+      );
+  }, [messages, leads]);
+
+  const selectedConversation =
+    conversations.find((conversation) => conversation.phone === selectedPhone) ?? conversations[0];
+
+  if (loading) {
+    return (
+      <div className="flex h-96 items-center justify-center">
+        <Loader2 className="h-6 w-6 animate-spin text-[#7C3AED]" />
+      </div>
+    );
+  }
+
+  if (conversations.length === 0) {
+    return (
+      <div className="rounded-xl border border-white/10 bg-white/[0.035] p-8 text-center">
+        <MessageCircle className="mx-auto h-8 w-8 text-zinc-500" />
+        <h2 className="mt-4 text-lg font-semibold">Nenhuma conversa ainda</h2>
+        <p className="mt-2 text-sm text-zinc-500">
+          Quando uma mensagem for enviada ou recebida pela Evolution, ela aparece aqui.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="grid min-h-[calc(100vh-11rem)] overflow-hidden rounded-xl border border-white/10 lg:grid-cols-[320px_1fr]">
+      <aside className="border-b border-white/10 bg-white/[0.025] lg:border-b-0 lg:border-r">
+        {conversations.map((conversation) => (
+          <button
+            className={`block w-full border-b border-white/10 p-4 text-left transition hover:bg-white/[0.05] ${
+              selectedConversation?.phone === conversation.phone ? "bg-[#7C3AED]/15" : ""
+            }`}
+            key={conversation.phone}
+            onClick={() => setSelectedPhone(conversation.phone)}
+            type="button"
+          >
+            <div className="flex items-center justify-between gap-3">
+              <div className="font-medium">{conversation.lead?.name ?? conversation.phone}</div>
+              <span className="text-xs text-zinc-500">
+                {new Date(conversation.lastMessage.created_at).toLocaleTimeString("pt-BR", {
+                  hour: "2-digit",
+                  minute: "2-digit",
+                })}
+              </span>
+            </div>
+            <p className="mt-1 truncate text-sm text-zinc-500">
+              {conversation.lastMessage.content || "Mensagem sem texto"}
+            </p>
+          </button>
+        ))}
+      </aside>
+
+      <section className="flex min-h-[520px] flex-col bg-black/10">
+        <div className="border-b border-white/10 p-4">
+          <div className="font-semibold">
+            {selectedConversation?.lead?.name ?? selectedConversation?.phone}
+          </div>
+          <div className="mt-1 text-sm text-zinc-500">{selectedConversation?.phone}</div>
+        </div>
+        <div className="flex-1 space-y-3 overflow-y-auto p-4">
+          {selectedConversation?.messages.map((message) => (
+            <div
+              className={`flex ${message.direction === "outbound" ? "justify-end" : "justify-start"}`}
+              key={message.id}
+            >
+              <div
+                className={`max-w-[78%] rounded-lg px-4 py-3 text-sm leading-6 ${
+                  message.direction === "outbound"
+                    ? "bg-[#25D366] text-black"
+                    : "border border-white/10 bg-white/[0.06] text-zinc-100"
+                }`}
+              >
+                <div>{message.content || "Mensagem sem texto"}</div>
+                <div
+                  className={`mt-2 text-right text-[11px] ${
+                    message.direction === "outbound" ? "text-black/60" : "text-zinc-500"
+                  }`}
+                >
+                  {new Date(message.created_at).toLocaleString("pt-BR")} - {message.status}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function applyMessageRealtimeEvent(current: WhatsAppMessage[], payload: {
+  eventType: "INSERT" | "UPDATE" | "DELETE";
+  new: Record<string, unknown>;
+  old: Record<string, unknown>;
+}) {
+  if (payload.eventType === "INSERT") {
+    const next = payload.new as WhatsAppMessage;
+    if (current.some((message) => message.id === next.id)) return current;
+    return [...current, next].sort(sortWhatsAppMessages);
+  }
+
+  if (payload.eventType === "UPDATE") {
+    const next = payload.new as WhatsAppMessage;
+    return current.map((message) => (message.id === next.id ? next : message)).sort(sortWhatsAppMessages);
+  }
+
+  if (payload.eventType === "DELETE") {
+    return current.filter((message) => message.id !== payload.old.id);
+  }
+
+  return current;
+}
+
+function sortWhatsAppMessages(a: WhatsAppMessage, b: WhatsAppMessage) {
+  return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+}
+
+function SettingsView() {
+  return (
+    <div className="grid gap-5 xl:grid-cols-2">
+      <section className="rounded-xl border border-white/10 bg-white/[0.035] p-5">
+        <h2 className="text-lg font-semibold">Banco de dados</h2>
+        <div className="mt-4 space-y-3 text-sm text-zinc-400">
+          <div className="flex items-center justify-between gap-3 rounded-lg border border-white/10 bg-black/20 p-3">
+            <span>Supabase</span>
+            <span className="text-[#25D366]">Ativo</span>
+          </div>
+          <div className="flex items-center justify-between gap-3 rounded-lg border border-white/10 bg-black/20 p-3">
+            <span>Tabelas do CRM</span>
+            <span>leads, interacoes, mensagens</span>
+          </div>
+        </div>
+      </section>
+
+      <section className="rounded-xl border border-white/10 bg-white/[0.035] p-5">
+        <h2 className="text-lg font-semibold">Evolution</h2>
+        <div className="mt-4 space-y-3 text-sm text-zinc-400">
+          <div className="rounded-lg border border-white/10 bg-black/20 p-3">
+            <div className="text-zinc-500">Webhook publico</div>
+            <div className="mt-1 break-all font-mono text-xs text-zinc-300">
+              /api/webhooks/evolution
+            </div>
+          </div>
+          <div className="rounded-lg border border-white/10 bg-black/20 p-3">
+            <div className="text-zinc-500">Variaveis esperadas na Vercel</div>
+            <div className="mt-1 font-mono text-xs text-zinc-300">
+              EVOLUTION_API_URL, EVOLUTION_API_KEY, EVOLUTION_INSTANCE_NAME,
+              EVOLUTION_WEBHOOK_KEY
+            </div>
+          </div>
+        </div>
+      </section>
     </div>
   );
 }

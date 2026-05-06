@@ -124,3 +124,17 @@ drop trigger if exists whatsapp_messages_set_updated_at on public.whatsapp_messa
 create trigger whatsapp_messages_set_updated_at
 before update on public.whatsapp_messages
 for each row execute function public.set_updated_at();
+
+do $$
+begin
+  if exists (select 1 from pg_publication where pubname = 'supabase_realtime')
+    and not exists (
+      select 1
+      from pg_publication_tables
+      where pubname = 'supabase_realtime'
+        and schemaname = 'public'
+        and tablename = 'whatsapp_messages'
+    ) then
+    alter publication supabase_realtime add table public.whatsapp_messages;
+  end if;
+end $$;

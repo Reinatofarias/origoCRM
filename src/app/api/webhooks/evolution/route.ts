@@ -17,6 +17,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   try {
     const payload = (await request.json()) as EvolutionWebhookPayload;
     const signature =
+      request.nextUrl.searchParams.get("token") ??
       request.headers.get("x-evolution-signature") ??
       request.headers.get("x-webhook-signature") ??
       request.headers.get("authorization") ??
@@ -46,7 +47,9 @@ async function handleWebhookEvent(
   eventType: EvolutionWebhookEvent,
   data: unknown,
 ): Promise<void> {
-  switch (eventType) {
+  const normalizedEvent = normalizeWebhookEvent(eventType);
+
+  switch (normalizedEvent) {
     case "messages.upsert":
       await handleMessageUpsert(data);
       break;
@@ -56,27 +59,41 @@ async function handleWebhookEvent(
     case "messages.delete":
     case "connection.update":
     case "qr.update":
+    case "qrcode.updated":
     case "presence.update":
       break;
     default:
-      await logWhatsAppEvent("webhook.unhandled_event", { eventType, data });
+      await logWhatsAppEvent("webhook.unhandled_event", { eventType, normalizedEvent, data });
   }
 
-  await logWhatsAppEvent(eventType, { data });
+  await logWhatsAppEvent(normalizedEvent, { data });
+}
+
+function normalizeWebhookEvent(eventType: string) {
+  const normalized = eventType.toLowerCase().replaceAll("_", ".");
+  if (normalized === "qrcode.updated") return "qr.update";
+  return normalized;
 }
 
 async function handleMessageUpsert(data: unknown): Promise<void> {
-  const message = data as EvolutionIncomingMessage;
-  await recordIncomingWhatsAppMessage(message);
+  for (const message of extractWebhookItems<EvolutionIncomingMessage>(data)) {
+    await recordIncomingWhatsAppMessage(message);
+  }
 }
 
 async function handleMessageUpdate(data: unknown): Promise<void> {
-  const update = data as EvolutionMessageUpdate;
+  for (const update of extractWebhookItems<EvolutionMessageUpdate>(data)) {
+    await updateStoredWhatsAppMessageStatus(
+      update.key.id,
+      update.status as "sent" | "delivered" | "read" | "failed",
+    );
+  }
+}
 
-  await updateStoredWhatsAppMessageStatus(
-    update.key.id,
-    update.status as "sent" | "delivered" | "read" | "failed",
-  );
+function extractWebhookItems<T>(data: unknown): T[] {
+  if (Array.isArray(data)) return data as T[];
+  if (!data || typeof data !== "object") return [];
+  return [data as T];
 }
 
 export async function GET(): Promise<NextResponse> {
@@ -89,6 +106,7 @@ export async function GET(): Promise<NextResponse> {
       "messages.delete",
       "connection.update",
       "qr.update",
+      "qrcode.updated",
       "presence.update",
     ],
   });
