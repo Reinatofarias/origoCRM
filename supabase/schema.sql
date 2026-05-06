@@ -1,0 +1,126 @@
+create extension if not exists pgcrypto;
+
+create table if not exists public.leads (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  name text not null,
+  phone text not null,
+  company text not null default '',
+  source text not null default '',
+  status text not null default 'novo' check (status in ('novo', 'contatado', 'respondeu', 'proposta', 'fechado')),
+  last_contact_at timestamptz,
+  next_followup_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+alter table public.leads add column if not exists last_contact_at timestamptz;
+alter table public.leads add column if not exists next_followup_at timestamptz;
+alter table public.leads add column if not exists updated_at timestamptz not null default now();
+
+create table if not exists public.message_templates (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  title text not null,
+  body text not null,
+  created_at timestamptz not null default now()
+);
+
+create table if not exists public.interactions (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  lead_id uuid not null references public.leads(id) on delete cascade,
+  note text not null,
+  message text,
+  type text not null default 'note' check (type in ('whatsapp_sent', 'status_changed', 'followup_created', 'note')),
+  channel text not null default 'whatsapp' check (channel in ('whatsapp', 'call', 'email', 'other')),
+  created_at timestamptz not null default now()
+);
+
+alter table public.interactions add column if not exists message text;
+alter table public.interactions add column if not exists type text not null default 'note';
+
+create table if not exists public.whatsapp_messages (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  lead_id uuid not null references public.leads(id) on delete cascade,
+  message_id text not null,
+  phone_number text not null,
+  direction text not null check (direction in ('inbound', 'outbound')),
+  content text not null default '',
+  media_url text,
+  status text not null default 'pending' check (status in ('pending', 'sent', 'delivered', 'read', 'failed')),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists public.whatsapp_logs (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid references auth.users(id) on delete set null,
+  event_type text not null,
+  status text not null default 'success' check (status in ('success', 'error')),
+  payload jsonb not null default '{}'::jsonb,
+  error_message text,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists leads_user_id_status_idx on public.leads(user_id, status);
+create index if not exists leads_user_id_next_followup_idx on public.leads(user_id, next_followup_at);
+create index if not exists leads_user_id_phone_idx on public.leads(user_id, phone);
+create index if not exists interactions_user_id_lead_id_idx on public.interactions(user_id, lead_id);
+create index if not exists whatsapp_messages_user_id_lead_id_idx on public.whatsapp_messages(user_id, lead_id);
+create unique index if not exists whatsapp_messages_message_id_idx on public.whatsapp_messages(message_id);
+create index if not exists whatsapp_logs_user_id_created_at_idx on public.whatsapp_logs(user_id, created_at desc);
+
+alter table public.leads enable row level security;
+alter table public.message_templates enable row level security;
+alter table public.interactions enable row level security;
+alter table public.whatsapp_messages enable row level security;
+alter table public.whatsapp_logs enable row level security;
+
+drop policy if exists "Users can manage own leads" on public.leads;
+create policy "Users can manage own leads"
+  on public.leads for all
+  using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);
+
+drop policy if exists "Users can manage own templates" on public.message_templates;
+create policy "Users can manage own templates"
+  on public.message_templates for all
+  using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);
+
+drop policy if exists "Users can manage own interactions" on public.interactions;
+create policy "Users can manage own interactions"
+  on public.interactions for all
+  using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);
+
+drop policy if exists "Users can manage own whatsapp messages" on public.whatsapp_messages;
+create policy "Users can manage own whatsapp messages"
+  on public.whatsapp_messages for all
+  using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);
+
+drop policy if exists "Users can read own whatsapp logs" on public.whatsapp_logs;
+create policy "Users can read own whatsapp logs"
+  on public.whatsapp_logs for select
+  using (auth.uid() = user_id);
+
+create or replace function public.set_updated_at()
+returns trigger as $$
+begin
+  new.updated_at = now();
+  return new;
+end;
+$$ language plpgsql;
+
+drop trigger if exists leads_set_updated_at on public.leads;
+create trigger leads_set_updated_at
+before update on public.leads
+for each row execute function public.set_updated_at();
+
+drop trigger if exists whatsapp_messages_set_updated_at on public.whatsapp_messages;
+create trigger whatsapp_messages_set_updated_at
+before update on public.whatsapp_messages
+for each row execute function public.set_updated_at();
