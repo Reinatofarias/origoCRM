@@ -142,6 +142,9 @@ export type EvolutionIncomingMessage = {
   };
   message: {
     conversation?: string;   // Texto puro
+    extendedTextMessage?: {
+      text?: string;
+    };
     imageMessage?: {
       url: string;
       caption?: string;
@@ -194,10 +197,12 @@ export type EvolutionInstanceResponse = {
  */
 export type WhatsAppMessage = {
   id: string;
-  lead_id: string;
+  lead_id: string | null;
   user_id: string;
   message_id: string;        // ID da mensagem no WhatsApp (Evolution)
+  remote_jid?: string | null;
   phone_number: string;
+  contact_name?: string | null;
   direction: "inbound" | "outbound";
   content: string;
   media_url?: string | null;

@@ -43,9 +43,11 @@ alter table public.interactions add column if not exists type text not null defa
 create table if not exists public.whatsapp_messages (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references auth.users(id) on delete cascade,
-  lead_id uuid not null references public.leads(id) on delete cascade,
+  lead_id uuid references public.leads(id) on delete set null,
   message_id text not null,
+  remote_jid text,
   phone_number text not null,
+  contact_name text,
   direction text not null check (direction in ('inbound', 'outbound')),
   content text not null default '',
   media_url text,
@@ -63,6 +65,10 @@ create table if not exists public.whatsapp_logs (
   error_message text,
   created_at timestamptz not null default now()
 );
+
+alter table public.whatsapp_messages alter column lead_id drop not null;
+alter table public.whatsapp_messages add column if not exists remote_jid text;
+alter table public.whatsapp_messages add column if not exists contact_name text;
 
 create index if not exists leads_user_id_status_idx on public.leads(user_id, status);
 create index if not exists leads_user_id_next_followup_idx on public.leads(user_id, next_followup_at);
