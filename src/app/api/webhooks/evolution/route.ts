@@ -119,8 +119,16 @@ function extractWebhookItems<T>(data: unknown): T[] {
   if ("messages" in data && Array.isArray((data as { messages?: unknown }).messages)) {
     return (data as { messages: T[] }).messages;
   }
-  if ("message" in data && typeof (data as { message?: unknown }).message === "object") {
-    return [(data as { message: T }).message];
+  const record = data as Record<string, unknown>;
+  const nestedMessage = record.message;
+  const hasEnvelopeFields = "key" in record || "remoteJid" in record || "jid" in record;
+  if (
+    !hasEnvelopeFields &&
+    nestedMessage &&
+    typeof nestedMessage === "object" &&
+    ("key" in nestedMessage || "remoteJid" in nestedMessage || "jid" in nestedMessage)
+  ) {
+    return [nestedMessage as T];
   }
   return [data as T];
 }
