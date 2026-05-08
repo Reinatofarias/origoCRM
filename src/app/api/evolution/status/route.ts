@@ -63,7 +63,9 @@ export async function GET() {
     );
   }
 
-  const state = response.data.instance?.state ?? response.data.state ?? "unknown";
+  const state = (response.data.instance?.state ?? response.data.state ?? "unknown")
+    .trim()
+    .toLowerCase();
 
   return NextResponse.json({
     configured: true,

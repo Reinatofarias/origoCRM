@@ -83,16 +83,45 @@ async function handleMessageUpsert(data: unknown): Promise<void> {
 
 async function handleMessageUpdate(data: unknown): Promise<void> {
   for (const update of extractWebhookItems<EvolutionMessageUpdate>(data)) {
-    await updateStoredWhatsAppMessageStatus(
-      update.key.id,
-      update.status as "sent" | "delivered" | "read" | "failed",
-    );
+    const messageId = getMessageUpdateId(update);
+    if (!messageId) {
+      await logWhatsAppEvent("messages.update.ignored", { update, reason: "missing_message_id" });
+      continue;
+    }
+
+    await updateStoredWhatsAppMessageStatus(messageId, normalizeMessageUpdateStatus(update.status));
   }
+}
+
+function getMessageUpdateId(update: unknown) {
+  if (!update || typeof update !== "object") return null;
+  const record = update as Record<string, unknown>;
+  const key = record.key as Record<string, unknown> | undefined;
+  const id = key?.id ?? record.id ?? record.messageId;
+  return typeof id === "string" && id.trim() ? id : null;
+}
+
+function normalizeMessageUpdateStatus(status: unknown): "sent" | "delivered" | "read" | "failed" {
+  if (typeof status !== "string") return "sent";
+  const normalized = status.toLowerCase();
+  if (["sent", "delivered", "read", "failed"].includes(normalized)) {
+    return normalized as "sent" | "delivered" | "read" | "failed";
+  }
+  if (normalized.includes("read")) return "read";
+  if (normalized.includes("delivery") || normalized.includes("delivered")) return "delivered";
+  if (normalized.includes("fail") || normalized.includes("error")) return "failed";
+  return "sent";
 }
 
 function extractWebhookItems<T>(data: unknown): T[] {
   if (Array.isArray(data)) return data as T[];
   if (!data || typeof data !== "object") return [];
+  if ("messages" in data && Array.isArray((data as { messages?: unknown }).messages)) {
+    return (data as { messages: T[] }).messages;
+  }
+  if ("message" in data && typeof (data as { message?: unknown }).message === "object") {
+    return [(data as { message: T }).message];
+  }
   return [data as T];
 }
 

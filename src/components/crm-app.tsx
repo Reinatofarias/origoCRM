@@ -38,7 +38,7 @@ import {
   WifiOff,
   Zap,
 } from "lucide-react";
-import { FormEvent, MouseEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, MouseEvent, useCallback, useEffect, useMemo, useState } from "react";
 
 import { sendWhatsAppMessage } from "@/actions/whatsapp";
 import { pipelineColumns } from "@/lib/constants";
@@ -993,56 +993,74 @@ function WhatsAppConnection() {
     error?: string;
   } | null>(null);
   const [qrCode, setQrCode] = useState<string | null>(null);
+  const [pairingCode, setPairingCode] = useState<string | null>(null);
   const [qrError, setQrError] = useState("");
 
-  async function loadStatus() {
-    setLoading(true);
-    const response = await fetch("/api/evolution/status", { cache: "no-store" });
-    const data = await response.json();
-    setStatus(data);
-    setLoading(false);
-  }
+  const loadStatus = useCallback(async (showLoading = true) => {
+    if (showLoading) setLoading(true);
+
+    try {
+      const response = await fetch("/api/evolution/status", { cache: "no-store" });
+      const data = await response.json();
+      setStatus({
+        ...data,
+        error: data.error ?? (!response.ok ? "Nao foi possivel consultar a Evolution" : undefined),
+      });
+    } catch {
+      setStatus({
+        configured: true,
+        connected: false,
+        state: "error",
+        error: "Nao foi possivel consultar a Evolution",
+      });
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
   async function loadQrCode() {
     setQrError("");
+    setPairingCode(null);
     setQrLoading(true);
-    const response = await fetch("/api/evolution/qrcode", { cache: "no-store" });
-    const data = await response.json();
-    setQrLoading(false);
 
-    if (!response.ok || data.error) {
-      setQrError(data.error ?? "Nao foi possivel gerar o QR Code");
-      return;
+    try {
+      const response = await fetch("/api/evolution/qrcode", { cache: "no-store" });
+      const data = await response.json();
+
+      if (!response.ok || data.error) {
+        setQrError(data.error ?? "Nao foi possivel gerar o QR Code");
+        return;
+      }
+
+      setQrCode(data.base64 ?? null);
+      setPairingCode(data.pairingCode ?? null);
+
+      if (!data.base64 && !data.pairingCode) {
+        setQrError("A Evolution retornou codigo de conexao, mas nao retornou imagem de QR Code.");
+      }
+
+      await loadStatus(false);
+    } catch {
+      setQrError("Nao foi possivel gerar o QR Code");
+    } finally {
+      setQrLoading(false);
     }
-
-    setQrCode(data.base64 ?? null);
   }
 
   useEffect(() => {
-    let mounted = true;
+    const initialLoad = window.setTimeout(() => {
+      void loadStatus();
+    }, 0);
 
-    fetch("/api/evolution/status", { cache: "no-store" })
-      .then((response) => response.json())
-      .then((data) => {
-        if (!mounted) return;
-        setStatus(data);
-        setLoading(false);
-      })
-      .catch(() => {
-        if (!mounted) return;
-        setStatus({
-          configured: true,
-          connected: false,
-          state: "error",
-          error: "Nao foi possivel consultar a Evolution",
-        });
-        setLoading(false);
-      });
+    const interval = window.setInterval(() => {
+      void loadStatus(false);
+    }, 5000);
 
     return () => {
-      mounted = false;
+      window.clearTimeout(initialLoad);
+      window.clearInterval(interval);
     };
-  }, []);
+  }, [loadStatus]);
 
   const connected = status?.connected;
 
@@ -1077,7 +1095,7 @@ function WhatsAppConnection() {
         <div className="mt-5 flex flex-col gap-3 sm:flex-row">
           <button
             className="flex h-11 items-center justify-center gap-2 rounded-lg border border-white/10 px-4 text-sm text-zinc-200 transition hover:bg-white/[0.06]"
-            onClick={loadStatus}
+            onClick={() => void loadStatus()}
             type="button"
           >
             <RefreshCw className="h-4 w-4" />
@@ -1113,10 +1131,17 @@ function WhatsAppConnection() {
               className="h-72 w-72 rounded-lg bg-white p-3"
               src={qrCode}
             />
+          ) : pairingCode ? (
+            <div className="text-center">
+              <div className="text-sm text-zinc-500">Codigo de pareamento</div>
+              <div className="mt-3 rounded-lg border border-white/10 bg-black/30 px-5 py-3 font-mono text-2xl tracking-widest text-zinc-100">
+                {pairingCode}
+              </div>
+            </div>
           ) : (
             <div className="max-w-sm text-center text-sm leading-6 text-zinc-500">
               Gere o QR Code e leia com o app do WhatsApp no celular. Depois clique em Atualizar
-              para confirmar o status conectado.
+              para confirmar o status conectado. A tela tambem consulta o status automaticamente.
             </div>
           )}
         </div>
