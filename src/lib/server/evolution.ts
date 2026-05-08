@@ -176,30 +176,35 @@ export async function updateStoredWhatsAppMessageStatus(
 export async function recordIncomingWhatsAppMessage(message: EvolutionIncomingMessage) {
   const supabase = createSupabaseServiceRoleClient();
   if (!supabase) return;
-  if (message.key.remoteJid.includes("@g.us")) {
+  const normalizedMessage = normalizeIncomingWebhookMessage(message);
+
+  if (!normalizedMessage.remoteJid || !normalizedMessage.messageId) {
     await logWhatsAppEvent("messages.upsert.ignored", {
-      remoteJid: message.key.remoteJid,
-      messageId: message.key.id,
+      reason: "missing_remote_jid_or_message_id",
+      message: message as unknown as Record<string, unknown>,
+    });
+    return;
+  }
+
+  if (normalizedMessage.remoteJid.includes("@g.us")) {
+    await logWhatsAppEvent("messages.upsert.ignored", {
+      remoteJid: normalizedMessage.remoteJid,
+      messageId: normalizedMessage.messageId,
       reason: "group_message",
     });
     return;
   }
 
-  const phoneNumber = normalizePhone(message.key.remoteJid);
-  const messageContent =
-    message.message.conversation ??
-    message.message.extendedTextMessage?.text ??
-    message.message.imageMessage?.caption ??
-    message.message.documentMessage?.fileName ??
-    "";
+  const phoneNumber = normalizePhone(normalizedMessage.remoteJid);
+  const messageContent = normalizedMessage.content;
   const lead = await findLeadByWhatsAppPhone(phoneNumber);
   const ownerUserId = lead?.user_id ?? (await resolveWebhookOwnerUserId());
 
   if (!ownerUserId) {
     await logWhatsAppEvent("messages.upsert.unmatched", {
       phoneNumber,
-      messageId: message.key.id,
-      remoteJid: message.key.remoteJid,
+      messageId: normalizedMessage.messageId,
+      remoteJid: normalizedMessage.remoteJid,
       reason: "missing_lead_and_owner_user",
     });
     return;
@@ -208,25 +213,25 @@ export async function recordIncomingWhatsAppMessage(message: EvolutionIncomingMe
   if (!lead) {
     await logWhatsAppEvent("messages.upsert.unmatched_saved", {
       phoneNumber,
-      messageId: message.key.id,
+      messageId: normalizedMessage.messageId,
       ownerUserId,
     });
   }
 
   const now = new Date().toISOString();
-  const direction = message.key.fromMe ? "outbound" : "inbound";
+  const direction = normalizedMessage.fromMe ? "outbound" : "inbound";
   await supabase.from("whatsapp_messages").upsert(
     {
       lead_id: lead?.id ?? null,
       user_id: ownerUserId,
-      message_id: message.key.id,
-      remote_jid: message.key.remoteJid,
+      message_id: normalizedMessage.messageId,
+      remote_jid: normalizedMessage.remoteJid,
       phone_number: phoneNumber,
-      contact_name: message.pushName ?? null,
+      contact_name: normalizedMessage.contactName,
       direction,
       content: messageContent,
       status: normalizeEvolutionMessageStatus(
-        message.status,
+        normalizedMessage.status,
         direction === "outbound" ? "sent" : "delivered",
       ),
     },
@@ -253,6 +258,64 @@ export async function recordIncomingWhatsAppMessage(message: EvolutionIncomingMe
         .eq("id", lead.id),
     ]);
   }
+}
+
+function normalizeIncomingWebhookMessage(message: unknown) {
+  const record = asRecord(message);
+  const key = asRecord(record?.key);
+  const nestedData = asRecord(record?.data);
+  const nestedKey = asRecord(nestedData?.key);
+  const messageBody = asRecord(record?.message) ?? asRecord(nestedData?.message);
+
+  const remoteJid =
+    getString(key, "remoteJid") ??
+    getString(nestedKey, "remoteJid") ??
+    getString(record, "remoteJid") ??
+    getString(nestedData, "remoteJid") ??
+    getString(record, "jid") ??
+    getString(nestedData, "jid");
+  const messageId =
+    getString(key, "id") ??
+    getString(nestedKey, "id") ??
+    getString(record, "id") ??
+    getString(record, "keyId") ??
+    getString(record, "messageId") ??
+    getString(nestedData, "id") ??
+    getString(nestedData, "keyId") ??
+    getString(nestedData, "messageId");
+  const fromMe = Boolean(key?.fromMe ?? nestedKey?.fromMe ?? record?.fromMe ?? nestedData?.fromMe);
+
+  return {
+    remoteJid,
+    messageId,
+    fromMe,
+    contactName: getString(record, "pushName") ?? getString(nestedData, "pushName") ?? null,
+    content: extractIncomingMessageContent(messageBody),
+    status: record?.status ?? nestedData?.status,
+  };
+}
+
+function extractIncomingMessageContent(messageBody: Record<string, unknown> | null) {
+  const extendedTextMessage = asRecord(messageBody?.extendedTextMessage);
+  const imageMessage = asRecord(messageBody?.imageMessage);
+  const documentMessage = asRecord(messageBody?.documentMessage);
+
+  return (
+    getString(messageBody, "conversation") ??
+    getString(extendedTextMessage, "text") ??
+    getString(imageMessage, "caption") ??
+    getString(documentMessage, "fileName") ??
+    ""
+  );
+}
+
+function asRecord(value: unknown) {
+  return value && typeof value === "object" ? (value as Record<string, unknown>) : null;
+}
+
+function getString(record: Record<string, unknown> | null | undefined, key: string) {
+  const value = record?.[key];
+  return typeof value === "string" && value.trim() ? value : null;
 }
 
 async function resolveWebhookOwnerUserId() {
