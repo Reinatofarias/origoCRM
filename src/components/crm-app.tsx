@@ -584,10 +584,15 @@ function Workspace({ user, onLogout }: { user: AuthUser; onLogout: () => void })
                 {view === "conversations" && (
                   <Conversations
                     leads={leads}
+                    templates={templates}
                     onLeadCreated={(lead) => {
                       setRemoteLeads((items) =>
                         items.some((item) => item.id === lead.id) ? items : [lead, ...items],
                       );
+                    }}
+                    onOpenLead={(lead) => {
+                      setSelectedLeadId(lead.id);
+                      setView("pipeline");
                     }}
                   />
                 )}
@@ -1166,10 +1171,14 @@ function WhatsAppConnection() {
 
 function Conversations({
   leads,
+  templates,
   onLeadCreated,
+  onOpenLead,
 }: {
   leads: Lead[];
+  templates: MessageTemplate[];
   onLeadCreated: (lead: Lead) => void;
+  onOpenLead: (lead: Lead) => void;
 }) {
   const supabase = useMemo(() => createSupabaseClient(), []);
   const [messages, setMessages] = useState<WhatsAppMessage[]>([]);
@@ -1179,6 +1188,7 @@ function Conversations({
   const [sending, setSending] = useState(false);
   const [savingLead, setSavingLead] = useState(false);
   const [actionError, setActionError] = useState("");
+  const [leadModalOpen, setLeadModalOpen] = useState(false);
 
   useEffect(() => {
     if (!supabase) {
@@ -1225,10 +1235,12 @@ function Conversations({
     return Array.from(grouped.entries())
       .map(([phone, items]) => {
         const lastMessage = items[items.length - 1];
-        const lead = leads.find((item) => item.id === lastMessage.lead_id);
+        const linkedLeadId = [...items].reverse().find((item) => item.lead_id)?.lead_id;
+        const lead = leads.find((item) => item.id === linkedLeadId);
         const contactMessage = [...items].reverse().find((item) => item.contact_name);
         const avatarMessage = [...items].reverse().find((item) => item.contact_avatar_url);
         const contactName = lead?.name ?? contactMessage?.contact_name ?? phone;
+        const inboundAfterLastOutbound = countPendingInboundMessages(items);
         return {
           phone,
           lead,
@@ -1236,6 +1248,8 @@ function Conversations({
           lastMessage,
           contactName,
           avatarUrl: avatarMessage?.contact_avatar_url ?? null,
+          inboundAfterLastOutbound,
+          statusLabel: conversationStatusLabel(lastMessage.direction, lead, inboundAfterLastOutbound),
         };
       })
       .sort(
@@ -1247,6 +1261,24 @@ function Conversations({
 
   const selectedConversation =
     conversations.find((conversation) => conversation.phone === selectedPhone) ?? conversations[0];
+
+  function applyTemplate(templateId: string) {
+    const template = templates.find((item) => item.id === templateId);
+    if (!template || !selectedConversation) return;
+
+    const virtualLead: Lead = selectedConversation.lead ?? {
+      id: "",
+      name: selectedConversation.contactName,
+      phone: selectedConversation.phone,
+      company: "",
+      source: "WhatsApp",
+      status: "novo",
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+
+    setReplyText(renderTemplate(template.body, virtualLead));
+  }
 
   async function handleReply(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -1277,15 +1309,16 @@ function Conversations({
     }
   }
 
-  async function handleSaveLead() {
+  async function handleSaveLead(input: { name: string; company: string; source: string }) {
     if (!selectedConversation || selectedConversation.lead) return;
 
     setActionError("");
     setSavingLead(true);
     const result = await saveWhatsAppConversationAsLead({
       phoneNumber: selectedConversation.phone,
-      name: selectedConversation.contactName,
-      source: "WhatsApp",
+      name: input.name,
+      company: input.company,
+      source: input.source,
     });
     setSavingLead(false);
 
@@ -1295,6 +1328,7 @@ function Conversations({
     }
 
     onLeadCreated(result.lead);
+    setLeadModalOpen(false);
     setMessages((current) =>
       current.map((message) =>
         message.phone_number === selectedConversation.phone
@@ -1325,8 +1359,19 @@ function Conversations({
   }
 
   return (
-    <div className="grid min-h-[calc(100vh-11rem)] overflow-hidden rounded-xl border border-white/10 lg:grid-cols-[320px_1fr]">
+    <div className="grid min-h-[calc(100vh-11rem)] overflow-hidden rounded-xl border border-white/10 bg-[#0D0D12] lg:grid-cols-[340px_1fr]">
       <aside className="border-b border-white/10 bg-white/[0.025] lg:border-b-0 lg:border-r">
+        <div className="border-b border-white/10 p-4">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <h2 className="font-semibold">Inbox WhatsApp</h2>
+              <p className="mt-1 text-xs text-zinc-500">{conversations.length} conversas ativas</p>
+            </div>
+            <span className="rounded-full border border-[#25D366]/30 bg-[#25D366]/10 px-2 py-1 text-xs text-[#25D366]">
+              Tempo real
+            </span>
+          </div>
+        </div>
         {conversations.map((conversation) => (
           <button
             className={`block w-full border-b border-white/10 p-4 text-left transition hover:bg-white/[0.05] ${
@@ -1348,16 +1393,33 @@ function Conversations({
                   <div className="mt-0.5 truncate text-xs text-zinc-500">{conversation.phone}</div>
                 </div>
               </div>
-              <span className="text-xs text-zinc-500">
+              <span className="shrink-0 text-xs text-zinc-500">
                 {new Date(conversation.lastMessage.created_at).toLocaleTimeString("pt-BR", {
                   hour: "2-digit",
                   minute: "2-digit",
                 })}
               </span>
             </div>
-            <p className="mt-1 truncate text-sm text-zinc-500">
-              {conversation.lastMessage.content || "Mensagem sem texto"}
-            </p>
+            <div className="mt-3 flex items-center justify-between gap-3">
+              <p className="truncate text-sm text-zinc-500">
+                {conversation.lastMessage.content || "Mensagem sem texto"}
+              </p>
+              {conversation.inboundAfterLastOutbound > 0 && (
+                <span className="flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-[#25D366] px-1.5 text-[11px] font-semibold text-black">
+                  {conversation.inboundAfterLastOutbound}
+                </span>
+              )}
+            </div>
+            <div className="mt-3 flex items-center gap-2">
+              <span className="rounded-full border border-white/10 px-2 py-1 text-[11px] text-zinc-400">
+                {conversation.statusLabel}
+              </span>
+              {conversation.lead && (
+                <span className="rounded-full border border-[#7C3AED]/30 bg-[#7C3AED]/10 px-2 py-1 text-[11px] text-[#C4B5FD]">
+                  Lead
+                </span>
+              )}
+            </div>
           </button>
         ))}
       </aside>
@@ -1372,22 +1434,42 @@ function Conversations({
               />
             )}
             <div className="min-w-0">
-              <div className="truncate font-semibold">
-                {selectedConversation?.contactName ?? selectedConversation?.phone}
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="truncate font-semibold">
+                  {selectedConversation?.contactName ?? selectedConversation?.phone}
+                </div>
+                {selectedConversation && (
+                  <span className="rounded-full border border-white/10 px-2 py-1 text-[11px] text-zinc-400">
+                    {selectedConversation.statusLabel}
+                  </span>
+                )}
               </div>
               <div className="mt-1 truncate text-sm text-zinc-500">{selectedConversation?.phone}</div>
             </div>
           </div>
-          {selectedConversation && !selectedConversation.lead && (
-            <button
-              className="flex h-10 items-center justify-center gap-2 rounded-lg border border-[#25D366]/30 px-3 text-sm text-[#25D366] transition hover:bg-[#25D366]/10 disabled:opacity-60"
-              disabled={savingLead}
-              onClick={handleSaveLead}
-              type="button"
-            >
-              {savingLead ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
-              Salvar como lead
-            </button>
+          {selectedConversation && (
+            <div className="flex shrink-0 items-center gap-2">
+              {selectedConversation.lead ? (
+                <button
+                  className="flex h-10 items-center justify-center gap-2 rounded-lg border border-white/10 px-3 text-sm text-zinc-200 transition hover:bg-white/[0.06]"
+                  onClick={() => selectedConversation.lead && onOpenLead(selectedConversation.lead)}
+                  type="button"
+                >
+                  <ExternalLink className="h-4 w-4" />
+                  Abrir lead
+                </button>
+              ) : (
+                <button
+                  className="flex h-10 items-center justify-center gap-2 rounded-lg border border-[#25D366]/30 px-3 text-sm text-[#25D366] transition hover:bg-[#25D366]/10 disabled:opacity-60"
+                  disabled={savingLead}
+                  onClick={() => setLeadModalOpen(true)}
+                  type="button"
+                >
+                  {savingLead ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+                  Salvar como lead
+                </button>
+              )}
+            </div>
           )}
         </div>
         <div className="flex-1 space-y-3 overflow-y-auto p-4">
@@ -1405,11 +1487,13 @@ function Conversations({
               >
                 <div>{message.content || "Mensagem sem texto"}</div>
                 <div
-                  className={`mt-2 text-right text-[11px] ${
+                  className={`mt-2 flex items-center justify-end gap-1 text-[11px] ${
                     message.direction === "outbound" ? "text-black/60" : "text-zinc-500"
                   }`}
                 >
-                  {new Date(message.created_at).toLocaleString("pt-BR")} - {message.status}
+                  <span>{new Date(message.created_at).toLocaleString("pt-BR")}</span>
+                  <span>-</span>
+                  <span>{messageStatusLabel(message.status)}</span>
                 </div>
               </div>
             </div>
@@ -1417,9 +1501,28 @@ function Conversations({
         </div>
         <form className="border-t border-white/10 p-4" onSubmit={handleReply}>
           {actionError && <p className="mb-3 text-sm text-red-300">{actionError}</p>}
+          <div className="mb-3 flex flex-wrap items-center gap-2">
+            <select
+              className="h-10 rounded-lg border border-white/10 bg-black/30 px-3 text-sm text-zinc-300 outline-none transition focus:border-[#7C3AED]"
+              disabled={templates.length === 0}
+              onChange={(event) => applyTemplate(event.target.value)}
+              value=""
+            >
+              <option value="">Mensagem pronta</option>
+              {templates.map((template) => (
+                <option key={template.id} value={template.id}>
+                  {template.title}
+                </option>
+              ))}
+            </select>
+            <span className="text-xs text-zinc-500">
+              {replyText.length}/1024 caracteres
+            </span>
+          </div>
           <div className="flex flex-col gap-3 sm:flex-row">
             <textarea
               className="min-h-12 flex-1 resize-none rounded-lg border border-white/10 bg-black/30 px-4 py-3 text-sm outline-none transition focus:border-[#7C3AED]"
+              maxLength={1024}
               onChange={(event) => setReplyText(event.target.value)}
               placeholder="Responder pelo WhatsApp"
               value={replyText}
@@ -1435,8 +1538,104 @@ function Conversations({
           </div>
         </form>
       </section>
+      {leadModalOpen && selectedConversation && (
+        <ConversationLeadModal
+          initialName={selectedConversation.contactName}
+          phoneNumber={selectedConversation.phone}
+          saving={savingLead}
+          onClose={() => setLeadModalOpen(false)}
+          onSave={handleSaveLead}
+        />
+      )}
     </div>
   );
+}
+
+function ConversationLeadModal({
+  initialName,
+  phoneNumber,
+  saving,
+  onClose,
+  onSave,
+}: {
+  initialName: string;
+  phoneNumber: string;
+  saving: boolean;
+  onClose: () => void;
+  onSave: (input: { name: string; company: string; source: string }) => void;
+}) {
+  const [name, setName] = useState(initialName);
+  const [company, setCompany] = useState("");
+  const [source, setSource] = useState("WhatsApp");
+
+  return (
+    <Modal onClose={onClose} title="Salvar conversa como lead">
+      <form
+        className="space-y-3"
+        onSubmit={(event) => {
+          event.preventDefault();
+          onSave({ name, company, source });
+        }}
+      >
+        <Input label="Nome" onChange={setName} required value={name} />
+        <label className="block text-sm text-zinc-300">
+          Telefone
+          <input
+            className="mt-2 h-11 w-full rounded-lg border border-white/10 bg-white/[0.03] px-3 text-zinc-400 outline-none"
+            readOnly
+            value={phoneNumber}
+          />
+        </label>
+        <Input label="Empresa" onChange={setCompany} value={company} />
+        <Input label="Origem" onChange={setSource} value={source} />
+        <button
+          className="flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-[#25D366] font-semibold text-black transition hover:bg-[#20bd5a] disabled:opacity-60"
+          disabled={saving}
+          type="submit"
+        >
+          {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+          Criar lead e vincular conversa
+        </button>
+      </form>
+    </Modal>
+  );
+}
+
+function countPendingInboundMessages(messages: WhatsAppMessage[]) {
+  const lastOutboundAt = Math.max(
+    0,
+    ...messages
+      .filter((message) => message.direction === "outbound")
+      .map((message) => new Date(message.created_at).getTime()),
+  );
+
+  return messages.filter(
+    (message) =>
+      message.direction === "inbound" && new Date(message.created_at).getTime() > lastOutboundAt,
+  ).length;
+}
+
+function conversationStatusLabel(
+  direction: WhatsAppMessage["direction"],
+  lead: Lead | undefined,
+  pendingInbound: number,
+) {
+  if (lead) return "Lead salvo";
+  if (pendingInbound > 0) return "Aguardando resposta";
+  if (direction === "outbound") return "Respondido";
+  return "Nova conversa";
+}
+
+function messageStatusLabel(status: WhatsAppMessage["status"]) {
+  const labels: Record<WhatsAppMessage["status"], string> = {
+    pending: "pendente",
+    sent: "enviada",
+    delivered: "entregue",
+    read: "lida",
+    failed: "falhou",
+  };
+
+  return labels[status] ?? status;
 }
 
 function ContactAvatar({

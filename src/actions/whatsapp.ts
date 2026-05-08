@@ -9,6 +9,7 @@ import {
   logWhatsAppEvent as persistWhatsAppEvent,
   recordOutboundWhatsAppMessage,
   updateStoredWhatsAppMessageStatus,
+  upsertWhatsAppConversation,
 } from "@/lib/server/evolution";
 import { createSupabaseServerClient } from "@/lib/server/supabase";
 import type {
@@ -190,6 +191,17 @@ export async function sendWhatsAppConversationMessage(
 
   if (error) return { success: false, error: error.message };
 
+  await upsertWhatsAppConversation({
+    userId: auth.user.id,
+    leadId: leadId ?? null,
+    phoneNumber: normalizedPhone,
+    remoteJid: `${normalizedPhone}@s.whatsapp.net`,
+    contactAvatarUrl: avatarUrl,
+    lastMessage: message,
+    direction: "outbound",
+    status: "responded",
+  });
+
   revalidatePath("/");
   return { success: true, message: data as WhatsAppMessage };
 }
@@ -245,6 +257,14 @@ export async function saveWhatsAppConversationAsLead(input: {
     .eq("phone_number", phone);
 
   if (error) return { success: false, error: error.message };
+
+  await upsertWhatsAppConversation({
+    userId: auth.user.id,
+    leadId: lead.id,
+    phoneNumber: phone,
+    contactName: lead.name,
+    status: "converted",
+  });
 
   revalidatePath("/");
   return { success: true, lead };

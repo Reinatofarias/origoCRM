@@ -158,6 +158,15 @@ export async function recordOutboundWhatsAppMessage(input: {
     content: input.content,
     status: input.status,
   });
+
+  await upsertWhatsAppConversation({
+    userId: input.userId,
+    leadId: input.leadId,
+    phoneNumber: input.phoneNumber,
+    lastMessage: input.content,
+    direction: "outbound",
+    status: "responded",
+  });
 }
 
 export async function fetchContactProfilePictureUrl(phoneNumber: string) {
@@ -185,6 +194,48 @@ export async function updateStoredWhatsAppMessageStatus(
     .from("whatsapp_messages")
     .update({ status, updated_at: new Date().toISOString() })
     .eq("message_id", messageId);
+}
+
+export async function upsertWhatsAppConversation(input: {
+  userId: string;
+  phoneNumber: string;
+  leadId?: string | null;
+  remoteJid?: string | null;
+  contactName?: string | null;
+  contactAvatarUrl?: string | null;
+  lastMessage?: string | null;
+  direction?: "inbound" | "outbound" | null;
+  status?: "open" | "unread" | "waiting" | "responded" | "converted" | "archived";
+}) {
+  const supabase = createSupabaseServiceRoleClient();
+  if (!supabase) return;
+
+  const now = new Date().toISOString();
+  const phoneNumber = normalizePhone(input.phoneNumber);
+  const payload: Record<string, unknown> = {
+    user_id: input.userId,
+    phone_number: phoneNumber,
+    status: input.status ?? (input.direction === "inbound" ? "unread" : "responded"),
+    updated_at: now,
+  };
+
+  if (input.leadId !== undefined) payload.lead_id = input.leadId;
+  if (input.remoteJid) payload.remote_jid = input.remoteJid;
+  if (input.contactName) payload.contact_name = input.contactName;
+  if (input.contactAvatarUrl) payload.contact_avatar_url = input.contactAvatarUrl;
+  if (input.lastMessage !== undefined) {
+    payload.last_message = input.lastMessage ?? "";
+    payload.last_message_at = now;
+  }
+  if (input.direction) {
+    payload.last_message_direction = input.direction;
+    payload.unread_count = input.direction === "inbound" ? 1 : 0;
+    if (input.direction === "outbound") payload.last_read_at = now;
+  }
+
+  await supabase.from("whatsapp_conversations").upsert(payload, {
+    onConflict: "user_id,phone_number",
+  });
 }
 
 export async function recordIncomingWhatsAppMessage(message: EvolutionIncomingMessage) {
@@ -253,6 +304,17 @@ export async function recordIncomingWhatsAppMessage(message: EvolutionIncomingMe
     },
     { onConflict: "message_id", ignoreDuplicates: true },
   );
+
+  await upsertWhatsAppConversation({
+    userId: ownerUserId,
+    leadId: lead?.id ?? null,
+    phoneNumber,
+    remoteJid: normalizedMessage.remoteJid,
+    contactName: normalizedMessage.contactName,
+    contactAvatarUrl: avatarUrl,
+    lastMessage: messageContent,
+    direction,
+  });
 
   if (lead && direction === "inbound") {
     await Promise.all([
