@@ -36,7 +36,6 @@ import {
   UserRound,
   Wifi,
   WifiOff,
-  Zap,
 } from "lucide-react";
 import { FormEvent, MouseEvent, useCallback, useEffect, useMemo, useState } from "react";
 
@@ -688,6 +687,37 @@ function Metric({ title, value }: { title: string; value: number }) {
   );
 }
 
+const pipelineMeta: Record<
+  LeadStatus,
+  { accent: string; description: string; empty: string }
+> = {
+  novo: {
+    accent: "bg-sky-400",
+    description: "Entradas recentes para qualificar",
+    empty: "Nenhum lead novo",
+  },
+  contatado: {
+    accent: "bg-[#7C3AED]",
+    description: "Contato iniciado e aguardando retorno",
+    empty: "Nenhum contato em andamento",
+  },
+  respondeu: {
+    accent: "bg-[#25D366]",
+    description: "Leads que ja responderam",
+    empty: "Nenhuma resposta registrada",
+  },
+  proposta: {
+    accent: "bg-amber-400",
+    description: "Negociacoes com proposta enviada",
+    empty: "Nenhuma proposta ativa",
+  },
+  fechado: {
+    accent: "bg-zinc-300",
+    description: "Oportunidades concluidas",
+    empty: "Nenhum lead fechado",
+  },
+};
+
 function Pipeline({
   leads,
   recentLeadId,
@@ -725,25 +755,126 @@ function Pipeline({
 
   return (
     <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
-      <div className="grid gap-4 overflow-x-auto pb-3 xl:grid-cols-5">
-        {pipelineColumns.map((column) => {
-          const columnLeads = leads.filter((lead) => lead.status === column.id);
-          return (
-            <PipelineColumn
-              key={column.id}
-              id={column.id}
-              leads={columnLeads}
-              onLeadClick={onLeadClick}
-              onQuickSchedule={onQuickSchedule}
-              onQuickWhatsApp={onQuickWhatsApp}
-              recentLeadId={recentLeadId}
-              title={column.title}
-            />
-          );
-        })}
+      <div className="space-y-4">
+        <PipelineOverview leads={leads} />
+        <div className="grid gap-4 overflow-x-auto pb-3 xl:grid-cols-5">
+          {pipelineColumns.map((column) => {
+            const columnLeads = leads.filter((lead) => lead.status === column.id);
+            return (
+              <PipelineColumn
+                key={column.id}
+                id={column.id}
+                leads={columnLeads}
+                onLeadClick={onLeadClick}
+                onQuickSchedule={onQuickSchedule}
+                onQuickWhatsApp={onQuickWhatsApp}
+                recentLeadId={recentLeadId}
+                title={column.title}
+              />
+            );
+          })}
+        </div>
       </div>
     </DndContext>
   );
+}
+
+function PipelineOverview({ leads }: { leads: Lead[] }) {
+  const pendingFollowups = leads.filter((lead) => isFollowupDue(lead)).length;
+  const activeDeals = leads.filter((lead) => lead.status !== "fechado").length;
+  const replied = leads.filter((lead) => lead.status === "respondeu").length;
+  const closed = leads.filter((lead) => lead.status === "fechado").length;
+  const closeRate = leads.length ? Math.round((closed / leads.length) * 100) : 0;
+
+  return (
+    <div className="grid gap-3 md:grid-cols-4">
+      <PipelineStat label="Leads ativos" value={activeDeals.toString()} tone="border-[#7C3AED]/30" />
+      <PipelineStat label="Follow-up hoje" value={pendingFollowups.toString()} tone="border-amber-400/30" />
+      <PipelineStat label="Responderam" value={replied.toString()} tone="border-[#25D366]/30" />
+      <PipelineStat label="Taxa de fechamento" value={`${closeRate}%`} tone="border-white/10" />
+    </div>
+  );
+}
+
+function PipelineStat({ label, value, tone }: { label: string; value: string; tone: string }) {
+  return (
+    <div className={`rounded-xl border ${tone} bg-white/[0.035] p-4`}>
+      <div className="text-xs uppercase tracking-wide text-zinc-500">{label}</div>
+      <div className="mt-2 text-2xl font-semibold text-white">{value}</div>
+    </div>
+  );
+}
+
+function isFollowupDue(lead: Lead) {
+  if (!lead.next_followup_at || lead.status === "fechado") return false;
+  const dueAt = new Date(lead.next_followup_at);
+  const todayEnd = new Date();
+  todayEnd.setHours(23, 59, 59, 999);
+  return dueAt.getTime() <= todayEnd.getTime();
+}
+
+function getFollowupLabel(lead: Lead) {
+  if (!lead.next_followup_at) return { text: "Sem follow-up", tone: "text-zinc-500" };
+
+  const dueAt = new Date(lead.next_followup_at);
+  const today = new Date();
+  const diffDays = Math.ceil(
+    (startOfDay(dueAt).getTime() - startOfDay(today).getTime()) / 86400000,
+  );
+
+  if (diffDays < 0) return { text: "Follow-up atrasado", tone: "text-red-300" };
+  if (diffDays === 0) return { text: "Follow-up hoje", tone: "text-amber-300" };
+  if (diffDays === 1) return { text: "Follow-up amanha", tone: "text-[#25D366]" };
+  return {
+    text: `Follow-up ${dueAt.toLocaleDateString("pt-BR")}`,
+    tone: "text-zinc-400",
+  };
+}
+
+function getLastContactLabel(lead: Lead) {
+  if (!lead.last_contact_at) return "Sem contato";
+
+  const contactedAt = new Date(lead.last_contact_at);
+  const today = new Date();
+  const diffDays = Math.floor(
+    (startOfDay(today).getTime() - startOfDay(contactedAt).getTime()) / 86400000,
+  );
+
+  if (diffDays <= 0) return "Contato hoje";
+  if (diffDays === 1) return "Contato ontem";
+  return `Contato ha ${diffDays} dias`;
+}
+
+function startOfDay(date: Date) {
+  const next = new Date(date);
+  next.setHours(0, 0, 0, 0);
+  return next;
+}
+
+function formatPhoneCompact(phone: string) {
+  const normalized = normalizePhone(phone);
+  if (normalized.length <= 4) return normalized || phone;
+  return `${normalized.slice(0, -4)}-${normalized.slice(-4)}`;
+}
+
+function getLeadInitials(lead: Lead) {
+  return lead.name
+    .split(" ")
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0])
+    .join("")
+    .toUpperCase();
+}
+
+function getColumnHealth(leads: Lead[]) {
+  const due = leads.filter((lead) => isFollowupDue(lead)).length;
+  if (due > 0) return `${due} com follow-up`;
+  return leads.length ? "Em dia" : "Sem itens";
+}
+
+function getSourceLabel(source: string) {
+  return source?.trim() || "Origem nao informada";
 }
 
 function PipelineColumn({
@@ -764,19 +895,30 @@ function PipelineColumn({
   onQuickSchedule: (lead: Lead) => void;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id });
+  const meta = pipelineMeta[id];
 
   return (
     <div
-      className={`min-h-72 min-w-64 rounded-xl border p-3 transition ${
+      className={`min-h-[560px] min-w-72 rounded-xl border p-3 transition ${
         isOver ? "border-[#7C3AED] bg-[#7C3AED]/10" : "border-white/10 bg-white/[0.025]"
       }`}
       ref={setNodeRef}
     >
-      <div className="mb-3 flex items-center justify-between">
-        <h2 className="text-sm font-semibold text-zinc-200">{title}</h2>
-        <span className="rounded-full bg-white/[0.06] px-2 py-1 text-xs text-zinc-400">
-          {leads.length}
-        </span>
+      <div className="mb-3 rounded-lg border border-white/10 bg-black/20 p-3">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex min-w-0 items-center gap-2">
+            <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${meta.accent}`} />
+            <h2 className="truncate text-sm font-semibold text-zinc-100">{title}</h2>
+          </div>
+          <span className="rounded-full bg-white/[0.06] px-2 py-1 text-xs text-zinc-300">
+            {leads.length}
+          </span>
+        </div>
+        <p className="mt-2 min-h-8 text-xs leading-4 text-zinc-500">{meta.description}</p>
+        <div className="mt-3 flex items-center justify-between gap-3 text-[11px] text-zinc-500">
+          <span>{getColumnHealth(leads)}</span>
+          <span>Arraste para mover</span>
+        </div>
       </div>
       <SortableContext items={leads.map((lead) => lead.id)} strategy={verticalListSortingStrategy}>
         <div className="space-y-3">
@@ -790,6 +932,11 @@ function PipelineColumn({
               onQuickWhatsApp={() => onQuickWhatsApp(lead)}
             />
           ))}
+          {leads.length === 0 && (
+            <div className="flex min-h-40 items-center justify-center rounded-lg border border-dashed border-white/10 bg-black/20 p-4 text-center text-sm text-zinc-500">
+              {meta.empty}
+            </div>
+          )}
         </div>
       </SortableContext>
     </div>
@@ -868,14 +1015,36 @@ function LeadCard({
       role="button"
       tabIndex={0}
     >
-      <div className="font-medium text-white">{lead.name}</div>
-      <div className="mt-1 text-sm text-zinc-400">{lead.company || "Sem empresa"}</div>
-      <div className="mt-3 flex items-center justify-between gap-3 text-xs text-zinc-500">
-        <span>{lead.source || "Origem nao informada"}</span>
-        <span>{lead.next_followup_at ? new Date(lead.next_followup_at).toLocaleDateString("pt-BR") : lead.phone}</span>
+      <div className="flex items-start gap-3">
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white/10 text-xs font-semibold text-zinc-200">
+          {getLeadInitials(lead) || <UserRound className="h-4 w-4" />}
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="truncate font-medium text-white">{lead.name}</div>
+          <div className="mt-1 truncate text-sm text-zinc-400">{lead.company || "Sem empresa"}</div>
+        </div>
+      </div>
+
+      <div className="mt-4 flex flex-wrap gap-2">
+        <span className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-1 text-[11px] text-zinc-400">
+          {getSourceLabel(lead.source)}
+        </span>
+        <span className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-1 text-[11px] text-zinc-400">
+          {formatPhoneCompact(lead.phone)}
+        </span>
+      </div>
+
+      <div className="mt-4 grid gap-2 text-xs">
+        <div className={`flex items-center justify-between gap-3 ${getFollowupLabel(lead).tone}`}>
+          <span className="flex items-center gap-1.5">
+            <Clock3 className="h-3.5 w-3.5" />
+            {getFollowupLabel(lead).text}
+          </span>
+        </div>
+        <div className="text-zinc-500">{getLastContactLabel(lead)}</div>
       </div>
       {showQuickActions && (
-        <div className="mt-3 grid grid-cols-3 gap-2 opacity-100 transition sm:opacity-0 sm:group-hover:opacity-100">
+        <div className="mt-4 grid grid-cols-3 gap-2 opacity-100 transition sm:opacity-0 sm:group-hover:opacity-100">
           <button
             className="flex h-8 items-center justify-center rounded-md bg-[#25D366] text-black"
             onClick={(event) => quick(event, onQuickWhatsApp)}
@@ -886,11 +1055,11 @@ function LeadCard({
           </button>
           <button
             className="flex h-8 items-center justify-center rounded-md border border-white/10 bg-white/[0.06] text-zinc-200"
-            onClick={(event) => quick(event, onQuickWhatsApp)}
-            title="Usar template rapido"
+            onClick={(event) => quick(event, onClick)}
+            title="Abrir lead"
             type="button"
           >
-            <Zap className="h-4 w-4" />
+            <ExternalLink className="h-4 w-4" />
           </button>
           <button
             className="flex h-8 items-center justify-center rounded-md border border-white/10 bg-white/[0.06] text-zinc-200"
