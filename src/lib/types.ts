@@ -203,6 +203,7 @@ export type WhatsAppMessage = {
   remote_jid?: string | null;
   phone_number: string;
   contact_name?: string | null;
+  contact_avatar_url?: string | null;
   direction: "inbound" | "outbound";
   content: string;
   media_url?: string | null;

@@ -160,6 +160,20 @@ export async function recordOutboundWhatsAppMessage(input: {
   });
 }
 
+export async function fetchContactProfilePictureUrl(phoneNumber: string) {
+  const endpoint = getEvolutionInstanceEndpoint("/chat/fetchProfilePictureUrl");
+  if (!endpoint) return null;
+
+  const response = await callEvolutionApi<{ profilePictureUrl?: string }>(
+    endpoint,
+    { number: normalizePhone(phoneNumber) },
+    "POST",
+  );
+
+  if (response.error || !response.data?.profilePictureUrl) return null;
+  return response.data.profilePictureUrl;
+}
+
 export async function updateStoredWhatsAppMessageStatus(
   messageId: string,
   status: EvolutionMessageStatus,
@@ -199,6 +213,7 @@ export async function recordIncomingWhatsAppMessage(message: EvolutionIncomingMe
   const messageContent = normalizedMessage.content;
   const lead = await findLeadByWhatsAppPhone(phoneNumber);
   const ownerUserId = lead?.user_id ?? (await resolveWebhookOwnerUserId());
+  const avatarUrl = await fetchContactProfilePictureUrl(phoneNumber);
 
   if (!ownerUserId) {
     await logWhatsAppEvent("messages.upsert.unmatched", {
@@ -228,6 +243,7 @@ export async function recordIncomingWhatsAppMessage(message: EvolutionIncomingMe
       remote_jid: normalizedMessage.remoteJid,
       phone_number: phoneNumber,
       contact_name: normalizedMessage.contactName,
+      contact_avatar_url: avatarUrl,
       direction,
       content: messageContent,
       status: normalizeEvolutionMessageStatus(

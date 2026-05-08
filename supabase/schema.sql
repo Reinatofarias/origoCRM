@@ -48,6 +48,7 @@ create table if not exists public.whatsapp_messages (
   remote_jid text,
   phone_number text not null,
   contact_name text,
+  contact_avatar_url text,
   direction text not null check (direction in ('inbound', 'outbound')),
   content text not null default '',
   media_url text,
@@ -69,6 +70,7 @@ create table if not exists public.whatsapp_logs (
 alter table public.whatsapp_messages alter column lead_id drop not null;
 alter table public.whatsapp_messages add column if not exists remote_jid text;
 alter table public.whatsapp_messages add column if not exists contact_name text;
+alter table public.whatsapp_messages add column if not exists contact_avatar_url text;
 
 create index if not exists leads_user_id_status_idx on public.leads(user_id, status);
 create index if not exists leads_user_id_next_followup_idx on public.leads(user_id, next_followup_at);
