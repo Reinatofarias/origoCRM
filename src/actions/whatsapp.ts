@@ -17,6 +17,7 @@ import type {
   EvolutionSendTextResponse,
   EvolutionWebhookEvent,
   Lead,
+  LeadStatus,
   WhatsAppMessage,
 } from "@/lib/types";
 import { normalizePhone } from "@/lib/utils";
@@ -211,6 +212,8 @@ export async function saveWhatsAppConversationAsLead(input: {
   name?: string | null;
   company?: string;
   source?: string;
+  status?: LeadStatus;
+  nextFollowupAt?: string | null;
 }): Promise<{
   success: boolean;
   lead?: Lead;
@@ -223,6 +226,7 @@ export async function saveWhatsAppConversationAsLead(input: {
   if (!phone) return { success: false, error: "Numero de telefone invalido" };
 
   const fallbackName = input.name?.trim() || phone;
+  const status = input.status ?? "respondeu";
   const now = new Date().toISOString();
   const { data: existing } = await auth.supabase
     .from("leads")
@@ -231,9 +235,28 @@ export async function saveWhatsAppConversationAsLead(input: {
     .eq("phone", phone)
     .maybeSingle();
 
-  const lead =
-    (existing as Lead | null) ??
-    ((await auth.supabase
+  let lead = existing as Lead | null;
+
+  if (lead) {
+    const { data: updatedLead } = await auth.supabase
+      .from("leads")
+      .update({
+        name: fallbackName,
+        company: input.company ?? lead.company,
+        source: input.source ?? lead.source,
+        status,
+        last_contact_at: now,
+        next_followup_at: input.nextFollowupAt || lead.next_followup_at,
+        updated_at: now,
+      })
+      .eq("id", lead.id)
+      .eq("user_id", auth.user.id)
+      .select()
+      .single();
+
+    lead = (updatedLead as Lead | null) ?? lead;
+  } else {
+    lead = (await auth.supabase
       .from("leads")
       .insert({
         user_id: auth.user.id,
@@ -241,12 +264,14 @@ export async function saveWhatsAppConversationAsLead(input: {
         phone,
         company: input.company ?? "",
         source: input.source ?? "WhatsApp",
-        status: "respondeu",
+        status,
         last_contact_at: now,
+        next_followup_at: input.nextFollowupAt || null,
         updated_at: now,
       })
       .select()
-      .single()).data as Lead | null);
+      .single()).data as Lead | null;
+  }
 
   if (!lead) return { success: false, error: "Nao foi possivel criar lead" };
 
