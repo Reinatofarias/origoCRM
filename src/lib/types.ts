@@ -212,6 +212,24 @@ export type WhatsAppMessage = {
   updated_at: string;
 };
 
+export type WhatsAppConversation = {
+  id: string;
+  user_id: string;
+  lead_id: string | null;
+  phone_number: string;
+  remote_jid?: string | null;
+  contact_name?: string | null;
+  contact_avatar_url?: string | null;
+  status: "open" | "unread" | "waiting" | "responded" | "converted" | "archived";
+  unread_count: number;
+  last_message: string;
+  last_message_direction?: "inbound" | "outbound" | null;
+  last_message_at?: string | null;
+  last_read_at?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 /**
  * Log de integração com WhatsApp
  */
