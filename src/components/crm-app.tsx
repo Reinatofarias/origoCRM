@@ -40,7 +40,11 @@ import {
 } from "lucide-react";
 import { FormEvent, MouseEvent, useCallback, useEffect, useMemo, useState } from "react";
 
-import { sendWhatsAppMessage } from "@/actions/whatsapp";
+import {
+  saveWhatsAppConversationAsLead,
+  sendWhatsAppConversationMessage,
+  sendWhatsAppMessage,
+} from "@/actions/whatsapp";
 import { pipelineColumns } from "@/lib/constants";
 import { createSupabaseClient, isSupabaseConfigured } from "@/lib/db";
 import type {
@@ -577,7 +581,16 @@ function Workspace({ user, onLogout }: { user: AuthUser; onLogout: () => void })
                   />
                 )}
                 {view === "templates" && <Templates templates={templates} onAddTemplate={addTemplate} />}
-                {view === "conversations" && <Conversations leads={leads} />}
+                {view === "conversations" && (
+                  <Conversations
+                    leads={leads}
+                    onLeadCreated={(lead) => {
+                      setRemoteLeads((items) =>
+                        items.some((item) => item.id === lead.id) ? items : [lead, ...items],
+                      );
+                    }}
+                  />
+                )}
                 {view === "whatsapp" && <WhatsAppConnection />}
                 {view === "settings" && <SettingsView />}
               </>
@@ -1151,11 +1164,21 @@ function WhatsAppConnection() {
   );
 }
 
-function Conversations({ leads }: { leads: Lead[] }) {
+function Conversations({
+  leads,
+  onLeadCreated,
+}: {
+  leads: Lead[];
+  onLeadCreated: (lead: Lead) => void;
+}) {
   const supabase = useMemo(() => createSupabaseClient(), []);
   const [messages, setMessages] = useState<WhatsAppMessage[]>([]);
   const [loading, setLoading] = useState(Boolean(supabase));
   const [selectedPhone, setSelectedPhone] = useState<string | null>(null);
+  const [replyText, setReplyText] = useState("");
+  const [sending, setSending] = useState(false);
+  const [savingLead, setSavingLead] = useState(false);
+  const [actionError, setActionError] = useState("");
 
   useEffect(() => {
     if (!supabase) {
@@ -1203,7 +1226,17 @@ function Conversations({ leads }: { leads: Lead[] }) {
       .map(([phone, items]) => {
         const lastMessage = items[items.length - 1];
         const lead = leads.find((item) => item.id === lastMessage.lead_id);
-        return { phone, lead, messages: items, lastMessage };
+        const contactMessage = [...items].reverse().find((item) => item.contact_name);
+        const avatarMessage = [...items].reverse().find((item) => item.contact_avatar_url);
+        const contactName = lead?.name ?? contactMessage?.contact_name ?? phone;
+        return {
+          phone,
+          lead,
+          messages: items,
+          lastMessage,
+          contactName,
+          avatarUrl: avatarMessage?.contact_avatar_url ?? null,
+        };
       })
       .sort(
         (a, b) =>
@@ -1214,6 +1247,62 @@ function Conversations({ leads }: { leads: Lead[] }) {
 
   const selectedConversation =
     conversations.find((conversation) => conversation.phone === selectedPhone) ?? conversations[0];
+
+  async function handleReply(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selectedConversation || !replyText.trim()) return;
+
+    setActionError("");
+    setSending(true);
+    const body = replyText.trim();
+    const result = await sendWhatsAppConversationMessage(
+      selectedConversation.phone,
+      body,
+      selectedConversation.lead?.id ?? null,
+    );
+    setSending(false);
+
+    if (!result.success) {
+      setActionError(result.error ?? "Nao foi possivel enviar a mensagem");
+      return;
+    }
+
+    setReplyText("");
+    if (result.message) {
+      setMessages((current) => applyMessageRealtimeEvent(current, {
+        eventType: "INSERT",
+        new: result.message as unknown as Record<string, unknown>,
+        old: {},
+      }));
+    }
+  }
+
+  async function handleSaveLead() {
+    if (!selectedConversation || selectedConversation.lead) return;
+
+    setActionError("");
+    setSavingLead(true);
+    const result = await saveWhatsAppConversationAsLead({
+      phoneNumber: selectedConversation.phone,
+      name: selectedConversation.contactName,
+      source: "WhatsApp",
+    });
+    setSavingLead(false);
+
+    if (!result.success || !result.lead) {
+      setActionError(result.error ?? "Nao foi possivel salvar o lead");
+      return;
+    }
+
+    onLeadCreated(result.lead);
+    setMessages((current) =>
+      current.map((message) =>
+        message.phone_number === selectedConversation.phone
+          ? { ...message, lead_id: result.lead?.id ?? message.lead_id }
+          : message,
+      ),
+    );
+  }
 
   if (loading) {
     return (
@@ -1248,7 +1337,17 @@ function Conversations({ leads }: { leads: Lead[] }) {
             type="button"
           >
             <div className="flex items-center justify-between gap-3">
-              <div className="font-medium">{conversation.lead?.name ?? conversation.phone}</div>
+              <div className="flex min-w-0 items-center gap-3">
+                <ContactAvatar
+                  avatarUrl={conversation.avatarUrl}
+                  label={conversation.contactName}
+                  size="sm"
+                />
+                <div className="min-w-0">
+                  <div className="truncate font-medium">{conversation.contactName}</div>
+                  <div className="mt-0.5 truncate text-xs text-zinc-500">{conversation.phone}</div>
+                </div>
+              </div>
               <span className="text-xs text-zinc-500">
                 {new Date(conversation.lastMessage.created_at).toLocaleTimeString("pt-BR", {
                   hour: "2-digit",
@@ -1264,11 +1363,32 @@ function Conversations({ leads }: { leads: Lead[] }) {
       </aside>
 
       <section className="flex min-h-[520px] flex-col bg-black/10">
-        <div className="border-b border-white/10 p-4">
-          <div className="font-semibold">
-            {selectedConversation?.lead?.name ?? selectedConversation?.phone}
+        <div className="flex items-center justify-between gap-4 border-b border-white/10 p-4">
+          <div className="flex min-w-0 items-center gap-3">
+            {selectedConversation && (
+              <ContactAvatar
+                avatarUrl={selectedConversation.avatarUrl}
+                label={selectedConversation.contactName}
+              />
+            )}
+            <div className="min-w-0">
+              <div className="truncate font-semibold">
+                {selectedConversation?.contactName ?? selectedConversation?.phone}
+              </div>
+              <div className="mt-1 truncate text-sm text-zinc-500">{selectedConversation?.phone}</div>
+            </div>
           </div>
-          <div className="mt-1 text-sm text-zinc-500">{selectedConversation?.phone}</div>
+          {selectedConversation && !selectedConversation.lead && (
+            <button
+              className="flex h-10 items-center justify-center gap-2 rounded-lg border border-[#25D366]/30 px-3 text-sm text-[#25D366] transition hover:bg-[#25D366]/10 disabled:opacity-60"
+              disabled={savingLead}
+              onClick={handleSaveLead}
+              type="button"
+            >
+              {savingLead ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+              Salvar como lead
+            </button>
+          )}
         </div>
         <div className="flex-1 space-y-3 overflow-y-auto p-4">
           {selectedConversation?.messages.map((message) => (
@@ -1295,7 +1415,57 @@ function Conversations({ leads }: { leads: Lead[] }) {
             </div>
           ))}
         </div>
+        <form className="border-t border-white/10 p-4" onSubmit={handleReply}>
+          {actionError && <p className="mb-3 text-sm text-red-300">{actionError}</p>}
+          <div className="flex flex-col gap-3 sm:flex-row">
+            <textarea
+              className="min-h-12 flex-1 resize-none rounded-lg border border-white/10 bg-black/30 px-4 py-3 text-sm outline-none transition focus:border-[#7C3AED]"
+              onChange={(event) => setReplyText(event.target.value)}
+              placeholder="Responder pelo WhatsApp"
+              value={replyText}
+            />
+            <button
+              className="flex h-12 items-center justify-center gap-2 rounded-lg bg-[#25D366] px-5 text-sm font-semibold text-black transition hover:bg-[#20bd5a] disabled:opacity-60"
+              disabled={sending || !replyText.trim()}
+              type="submit"
+            >
+              {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+              Enviar
+            </button>
+          </div>
+        </form>
       </section>
+    </div>
+  );
+}
+
+function ContactAvatar({
+  avatarUrl,
+  label,
+  size = "md",
+}: {
+  avatarUrl?: string | null;
+  label: string;
+  size?: "sm" | "md";
+}) {
+  const dimension = size === "sm" ? "h-9 w-9" : "h-11 w-11";
+  const initials = label
+    .split(" ")
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0])
+    .join("")
+    .toUpperCase();
+
+  if (avatarUrl) {
+    // Profile picture URLs come from WhatsApp/Evolution and are not handled by next/image.
+    // eslint-disable-next-line @next/next/no-img-element
+    return <img alt={label} className={`${dimension} rounded-full object-cover`} src={avatarUrl} />;
+  }
+
+  return (
+    <div className={`${dimension} flex shrink-0 items-center justify-center rounded-full bg-white/10 text-xs font-semibold text-zinc-300`}>
+      {initials || <UserRound className="h-4 w-4" />}
     </div>
   );
 }
