@@ -17,8 +17,10 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import {
+  AlertTriangle,
   BarChart3,
   Check,
+  CheckCheck,
   Clock3,
   Edit3,
   ExternalLink,
@@ -37,7 +39,7 @@ import {
   Wifi,
   WifiOff,
 } from "lucide-react";
-import { FormEvent, MouseEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { FormEvent, KeyboardEvent, MouseEvent, useCallback, useEffect, useMemo, useState } from "react";
 
 import {
   saveWhatsAppConversationAsLead,
@@ -1338,6 +1340,29 @@ function WhatsAppConnection() {
   );
 }
 
+type ConversationStatusFilter = "all" | "unread" | "waiting" | "responded" | "converted";
+type ConversationLeadFilter = "all" | "without" | "with";
+type ConversationStatus = Exclude<ConversationStatusFilter, "all">;
+type ConversationCounts = {
+  all: number;
+  unread: number;
+  waiting: number;
+  responded: number;
+  converted: number;
+};
+
+const conversationStatusTabs: Array<{
+  id: ConversationStatusFilter;
+  label: string;
+  countKey: keyof ConversationCounts;
+}> = [
+  { id: "all", label: "Todas", countKey: "all" },
+  { id: "unread", label: "Nao lidas", countKey: "unread" },
+  { id: "waiting", label: "Aguardando", countKey: "waiting" },
+  { id: "responded", label: "Respondidas", countKey: "responded" },
+  { id: "converted", label: "Convertidas", countKey: "converted" },
+];
+
 function Conversations({
   leads,
   templates,
@@ -1354,6 +1379,10 @@ function Conversations({
   const [loading, setLoading] = useState(Boolean(supabase));
   const [selectedPhone, setSelectedPhone] = useState<string | null>(null);
   const [replyText, setReplyText] = useState("");
+  const [conversationQuery, setConversationQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState<ConversationStatusFilter>("all");
+  const [leadFilter, setLeadFilter] = useState<ConversationLeadFilter>("all");
+  const [readPhones, setReadPhones] = useState<Set<string>>(() => new Set());
   const [sending, setSending] = useState(false);
   const [savingLead, setSavingLead] = useState(false);
   const [actionError, setActionError] = useState("");
@@ -1382,6 +1411,19 @@ function Conversations({
         "postgres_changes",
         { event: "*", schema: "public", table: "whatsapp_messages" },
         (payload) => {
+          const nextMessage = payload.new as WhatsAppMessage;
+          if (
+            payload.eventType === "INSERT" &&
+            nextMessage?.direction === "inbound" &&
+            nextMessage.phone_number !== selectedPhone
+          ) {
+            setReadPhones((current) => {
+              if (!current.has(nextMessage.phone_number)) return current;
+              const next = new Set(current);
+              next.delete(nextMessage.phone_number);
+              return next;
+            });
+          }
           setMessages((current) => applyMessageRealtimeEvent(current, payload));
         },
       )
@@ -1391,7 +1433,7 @@ function Conversations({
       mounted = false;
       supabase.removeChannel(channel);
     };
-  }, [supabase]);
+  }, [selectedPhone, supabase]);
 
   const conversations = useMemo(() => {
     const grouped = new Map<string, WhatsAppMessage[]>();
@@ -1406,19 +1448,25 @@ function Conversations({
         const lastMessage = items[items.length - 1];
         const linkedLeadId = [...items].reverse().find((item) => item.lead_id)?.lead_id;
         const lead = leads.find((item) => item.id === linkedLeadId);
+        const existingLead = lead ?? findLeadByPhone(leads, phone);
         const contactMessage = [...items].reverse().find((item) => item.contact_name);
         const avatarMessage = [...items].reverse().find((item) => item.contact_avatar_url);
-        const contactName = lead?.name ?? contactMessage?.contact_name ?? phone;
-        const inboundAfterLastOutbound = countPendingInboundMessages(items);
+        const contactName = lead?.name ?? existingLead?.name ?? contactMessage?.contact_name ?? phone;
+        const pendingInbound = countPendingInboundMessages(items);
+        const unreadCount = readPhones.has(phone) ? 0 : pendingInbound;
+        const status = conversationStatus(lastMessage.direction, Boolean(lead), unreadCount);
         return {
           phone,
           lead,
+          existingLead,
           messages: items,
           lastMessage,
           contactName,
           avatarUrl: avatarMessage?.contact_avatar_url ?? null,
-          inboundAfterLastOutbound,
-          statusLabel: conversationStatusLabel(lastMessage.direction, lead, inboundAfterLastOutbound),
+          unreadCount,
+          pendingInbound,
+          status,
+          statusLabel: conversationStatusLabel(status),
         };
       })
       .sort(
@@ -1426,10 +1474,74 @@ function Conversations({
           new Date(b.lastMessage.created_at).getTime() -
           new Date(a.lastMessage.created_at).getTime(),
       );
-  }, [messages, leads]);
+  }, [messages, leads, readPhones]);
+
+  const conversationCounts = useMemo(
+    () => ({
+      all: conversations.length,
+      unread: conversations.filter((conversation) => conversation.status === "unread").length,
+      waiting: conversations.filter((conversation) => conversation.status === "waiting").length,
+      responded: conversations.filter((conversation) => conversation.status === "responded").length,
+      converted: conversations.filter((conversation) => conversation.status === "converted").length,
+    }),
+    [conversations],
+  );
+
+  const filteredConversations = useMemo(() => {
+    const search = conversationQuery.trim().toLowerCase();
+    return conversations.filter((conversation) => {
+      const matchesStatus = statusFilter === "all" || conversation.status === statusFilter;
+      const matchesLead =
+        leadFilter === "all" ||
+        (leadFilter === "without" && !conversation.lead && !conversation.existingLead) ||
+        (leadFilter === "with" && Boolean(conversation.lead || conversation.existingLead));
+      const matchesSearch =
+        !search ||
+        [
+          conversation.contactName,
+          conversation.phone,
+          conversation.lead?.company ?? "",
+          conversation.lead?.source ?? "",
+          ...conversation.messages.map((message) => message.content),
+        ].some((value) => value.toLowerCase().includes(search));
+
+      return matchesStatus && matchesLead && matchesSearch;
+    });
+  }, [conversationQuery, conversations, leadFilter, statusFilter]);
 
   const selectedConversation =
-    conversations.find((conversation) => conversation.phone === selectedPhone) ?? conversations[0];
+    filteredConversations.find((conversation) => conversation.phone === selectedPhone) ??
+    filteredConversations[0] ??
+    conversations[0];
+
+  const markConversationAsRead = useCallback(
+    (phone: string, status: "responded" | "converted" = "responded") => {
+      setReadPhones((current) => {
+        if (current.has(phone)) return current;
+        const next = new Set(current);
+        next.add(phone);
+        return next;
+      });
+
+      if (supabase) {
+        void supabase
+          .from("whatsapp_conversations")
+          .update({
+            unread_count: 0,
+            last_read_at: new Date().toISOString(),
+            status,
+          })
+          .eq("phone_number", phone);
+      }
+    },
+    [supabase],
+  );
+
+  function selectConversation(phone: string) {
+    setSelectedPhone(phone);
+    const conversation = conversations.find((item) => item.phone === phone);
+    markConversationAsRead(phone, conversation?.lead ? "converted" : "responded");
+  }
 
   function applyTemplate(templateId: string) {
     const template = templates.find((item) => item.id === templateId);
@@ -1449,16 +1561,14 @@ function Conversations({
     setReplyText(renderTemplate(template.body, virtualLead));
   }
 
-  async function handleReply(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!selectedConversation || !replyText.trim()) return;
+  async function sendReply(body: string) {
+    if (!selectedConversation || !body.trim()) return;
 
     setActionError("");
     setSending(true);
-    const body = replyText.trim();
     const result = await sendWhatsAppConversationMessage(
       selectedConversation.phone,
-      body,
+      body.trim(),
       selectedConversation.lead?.id ?? null,
     );
     setSending(false);
@@ -1478,7 +1588,24 @@ function Conversations({
     }
   }
 
-  async function handleSaveLead(input: { name: string; company: string; source: string }) {
+  async function handleReply(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    await sendReply(replyText);
+  }
+
+  function handleReplyKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (event.key !== "Enter" || event.shiftKey) return;
+    event.preventDefault();
+    event.currentTarget.form?.requestSubmit();
+  }
+
+  async function handleSaveLead(input: {
+    name: string;
+    company: string;
+    source: string;
+    status: LeadStatus;
+    nextFollowupAt: string;
+  }) {
     if (!selectedConversation || selectedConversation.lead) return;
 
     setActionError("");
@@ -1488,6 +1615,8 @@ function Conversations({
       name: input.name,
       company: input.company,
       source: input.source,
+      status: input.status,
+      nextFollowupAt: input.nextFollowupAt ? new Date(input.nextFollowupAt).toISOString() : null,
     });
     setSavingLead(false);
 
@@ -1534,20 +1663,74 @@ function Conversations({
           <div className="flex items-center justify-between gap-3">
             <div>
               <h2 className="font-semibold">Inbox WhatsApp</h2>
-              <p className="mt-1 text-xs text-zinc-500">{conversations.length} conversas ativas</p>
+              <p className="mt-1 text-xs text-zinc-500">
+                {conversationCounts.unread} nao lidas de {conversations.length} conversas
+              </p>
             </div>
             <span className="rounded-full border border-[#25D366]/30 bg-[#25D366]/10 px-2 py-1 text-xs text-[#25D366]">
               Tempo real
             </span>
           </div>
+          <label className="mt-4 flex h-10 items-center gap-2 rounded-lg border border-white/10 bg-black/30 px-3 text-sm text-zinc-400">
+            <Search className="h-4 w-4" />
+            <input
+              className="min-w-0 flex-1 bg-transparent outline-none placeholder:text-zinc-600"
+              onChange={(event) => setConversationQuery(event.target.value)}
+              placeholder="Buscar nome, telefone ou mensagem"
+              value={conversationQuery}
+            />
+          </label>
+          <div className="mt-3 grid grid-cols-2 gap-2">
+            <select
+              className="h-9 rounded-lg border border-white/10 bg-black/30 px-2 text-xs text-zinc-300 outline-none"
+              onChange={(event) => setLeadFilter(event.target.value as ConversationLeadFilter)}
+              value={leadFilter}
+            >
+              <option value="all">Todos os leads</option>
+              <option value="without">Sem lead</option>
+              <option value="with">Com lead</option>
+            </select>
+            <button
+              className="h-9 rounded-lg border border-white/10 text-xs text-zinc-400 transition hover:bg-white/[0.06]"
+              onClick={() => {
+                setConversationQuery("");
+                setStatusFilter("all");
+                setLeadFilter("all");
+              }}
+              type="button"
+            >
+              Limpar filtros
+            </button>
+          </div>
+          <div className="mt-3 flex flex-wrap gap-2">
+            {conversationStatusTabs.map((tab) => (
+              <button
+                className={`rounded-full border px-2.5 py-1 text-[11px] transition ${
+                  statusFilter === tab.id
+                    ? "border-[#7C3AED] bg-[#7C3AED]/20 text-white"
+                    : "border-white/10 text-zinc-400 hover:bg-white/[0.06]"
+                }`}
+                key={tab.id}
+                onClick={() => setStatusFilter(tab.id)}
+                type="button"
+              >
+                {tab.label} {conversationCounts[tab.countKey]}
+              </button>
+            ))}
+          </div>
         </div>
-        {conversations.map((conversation) => (
+        {filteredConversations.length === 0 && (
+          <div className="p-5 text-center text-sm text-zinc-500">
+            Nenhuma conversa encontrada.
+          </div>
+        )}
+        {filteredConversations.map((conversation) => (
           <button
             className={`block w-full border-b border-white/10 p-4 text-left transition hover:bg-white/[0.05] ${
               selectedConversation?.phone === conversation.phone ? "bg-[#7C3AED]/15" : ""
             }`}
             key={conversation.phone}
-            onClick={() => setSelectedPhone(conversation.phone)}
+            onClick={() => selectConversation(conversation.phone)}
             type="button"
           >
             <div className="flex items-center justify-between gap-3">
@@ -1573,9 +1756,9 @@ function Conversations({
               <p className="truncate text-sm text-zinc-500">
                 {conversation.lastMessage.content || "Mensagem sem texto"}
               </p>
-              {conversation.inboundAfterLastOutbound > 0 && (
+              {conversation.unreadCount > 0 && (
                 <span className="flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-[#25D366] px-1.5 text-[11px] font-semibold text-black">
-                  {conversation.inboundAfterLastOutbound}
+                  {conversation.unreadCount}
                 </span>
               )}
             </div>
@@ -1586,6 +1769,11 @@ function Conversations({
               {conversation.lead && (
                 <span className="rounded-full border border-[#7C3AED]/30 bg-[#7C3AED]/10 px-2 py-1 text-[11px] text-[#C4B5FD]">
                   Lead
+                </span>
+              )}
+              {!conversation.lead && conversation.existingLead && (
+                <span className="rounded-full border border-amber-400/30 bg-amber-400/10 px-2 py-1 text-[11px] text-amber-200">
+                  Lead existente
                 </span>
               )}
             </div>
@@ -1614,6 +1802,21 @@ function Conversations({
                 )}
               </div>
               <div className="mt-1 truncate text-sm text-zinc-500">{selectedConversation?.phone}</div>
+              {selectedConversation && (
+                <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-zinc-500">
+                  <span>{selectedConversation.lead?.status ?? "sem lead"}</span>
+                  <span>-</span>
+                  <span>Ultima interacao {new Date(selectedConversation.lastMessage.created_at).toLocaleString("pt-BR")}</span>
+                  <a
+                    className="text-[#25D366] transition hover:text-[#6EE7A8]"
+                    href={`https://wa.me/${selectedConversation.phone}`}
+                    rel="noreferrer"
+                    target="_blank"
+                  >
+                    Abrir WhatsApp Web
+                  </a>
+                </div>
+              )}
             </div>
           </div>
           {selectedConversation && (
@@ -1635,7 +1838,7 @@ function Conversations({
                   type="button"
                 >
                   {savingLead ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
-                  Salvar como lead
+                  {selectedConversation.existingLead ? "Vincular ao lead" : "Salvar como lead"}
                 </button>
               )}
             </div>
@@ -1662,8 +1865,18 @@ function Conversations({
                 >
                   <span>{new Date(message.created_at).toLocaleString("pt-BR")}</span>
                   <span>-</span>
+                  {messageStatusIcon(message.status)}
                   <span>{messageStatusLabel(message.status)}</span>
                 </div>
+                {message.status === "failed" && message.direction === "outbound" && (
+                  <button
+                    className="mt-2 rounded-md border border-black/20 px-2 py-1 text-xs text-black/70 transition hover:bg-black/10"
+                    onClick={() => void sendReply(message.content)}
+                    type="button"
+                  >
+                    Tentar novamente
+                  </button>
+                )}
               </div>
             </div>
           ))}
@@ -1687,12 +1900,19 @@ function Conversations({
             <span className="text-xs text-zinc-500">
               {replyText.length}/1024 caracteres
             </span>
+            <span className="text-xs text-zinc-600">Enter envia, Shift+Enter quebra linha</span>
           </div>
+          {replyText.includes("{{") && (
+            <div className="mb-3 rounded-lg border border-[#7C3AED]/20 bg-[#7C3AED]/10 p-3 text-xs text-zinc-300">
+              Preview: {previewTemplateText(replyText, selectedConversation)}
+            </div>
+          )}
           <div className="flex flex-col gap-3 sm:flex-row">
             <textarea
               className="min-h-12 flex-1 resize-none rounded-lg border border-white/10 bg-black/30 px-4 py-3 text-sm outline-none transition focus:border-[#7C3AED]"
               maxLength={1024}
               onChange={(event) => setReplyText(event.target.value)}
+              onKeyDown={handleReplyKeyDown}
               placeholder="Responder pelo WhatsApp"
               value={replyText}
             />
@@ -1702,7 +1922,7 @@ function Conversations({
               type="submit"
             >
               {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-              Enviar
+              {sending ? "Enviando" : "Enviar"}
             </button>
           </div>
         </form>
@@ -1712,6 +1932,7 @@ function Conversations({
           initialName={selectedConversation.contactName}
           phoneNumber={selectedConversation.phone}
           saving={savingLead}
+          existingLead={selectedConversation.existingLead ?? null}
           onClose={() => setLeadModalOpen(false)}
           onSave={handleSaveLead}
         />
@@ -1724,28 +1945,43 @@ function ConversationLeadModal({
   initialName,
   phoneNumber,
   saving,
+  existingLead,
   onClose,
   onSave,
 }: {
   initialName: string;
   phoneNumber: string;
   saving: boolean;
+  existingLead: Lead | null;
   onClose: () => void;
-  onSave: (input: { name: string; company: string; source: string }) => void;
+  onSave: (input: {
+    name: string;
+    company: string;
+    source: string;
+    status: LeadStatus;
+    nextFollowupAt: string;
+  }) => void;
 }) {
-  const [name, setName] = useState(initialName);
-  const [company, setCompany] = useState("");
-  const [source, setSource] = useState("WhatsApp");
+  const [name, setName] = useState(existingLead?.name ?? initialName);
+  const [company, setCompany] = useState(existingLead?.company ?? "");
+  const [source, setSource] = useState(existingLead?.source ?? "WhatsApp");
+  const [status, setStatus] = useState<LeadStatus>(existingLead?.status ?? "respondeu");
+  const [nextFollowupAt, setNextFollowupAt] = useState("");
 
   return (
-    <Modal onClose={onClose} title="Salvar conversa como lead">
+    <Modal onClose={onClose} title={existingLead ? "Vincular conversa ao lead" : "Salvar conversa como lead"}>
       <form
         className="space-y-3"
         onSubmit={(event) => {
           event.preventDefault();
-          onSave({ name, company, source });
+          onSave({ name, company, source, status, nextFollowupAt });
         }}
       >
+        {existingLead && (
+          <div className="rounded-lg border border-amber-400/20 bg-amber-400/10 p-3 text-sm text-amber-100">
+            Ja existe um lead com este telefone. A conversa sera vinculada a ele, evitando duplicidade.
+          </div>
+        )}
         <Input label="Nome" onChange={setName} required value={name} />
         <label className="block text-sm text-zinc-300">
           Telefone
@@ -1757,17 +1993,51 @@ function ConversationLeadModal({
         </label>
         <Input label="Empresa" onChange={setCompany} value={company} />
         <Input label="Origem" onChange={setSource} value={source} />
+        <label className="block text-sm text-zinc-300">
+          Status inicial
+          <select
+            className="mt-2 h-11 w-full rounded-lg border border-white/10 bg-[#101018] px-3 text-white outline-none transition focus:border-[#7C3AED]"
+            onChange={(event) => setStatus(event.target.value as LeadStatus)}
+            value={status}
+          >
+            {pipelineColumns.map((column) => (
+              <option key={column.id} value={column.id}>
+                {column.title}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="block text-sm text-zinc-300">
+          Proximo follow-up
+          <input
+            className="mt-2 h-11 w-full rounded-lg border border-white/10 bg-black/30 px-3 text-white outline-none transition focus:border-[#7C3AED]"
+            onChange={(event) => setNextFollowupAt(event.target.value)}
+            type="datetime-local"
+            value={nextFollowupAt}
+          />
+        </label>
         <button
           className="flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-[#25D366] font-semibold text-black transition hover:bg-[#20bd5a] disabled:opacity-60"
           disabled={saving}
           type="submit"
         >
           {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
-          Criar lead e vincular conversa
+          {existingLead ? "Vincular conversa" : "Criar lead e vincular conversa"}
         </button>
       </form>
     </Modal>
   );
+}
+
+function conversationStatus(
+  direction: WhatsAppMessage["direction"],
+  hasLinkedLead: boolean,
+  unreadCount: number,
+): ConversationStatus {
+  if (hasLinkedLead) return "converted";
+  if (unreadCount > 0) return "unread";
+  if (direction === "outbound") return "waiting";
+  return "responded";
 }
 
 function countPendingInboundMessages(messages: WhatsAppMessage[]) {
@@ -1784,15 +2054,15 @@ function countPendingInboundMessages(messages: WhatsAppMessage[]) {
   ).length;
 }
 
-function conversationStatusLabel(
-  direction: WhatsAppMessage["direction"],
-  lead: Lead | undefined,
-  pendingInbound: number,
-) {
-  if (lead) return "Lead salvo";
-  if (pendingInbound > 0) return "Aguardando resposta";
-  if (direction === "outbound") return "Respondido";
-  return "Nova conversa";
+function conversationStatusLabel(status: ConversationStatus) {
+  const labels: Record<ConversationStatus, string> = {
+    unread: "Nao lida",
+    waiting: "Aguardando resposta",
+    responded: "Respondida",
+    converted: "Convertida em lead",
+  };
+
+  return labels[status];
 }
 
 function messageStatusLabel(status: WhatsAppMessage["status"]) {
@@ -1805,6 +2075,78 @@ function messageStatusLabel(status: WhatsAppMessage["status"]) {
   };
 
   return labels[status] ?? status;
+}
+
+function messageStatusIcon(status: WhatsAppMessage["status"]) {
+  const className = "h-3.5 w-3.5";
+
+  if (status === "pending") return <Clock3 className={className} />;
+  if (status === "sent") return <Check className={className} />;
+  if (status === "delivered") return <CheckCheck className={className} />;
+  if (status === "read") return <CheckCheck className={`${className} text-[#0EA5E9]`} />;
+  return <AlertTriangle className={className} />;
+}
+
+function previewTemplateText(
+  text: string,
+  conversation:
+    | {
+        contactName: string;
+        phone: string;
+        lead?: Lead;
+      }
+    | undefined,
+) {
+  if (!conversation) return text;
+
+  const lead: Lead = conversation.lead ?? {
+    id: "",
+    name: conversation.contactName,
+    phone: conversation.phone,
+    company: "",
+    source: "WhatsApp",
+    status: "novo",
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  };
+
+  return renderTemplate(text, lead);
+}
+
+function findLeadByPhone(leads: Lead[], phone: string) {
+  const candidates = getPhoneCandidates(phone);
+
+  return (
+    leads.find((lead) => {
+      const normalized = normalizePhone(lead.phone);
+      return candidates.some(
+        (candidate) => candidate === normalized || candidate.endsWith(normalized) || normalized.endsWith(candidate),
+      );
+    }) ?? null
+  );
+}
+
+function getPhoneCandidates(phone: string) {
+  const normalized = normalizePhone(phone);
+  const candidates = new Set([normalized]);
+  const localNumber = normalized.startsWith("55") ? normalized.slice(2) : normalized;
+
+  candidates.add(localNumber);
+  candidates.add(`55${localNumber}`);
+
+  if (localNumber.length === 10) {
+    const withNinthDigit = `${localNumber.slice(0, 2)}9${localNumber.slice(2)}`;
+    candidates.add(withNinthDigit);
+    candidates.add(`55${withNinthDigit}`);
+  }
+
+  if (localNumber.length === 11 && localNumber[2] === "9") {
+    const withoutNinthDigit = `${localNumber.slice(0, 2)}${localNumber.slice(3)}`;
+    candidates.add(withoutNinthDigit);
+    candidates.add(`55${withoutNinthDigit}`);
+  }
+
+  return Array.from(candidates).filter(Boolean);
 }
 
 function ContactAvatar({
