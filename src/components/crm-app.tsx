@@ -1657,9 +1657,9 @@ function Conversations({
   }
 
   return (
-    <div className="grid min-h-[calc(100vh-11rem)] overflow-hidden rounded-xl border border-white/10 bg-[#0D0D12] lg:grid-cols-[340px_1fr]">
-      <aside className="border-b border-white/10 bg-white/[0.025] lg:border-b-0 lg:border-r">
-        <div className="border-b border-white/10 p-4">
+    <div className="grid h-[calc(100vh-11rem)] min-h-[560px] overflow-hidden rounded-xl border border-white/10 bg-[#0D0D12] lg:grid-cols-[340px_1fr]">
+      <aside className="flex min-h-0 flex-col border-b border-white/10 bg-white/[0.025] lg:border-b-0 lg:border-r">
+        <div className="shrink-0 border-b border-white/10 p-4">
           <div className="flex items-center justify-between gap-3">
             <div>
               <h2 className="font-semibold">Inbox WhatsApp</h2>
@@ -1719,70 +1719,73 @@ function Conversations({
             ))}
           </div>
         </div>
-        {filteredConversations.length === 0 && (
-          <div className="p-5 text-center text-sm text-zinc-500">
-            Nenhuma conversa encontrada.
-          </div>
-        )}
-        {filteredConversations.map((conversation) => (
-          <button
-            className={`block w-full border-b border-white/10 p-4 text-left transition hover:bg-white/[0.05] ${
-              selectedConversation?.phone === conversation.phone ? "bg-[#7C3AED]/15" : ""
-            }`}
-            key={conversation.phone}
-            onClick={() => selectConversation(conversation.phone)}
-            type="button"
-          >
-            <div className="flex items-center justify-between gap-3">
-              <div className="flex min-w-0 items-center gap-3">
-                <ContactAvatar
-                  avatarUrl={conversation.avatarUrl}
-                  label={conversation.contactName}
-                  size="sm"
-                />
-                <div className="min-w-0">
-                  <div className="truncate font-medium">{conversation.contactName}</div>
-                  <div className="mt-0.5 truncate text-xs text-zinc-500">{conversation.phone}</div>
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          {filteredConversations.length === 0 && (
+            <div className="p-5 text-center text-sm text-zinc-500">
+              Nenhuma conversa encontrada.
+            </div>
+          )}
+          {filteredConversations.map((conversation) => (
+            <button
+              className={`block w-full border-b border-white/10 p-4 text-left transition hover:bg-white/[0.05] ${
+                selectedConversation?.phone === conversation.phone ? "bg-[#7C3AED]/15" : ""
+              }`}
+              key={conversation.phone}
+              onClick={() => selectConversation(conversation.phone)}
+              type="button"
+            >
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex min-w-0 items-center gap-3">
+                  <ContactAvatar
+                    avatarUrl={conversation.avatarUrl}
+                    label={conversation.contactName}
+                    size="sm"
+                  />
+                  <div className="min-w-0">
+                    <div className="truncate font-medium">{conversation.contactName}</div>
+                    <div className="mt-0.5 truncate text-xs text-zinc-500">{conversation.phone}</div>
+                  </div>
                 </div>
+                <span className="shrink-0 text-xs text-zinc-500">
+                  {new Date(conversation.lastMessage.created_at).toLocaleTimeString("pt-BR", {
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })}
+                </span>
               </div>
-              <span className="shrink-0 text-xs text-zinc-500">
-                {new Date(conversation.lastMessage.created_at).toLocaleTimeString("pt-BR", {
-                  hour: "2-digit",
-                  minute: "2-digit",
-                })}
-              </span>
-            </div>
-            <div className="mt-3 flex items-center justify-between gap-3">
-              <p className="truncate text-sm text-zinc-500">
-                {conversation.lastMessage.content || "Mensagem sem texto"}
-              </p>
-              {conversation.unreadCount > 0 && (
-                <span className="flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-[#25D366] px-1.5 text-[11px] font-semibold text-black">
-                  {conversation.unreadCount}
+              <div className="mt-3 flex items-center justify-between gap-3">
+                <p className="truncate text-sm text-zinc-500">
+                  {conversation.lastMessage.content || "Mensagem sem texto"}
+                </p>
+                {conversation.unreadCount > 0 && (
+                  <span className="flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-[#25D366] px-1.5 text-[11px] font-semibold text-black">
+                    {conversation.unreadCount}
+                  </span>
+                )}
+              </div>
+              <div className="mt-3 flex items-center gap-2">
+                <span className="rounded-full border border-white/10 px-2 py-1 text-[11px] text-zinc-400">
+                  {conversation.statusLabel}
                 </span>
-              )}
-            </div>
-            <div className="mt-3 flex items-center gap-2">
-              <span className="rounded-full border border-white/10 px-2 py-1 text-[11px] text-zinc-400">
-                {conversation.statusLabel}
-              </span>
-              {conversation.lead && (
-                <span className="rounded-full border border-[#7C3AED]/30 bg-[#7C3AED]/10 px-2 py-1 text-[11px] text-[#C4B5FD]">
-                  Lead
-                </span>
-              )}
-              {!conversation.lead && conversation.existingLead && (
-                <span className="rounded-full border border-amber-400/30 bg-amber-400/10 px-2 py-1 text-[11px] text-amber-200">
-                  Lead existente
-                </span>
-              )}
-            </div>
-          </button>
-        ))}
+                {conversation.lead && (
+                  <span className="rounded-full border border-[#7C3AED]/30 bg-[#7C3AED]/10 px-2 py-1 text-[11px] text-[#C4B5FD]">
+                    Lead
+                  </span>
+                )}
+                {!conversation.lead && conversation.existingLead && (
+                  <span className="rounded-full border border-amber-400/30 bg-amber-400/10 px-2 py-1 text-[11px] text-amber-200">
+                    Lead existente
+                  </span>
+                )}
+              </div>
+            </button>
+          ))}
+        </div>
       </aside>
 
-      <section className="flex min-h-[520px] flex-col bg-black/10">
-        <div className="flex items-center justify-between gap-4 border-b border-white/10 p-4">
+      <section className="flex min-h-0 flex-col bg-black/10">
+        <div className="shrink-0 border-b border-white/10 p-4">
+          <div className="flex items-center justify-between gap-4">
           <div className="flex min-w-0 items-center gap-3">
             {selectedConversation && (
               <ContactAvatar
@@ -1843,8 +1846,9 @@ function Conversations({
               )}
             </div>
           )}
+          </div>
         </div>
-        <div className="flex-1 space-y-3 overflow-y-auto p-4">
+        <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4">
           {selectedConversation?.messages.map((message) => (
             <div
               className={`flex ${message.direction === "outbound" ? "justify-end" : "justify-start"}`}
@@ -1881,7 +1885,7 @@ function Conversations({
             </div>
           ))}
         </div>
-        <form className="border-t border-white/10 p-4" onSubmit={handleReply}>
+        <form className="shrink-0 border-t border-white/10 p-4" onSubmit={handleReply}>
           {actionError && <p className="mb-3 text-sm text-red-300">{actionError}</p>}
           <div className="mb-3 flex flex-wrap items-center gap-2">
             <select
