@@ -507,6 +507,7 @@ function Workspace({
   }
 
   async function scheduleFollowup(lead: Lead, nextFollowupAt: string) {
+    const now = new Date().toISOString();
     const task: Task = {
       id: newId("task"),
       lead_id: lead.id,
@@ -517,12 +518,12 @@ function Workspace({
       due_at: nextFollowupAt,
       status: "open",
       completed_at: null,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
+      created_at: now,
+      updated_at: now,
     };
     patchLeadOptimistic(lead.id, {
       next_followup_at: nextFollowupAt,
-      updated_at: new Date().toISOString(),
+      updated_at: now,
     });
     const interaction = makeInteraction(
       lead.id,
@@ -530,14 +531,28 @@ function Workspace({
       "followup_created",
     );
     addInteractionOptimistic(interaction);
-    setRemoteTasks((items) => [task, ...items.filter((item) => item.id !== task.id)]);
+    setRemoteTasks((items) => [
+      task,
+      ...items.map((item) =>
+        item.lead_id === lead.id && item.status === "open" && item.type === "followup"
+          ? { ...item, status: "canceled" as const, updated_at: now }
+          : item,
+      ),
+    ]);
     showToast("Follow-up agendado");
 
     if (supabase) {
-      const [{ error: leadError }, { error: interactionError }, { error: taskError }] = await Promise.all([
-        supabase.from("leads").update({ next_followup_at: nextFollowupAt }).eq("id", lead.id),
-        supabase.from("interactions").insert({ ...interaction, user_id: user.id }),
-        supabase.from("tasks").insert({
+      const saveTask = async () => {
+        const { error: cancelTaskError } = await supabase
+          .from("tasks")
+          .update({ status: "canceled", updated_at: now })
+          .eq("lead_id", lead.id)
+          .eq("type", "followup")
+          .eq("status", "open");
+
+        if (cancelTaskError) return { error: cancelTaskError };
+
+        return supabase.from("tasks").insert({
           lead_id: lead.id,
           user_id: user.id,
           type: task.type,
@@ -545,10 +560,61 @@ function Workspace({
           notes: task.notes,
           due_at: task.due_at,
           status: task.status,
-        }),
+        });
+      };
+      const [{ error: leadError }, { error: interactionError }, { error: taskError }] = await Promise.all([
+        supabase.from("leads").update({ next_followup_at: nextFollowupAt }).eq("id", lead.id),
+        supabase.from("interactions").insert({ ...interaction, user_id: user.id }),
+        saveTask(),
       ]);
       if (leadError || interactionError) showToast("Erro ao salvar follow-up");
       if (taskError) showToast("Follow-up salvo; aplique a migracao de tarefas no Supabase");
+    }
+  }
+
+  async function completeTask(task: Task, lead: Lead) {
+    const now = new Date().toISOString();
+    const previousTasks = remoteTasks;
+    const previousLeads = remoteLeads;
+    const previousInteractions = remoteInteractions;
+    const shouldClearFollowup = lead.next_followup_at === task.due_at;
+    const interaction = makeInteraction(
+      lead.id,
+      `Follow-up concluido: ${task.title}`,
+      "note",
+    );
+
+    setRemoteTasks((items) =>
+      items.map((item) =>
+        item.id === task.id
+          ? { ...item, status: "completed", completed_at: now, updated_at: now }
+          : item,
+      ),
+    );
+    if (shouldClearFollowup) {
+      patchLeadOptimistic(lead.id, { next_followup_at: null, updated_at: now });
+    }
+    addInteractionOptimistic(interaction);
+    showToast("Follow-up concluido");
+
+    if (supabase) {
+      const [{ error: taskError }, { error: leadError }, { error: interactionError }] = await Promise.all([
+        supabase
+          .from("tasks")
+          .update({ status: "completed", completed_at: now, updated_at: now })
+          .eq("id", task.id),
+        shouldClearFollowup
+          ? supabase.from("leads").update({ next_followup_at: null }).eq("id", lead.id)
+          : Promise.resolve({ error: null }),
+        supabase.from("interactions").insert({ ...interaction, user_id: user.id }),
+      ]);
+
+      if (taskError || leadError || interactionError) {
+        setRemoteTasks(previousTasks);
+        setRemoteLeads(previousLeads);
+        setRemoteInteractions(previousInteractions);
+        showToast("Erro ao concluir follow-up");
+      }
     }
   }
 
@@ -819,6 +885,7 @@ function Workspace({
                     interactions={interactions}
                     leads={leads}
                     tasks={tasks}
+                    onCompleteTask={completeTask}
                     onOpen={(lead) => setSelectedLeadId(lead.id)}
                     onQuickSchedule={(lead) => scheduleFollowup(lead, addDays(1))}
                     onQuickWhatsApp={(lead) => setSelectedLeadId(lead.id)}
@@ -915,6 +982,7 @@ function Dashboard({
   tasks,
   whatsappMessages,
   whatsappLogs,
+  onCompleteTask,
   onOpen,
   onQuickWhatsApp,
   onQuickSchedule,
@@ -925,6 +993,7 @@ function Dashboard({
   tasks: Task[];
   whatsappMessages: WhatsAppMessage[];
   whatsappLogs: WhatsAppLog[];
+  onCompleteTask: (task: Task, lead: Lead) => void;
   onOpen: (lead: Lead) => void;
   onQuickWhatsApp: (lead: Lead) => void;
   onQuickSchedule: (lead: Lead) => void;
@@ -1034,17 +1103,22 @@ function Dashboard({
             {todayAgenda.length === 0 && (
               <DashboardEmpty text="Nenhum follow-up vencido ou agendado para hoje." />
             )}
-            {todayAgenda.slice(0, 6).map((item) => (
-              <DashboardLeadRow
-                dueAt={item.dueAt}
-                key={item.task?.id ?? `${item.lead.id}-${item.dueAt}`}
-                lead={item.lead}
-                onOpen={() => onOpen(item.lead)}
-                onQuickSchedule={() => onQuickSchedule(item.lead)}
-                onQuickWhatsApp={() => onQuickWhatsApp(item.lead)}
-                title={item.title}
-              />
-            ))}
+            {todayAgenda.slice(0, 6).map((item) => {
+              const task = item.task;
+
+              return (
+                <DashboardLeadRow
+                  dueAt={item.dueAt}
+                  key={task?.id ?? `${item.lead.id}-${item.dueAt}`}
+                  lead={item.lead}
+                  onCompleteTask={task ? () => onCompleteTask(task, item.lead) : undefined}
+                  onOpen={() => onOpen(item.lead)}
+                  onQuickSchedule={() => onQuickSchedule(item.lead)}
+                  onQuickWhatsApp={() => onQuickWhatsApp(item.lead)}
+                  title={item.title}
+                />
+              );
+            })}
           </div>
         </section>
 
@@ -1168,6 +1242,7 @@ function DashboardLeadRow({
   lead,
   dueAt,
   title,
+  onCompleteTask,
   onOpen,
   onQuickWhatsApp,
   onQuickSchedule,
@@ -1175,6 +1250,7 @@ function DashboardLeadRow({
   lead: Lead;
   dueAt: string;
   title: string;
+  onCompleteTask?: () => void;
   onOpen: () => void;
   onQuickWhatsApp: () => void;
   onQuickSchedule: () => void;
@@ -1191,6 +1267,16 @@ function DashboardLeadRow({
           <div className={`mt-2 text-xs ${followup.tone}`}>{followup.text}</div>
         </button>
         <div className="flex flex-wrap gap-2">
+          {onCompleteTask && (
+            <button
+              className="flex h-9 items-center gap-2 rounded-lg border border-[#25D366]/25 bg-[#25D366]/10 px-3 text-xs text-[#9AF0B8] transition hover:bg-[#25D366]/20"
+              onClick={onCompleteTask}
+              type="button"
+            >
+              <CheckCheck className="h-4 w-4" />
+              Concluir
+            </button>
+          )}
           <button
             className="h-9 rounded-lg border border-white/10 px-3 text-xs text-zinc-300 transition hover:bg-white/[0.06]"
             onClick={onOpen}
