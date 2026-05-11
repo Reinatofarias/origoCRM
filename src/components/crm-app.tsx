@@ -24,7 +24,6 @@ import {
   Clock3,
   Edit3,
   ExternalLink,
-  Flame,
   Loader2,
   LogOut,
   MessageCircle,
@@ -35,12 +34,16 @@ import {
   Send,
   Settings,
   Sparkles,
+  Trash2,
   UserRound,
   Wifi,
   WifiOff,
 } from "lucide-react";
+import Image from "next/image";
+import { usePathname, useRouter } from "next/navigation";
 import { FormEvent, KeyboardEvent, MouseEvent, useCallback, useEffect, useMemo, useState } from "react";
 
+import { deleteLead as deleteLeadAction } from "@/actions/leads";
 import {
   saveWhatsAppConversationAsLead,
   sendWhatsAppConversationMessage,
@@ -54,6 +57,7 @@ import type {
   LeadInput,
   LeadStatus,
   MessageTemplate,
+  WhatsAppLog,
   WhatsAppMessage,
 } from "@/lib/types";
 import {
@@ -72,6 +76,11 @@ import {
 type View = "dashboard" | "pipeline" | "leads" | "templates" | "conversations" | "whatsapp" | "settings";
 type AuthUser = { id: string; email?: string };
 type Toast = { id: string; text: string };
+type InteractionInput = {
+  note: string;
+  type: NonNullable<Interaction["type"]>;
+  channel: Interaction["channel"];
+};
 
 const emptyLead: LeadInput = {
   name: "",
@@ -79,9 +88,35 @@ const emptyLead: LeadInput = {
   company: "",
   source: "",
   status: "novo",
+  estimated_value: null,
+  owner_name: "",
+  temperature: "morno",
+  outcome_reason: "",
+  sla_hours: 24,
 };
 
-export function CrmApp() {
+function BrandLogo({
+  compact = false,
+  className = "",
+}: {
+  compact?: boolean;
+  className?: string;
+}) {
+  return (
+    <div className={`relative overflow-hidden ${className}`}>
+      <Image
+        alt="OrigoCRM"
+        className="object-contain"
+        fill
+        preload={!compact}
+        sizes={compact ? "220px" : "(max-width: 768px) 92vw, 640px"}
+        src="/origocrm-logo.png"
+      />
+    </div>
+  );
+}
+
+export function CrmApp({ initialView = "dashboard" }: { initialView?: View } = {}) {
   const supabase = useMemo(() => createSupabaseClient(), []);
   const [user, setUser] = useState<AuthUser | null>(null);
   const [authLoading, setAuthLoading] = useState(isSupabaseConfigured);
@@ -109,8 +144,8 @@ export function CrmApp() {
 
   if (authLoading) {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-[#0B0B0F] text-white">
-        <Loader2 className="h-6 w-6 animate-spin text-[#7C3AED]" />
+      <main className="flex min-h-screen items-center justify-center bg-[#09090D] text-white">
+        <Loader2 className="h-6 w-6 animate-spin text-[#8B5CF6]" />
       </main>
     );
   }
@@ -119,13 +154,14 @@ export function CrmApp() {
 
   if (!user) return <AuthScreen />;
 
-  return <Workspace user={user} onLogout={() => setUser(null)} />;
+  return <Workspace initialView={initialView} user={user} onLogout={() => setUser(null)} />;
 }
 
 function MissingSupabaseConfig() {
   return (
-    <main className="flex min-h-screen items-center justify-center bg-[#0B0B0F] px-5 text-white">
+    <main className="flex min-h-screen items-center justify-center bg-[#09090D] px-5 text-white">
       <section className="w-full max-w-lg rounded-xl border border-white/10 bg-white/[0.04] p-6">
+        <BrandLogo className="mb-5 aspect-[3.13/1] w-full" />
         <h1 className="text-2xl font-semibold">Supabase nao configurado</h1>
         <p className="mt-3 text-sm leading-6 text-zinc-400">
           Configure as variaveis `NEXT_PUBLIC_SUPABASE_URL` e
@@ -161,20 +197,13 @@ function AuthScreen() {
   }
 
   return (
-    <main className="min-h-screen bg-[#0B0B0F] px-5 py-8 text-white">
-      <div className="mx-auto grid min-h-[calc(100vh-4rem)] max-w-6xl items-center gap-10 lg:grid-cols-[1.1fr_0.9fr]">
-        <section>
-          <div className="mb-8 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.03] px-3 py-1 text-sm text-zinc-300">
-            <Sparkles className="h-4 w-4 text-[#7C3AED]" />
-            Prospeccao via WhatsApp
-          </div>
-          <h1 className="max-w-2xl text-5xl font-semibold tracking-tight sm:text-7xl">ORIGOCRM</h1>
-          <p className="mt-5 max-w-xl text-lg leading-8 text-zinc-400">
-            Pipeline rapido, mensagens prontas e follow-up automatico para falar com mais leads.
-          </p>
+    <main className="min-h-screen bg-[#09090D] px-5 py-8 text-white">
+      <div className="mx-auto grid min-h-[calc(100vh-4rem)] max-w-6xl items-center gap-10 lg:grid-cols-[1fr_0.9fr]">
+        <section className="flex justify-center lg:justify-start">
+          <BrandLogo className="aspect-[3.13/1] w-[min(92vw,640px)]" />
         </section>
 
-        <section className="rounded-2xl border border-white/10 bg-white/[0.04] p-6 shadow-2xl shadow-[#7C3AED]/10 backdrop-blur">
+        <section className="rounded-2xl border border-[#8B5CF6]/20 bg-white/[0.04] p-6 shadow-2xl shadow-[#8B5CF6]/10 backdrop-blur">
           <div className="mb-6">
             <h2 className="text-2xl font-semibold">Entrar</h2>
             <p className="mt-2 text-sm text-zinc-400">
@@ -185,7 +214,7 @@ function AuthScreen() {
             <label className="block text-sm text-zinc-300">
               Email
               <input
-                className="mt-2 h-12 w-full rounded-lg border border-white/10 bg-black/30 px-4 text-white outline-none ring-[#7C3AED]/50 transition focus:border-[#7C3AED] focus:ring-4"
+                className="mt-2 h-12 w-full rounded-lg border border-white/10 bg-black/30 px-4 text-white outline-none ring-[#8B5CF6]/50 transition focus:border-[#8B5CF6] focus:ring-4"
                 onChange={(event) => setEmail(event.target.value)}
                 placeholder="email"
                 required
@@ -196,7 +225,7 @@ function AuthScreen() {
             <label className="block text-sm text-zinc-300">
               Senha
               <input
-                className="mt-2 h-12 w-full rounded-lg border border-white/10 bg-black/30 px-4 text-white outline-none ring-[#7C3AED]/50 transition focus:border-[#7C3AED] focus:ring-4"
+                className="mt-2 h-12 w-full rounded-lg border border-white/10 bg-black/30 px-4 text-white outline-none ring-[#8B5CF6]/50 transition focus:border-[#8B5CF6] focus:ring-4"
                 minLength={6}
                 onChange={(event) => setPassword(event.target.value)}
                 placeholder="minimo 6 caracteres"
@@ -206,7 +235,7 @@ function AuthScreen() {
               />
             </label>
             <button
-              className="flex h-12 w-full items-center justify-center gap-2 rounded-lg bg-[#7C3AED] px-4 font-medium transition hover:bg-[#6D28D9] disabled:opacity-60"
+              className="flex h-12 w-full items-center justify-center gap-2 rounded-lg bg-[#8B5CF6] px-4 font-medium transition hover:bg-[#8B5CF6] disabled:opacity-60"
               disabled={loading}
               type="submit"
             >
@@ -221,22 +250,54 @@ function AuthScreen() {
   );
 }
 
-function Workspace({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
+const viewPaths: Record<View, string> = {
+  dashboard: "/dashboard",
+  pipeline: "/pipeline",
+  leads: "/leads",
+  templates: "/templates",
+  conversations: "/conversations",
+  whatsapp: "/whatsapp",
+  settings: "/settings",
+};
+
+const pathViews: Record<string, View> = Object.fromEntries(
+  Object.entries(viewPaths).map(([view, path]) => [path, view]),
+) as Record<string, View>;
+
+function Workspace({
+  user,
+  onLogout,
+  initialView,
+}: {
+  user: AuthUser;
+  onLogout: () => void;
+  initialView: View;
+}) {
   const supabase = useMemo(() => createSupabaseClient(), []);
-  const [view, setView] = useState<View>("dashboard");
+  const router = useRouter();
+  const pathname = usePathname();
+  const view = pathViews[pathname] ?? initialView;
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState<LeadStatus | "all">("all");
+  const [temperatureFilter, setTemperatureFilter] = useState<Lead["temperature"] | "all">("all");
+  const [dateFilter, setDateFilter] = useState<"all" | "today" | "overdue">("all");
   const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null);
   const [leadFormOpen, setLeadFormOpen] = useState(false);
   const [editingLead, setEditingLead] = useState<Lead | null>(null);
+  const [leadPendingDelete, setLeadPendingDelete] = useState<Lead | null>(null);
   const [toast, setToast] = useState<Toast | null>(null);
   const [recentLeadId, setRecentLeadId] = useState<string | null>(null);
   const [remoteLeads, setRemoteLeads] = useState<Lead[]>([]);
   const [remoteTemplates, setRemoteTemplates] = useState<MessageTemplate[]>([]);
   const [remoteInteractions, setRemoteInteractions] = useState<Interaction[]>([]);
+  const [remoteWhatsAppMessages, setRemoteWhatsAppMessages] = useState<WhatsAppMessage[]>([]);
+  const [remoteWhatsAppLogs, setRemoteWhatsAppLogs] = useState<WhatsAppLog[]>([]);
   const leads = remoteLeads;
   const templates = remoteTemplates;
   const interactions = remoteInteractions;
+  const whatsappMessages = remoteWhatsAppMessages;
+  const whatsappLogs = remoteWhatsAppLogs;
   const priorityLeads = useMemo(() => getPriorityLeads(leads), [leads]);
 
   useEffect(() => {
@@ -247,13 +308,21 @@ function Workspace({ user, onLogout }: { user: AuthUser; onLogout: () => void })
       }
 
       setLoading(true);
-      const [leadResult, templateResult, interactionResult] = await Promise.all([
+      const [leadResult, templateResult, interactionResult, whatsappMessageResult, whatsappLogResult] = await Promise.all([
         supabase.from("leads").select("*").order("created_at", { ascending: false }),
         supabase.from("message_templates").select("*").order("created_at", { ascending: true }),
         supabase.from("interactions").select("*").order("created_at", { ascending: false }),
+        supabase.from("whatsapp_messages").select("*").order("created_at", { ascending: false }).limit(100),
+        supabase.from("whatsapp_logs").select("*").order("created_at", { ascending: false }).limit(30),
       ]);
 
-      if (leadResult.error || templateResult.error || interactionResult.error) {
+      if (
+        leadResult.error ||
+        templateResult.error ||
+        interactionResult.error ||
+        whatsappMessageResult.error ||
+        whatsappLogResult.error
+      ) {
         setToast({
           id: newId("toast"),
           text: "Nao foi possivel carregar os dados do Supabase",
@@ -263,6 +332,8 @@ function Workspace({ user, onLogout }: { user: AuthUser; onLogout: () => void })
       setRemoteLeads((leadResult.data as Lead[] | null) ?? []);
       setRemoteTemplates((templateResult.data as MessageTemplate[] | null) ?? []);
       setRemoteInteractions((interactionResult.data as Interaction[] | null) ?? []);
+      setRemoteWhatsAppMessages((whatsappMessageResult.data as WhatsAppMessage[] | null) ?? []);
+      setRemoteWhatsAppLogs((whatsappLogResult.data as WhatsAppLog[] | null) ?? []);
       setLoading(false);
     }
 
@@ -277,24 +348,68 @@ function Workspace({ user, onLogout }: { user: AuthUser; onLogout: () => void })
 
   const filteredLeads = useMemo(() => {
     const search = query.trim().toLowerCase();
-    if (!search) return leads;
     return leads.filter((lead) =>
-      [lead.name, lead.phone, lead.company, lead.source].some((value) =>
-        value.toLowerCase().includes(search),
-      ),
+      (!search ||
+        [lead.name, lead.phone, lead.company, lead.source, lead.owner_name ?? ""].some((value) =>
+          value.toLowerCase().includes(search),
+        )) &&
+      (statusFilter === "all" || lead.status === statusFilter) &&
+      (temperatureFilter === "all" || (lead.temperature ?? "morno") === temperatureFilter) &&
+      (dateFilter === "all" ||
+        (dateFilter === "today" && isLeadCreatedToday(lead)) ||
+        (dateFilter === "overdue" && isFollowupOverdue(lead))),
     );
-  }, [leads, query]);
+  }, [dateFilter, leads, query, statusFilter, temperatureFilter]);
 
   const selectedLead = leads.find((lead) => lead.id === selectedLeadId) ?? null;
-  const leadsToday = leads.filter((lead) => {
-    const created = new Date(lead.created_at);
-    const today = new Date();
-    return created.toDateString() === today.toDateString();
-  }).length;
-  const activeLeads = leads.filter((lead) => lead.status !== "fechado").length;
-
   function showToast(text: string) {
     setToast({ id: newId("toast"), text });
+  }
+
+  function exportFilteredLeads() {
+    const rows = filteredLeads.map((lead) => ({
+      nome: lead.name,
+      telefone: lead.phone,
+      empresa: lead.company,
+      origem: lead.source,
+      status: lead.status,
+      temperatura: lead.temperature ?? "morno",
+      valor_estimado: lead.estimated_value ?? "",
+      responsavel: lead.owner_name ?? "",
+      proximo_followup: lead.next_followup_at ?? "",
+      motivo: lead.outcome_reason ?? "",
+    }));
+    const header = Object.keys(rows[0] ?? {
+      nome: "",
+      telefone: "",
+      empresa: "",
+      origem: "",
+      status: "",
+      temperatura: "",
+      valor_estimado: "",
+      responsavel: "",
+      proximo_followup: "",
+      motivo: "",
+    });
+    const csv = [
+      header.join(","),
+      ...rows.map((row) =>
+        header
+          .map((key) => `"${String(row[key as keyof typeof row] ?? "").replaceAll('"', '""')}"`)
+          .join(","),
+      ),
+    ].join("\n");
+    const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `origo-leads-${new Date().toISOString().slice(0, 10)}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function navigateView(nextView: View) {
+    const nextPath = viewPaths[nextView];
+    if (pathname !== nextPath) router.push(nextPath);
   }
 
   function patchLeadOptimistic(id: string, patch: Partial<Lead>) {
@@ -340,6 +455,25 @@ function Workspace({ user, onLogout }: { user: AuthUser; onLogout: () => void })
     if (data) setRemoteLeads((items) => [data as Lead, ...items]);
   }
 
+  async function deleteLead(lead: Lead) {
+    const previousLeads = remoteLeads;
+    const previousInteractions = remoteInteractions;
+
+    setSelectedLeadId((current) => (current === lead.id ? null : current));
+    setLeadPendingDelete(null);
+    setRemoteLeads((items) => items.filter((item) => item.id !== lead.id));
+    setRemoteInteractions((items) => items.filter((item) => item.lead_id !== lead.id));
+    showToast("Lead removido");
+
+    const result = await deleteLeadAction(lead.id);
+
+    if (!result.success) {
+      setRemoteLeads(previousLeads);
+      setRemoteInteractions(previousInteractions);
+      showToast(result.error ?? "Erro ao excluir lead");
+    }
+  }
+
   async function updateLeadStatus(id: string, status: LeadStatus) {
     const before = leads.find((lead) => lead.id === id);
     patchLeadOptimistic(id, { status, updated_at: new Date().toISOString() });
@@ -355,10 +489,13 @@ function Workspace({ user, onLogout }: { user: AuthUser; onLogout: () => void })
   }
 
   async function scheduleFollowup(lead: Lead, nextFollowupAt: string) {
-    patchLeadOptimistic(lead.id, { next_followup_at: nextFollowupAt });
+    patchLeadOptimistic(lead.id, {
+      next_followup_at: nextFollowupAt,
+      updated_at: new Date().toISOString(),
+    });
     const interaction = makeInteraction(
       lead.id,
-      `Follow-up criado para ${new Date(nextFollowupAt).toLocaleDateString("pt-BR")}`,
+      `Follow-up criado para ${new Date(nextFollowupAt).toLocaleString("pt-BR")}`,
       "followup_created",
     );
     addInteractionOptimistic(interaction);
@@ -373,10 +510,50 @@ function Workspace({ user, onLogout }: { user: AuthUser; onLogout: () => void })
     }
   }
 
+  async function updateLeadTemperature(lead: Lead, temperature: NonNullable<Lead["temperature"]>) {
+    const previousLeads = remoteLeads;
+    const previousInteractions = remoteInteractions;
+    const now = new Date().toISOString();
+    const interaction: Interaction = {
+      id: newId("interaction"),
+      lead_id: lead.id,
+      note: `Temperatura alterada para ${temperature}`,
+      message: `Temperatura alterada para ${temperature}`,
+      type: "note",
+      channel: "other",
+      created_at: now,
+    };
+
+    patchLeadOptimistic(lead.id, { temperature, updated_at: now });
+    addInteractionOptimistic(interaction);
+    showToast("Temperatura atualizada");
+
+    if (supabase) {
+      const [{ error: leadError }, { error: interactionError }] = await Promise.all([
+        supabase.from("leads").update({ temperature }).eq("id", lead.id),
+        supabase.from("interactions").insert({ ...interaction, user_id: user.id }),
+      ]);
+
+      if (leadError || interactionError) {
+        setRemoteLeads(previousLeads);
+        setRemoteInteractions(previousInteractions);
+        showToast("Erro ao atualizar temperatura");
+      }
+    }
+  }
 
 
-  async function addInteraction(leadId: string, note: string) {
-    const interaction = makeInteraction(leadId, note, "note");
+
+  async function addInteraction(leadId: string, input: InteractionInput) {
+    const interaction: Interaction = {
+      id: newId("interaction"),
+      lead_id: leadId,
+      note: input.note,
+      message: input.note,
+      type: input.type,
+      channel: input.channel,
+      created_at: new Date().toISOString(),
+    };
     addInteractionOptimistic(interaction);
     if (supabase) {
       const { error } = await supabase.from("interactions").insert({ ...interaction, user_id: user.id });
@@ -442,19 +619,19 @@ function Workspace({ user, onLogout }: { user: AuthUser; onLogout: () => void })
   }
 
   return (
-    <main className="min-h-screen bg-[#0B0B0F] text-white">
+    <main className="min-h-screen bg-[#09090D] text-white">
       {toast && (
-        <div className="fixed right-4 top-4 z-[60] rounded-lg border border-[#7C3AED]/40 bg-[#17111f] px-4 py-3 text-sm shadow-2xl shadow-[#7C3AED]/30">
+        <div className="fixed right-4 top-4 z-[60] rounded-lg border border-[#8B5CF6]/40 bg-[#17111f] px-4 py-3 text-sm shadow-2xl shadow-[#8B5CF6]/30">
           {toast.text}
         </div>
       )}
 
       <div className="flex min-h-screen flex-col lg:flex-row">
-        <aside className="border-b border-white/10 bg-black/20 px-4 py-4 lg:w-64 lg:border-b-0 lg:border-r">
+        <aside className="border-b border-white/10 bg-black/25 px-4 py-4 lg:w-72 lg:border-b-0 lg:border-r">
           <div className="flex items-center justify-between gap-3 lg:block">
             <div>
-              <div className="text-xl font-semibold tracking-tight">ORIGOCRM</div>
-              <div className="mt-1 text-xs text-zinc-500">{user.email}</div>
+              <BrandLogo compact className="aspect-[3.13/1] w-56 max-w-full" />
+              <div className="mt-3 max-w-full truncate text-xs text-zinc-500">{user.email}</div>
             </div>
             <button
               className="rounded-lg border border-white/10 p-2 text-zinc-400 transition hover:bg-white/[0.06] hover:text-white lg:hidden"
@@ -477,11 +654,11 @@ function Workspace({ user, onLogout }: { user: AuthUser; onLogout: () => void })
               <button
                 className={`flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm transition lg:justify-start ${
                   view === key
-                    ? "bg-[#7C3AED] text-white"
+                    ? "bg-[#8B5CF6] text-white"
                     : "text-zinc-400 hover:bg-white/[0.06] hover:text-white"
                 }`}
                 key={key as string}
-                onClick={() => setView(key as View)}
+                onClick={() => navigateView(key as View)}
               >
                 <Icon className="h-4 w-4" />
                 <span className="hidden sm:inline">{label as string}</span>
@@ -513,7 +690,7 @@ function Workspace({ user, onLogout }: { user: AuthUser; onLogout: () => void })
                 {view === "conversations"
                   ? "Mensagens salvas pelo webhook da Evolution."
                   : view === "whatsapp"
-                    ? "Conecte a instancia ORIGOCRM pelo QR Code."
+                    ? "Conecte a instancia OrigoCRM pelo QR Code."
                     : view === "settings"
                       ? "Status das conexoes e proximos ajustes do CRM."
                       : "Cadencia continua: abrir, enviar, proximo."}
@@ -523,15 +700,59 @@ function Workspace({ user, onLogout }: { user: AuthUser; onLogout: () => void })
               <div className="relative">
                 <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" />
                 <input
-                  className="h-11 w-full rounded-lg border border-white/10 bg-white/[0.04] pl-9 pr-3 text-sm outline-none transition placeholder:text-zinc-600 focus:border-[#7C3AED] sm:w-72"
+                  className="h-11 w-full rounded-lg border border-white/10 bg-white/[0.04] pl-9 pr-3 text-sm outline-none transition placeholder:text-zinc-600 focus:border-[#8B5CF6] sm:w-72"
                   onChange={(event) => setQuery(event.target.value)}
                   placeholder="Buscar lead"
                   value={query}
                 />
               </div>
+              {(view === "pipeline" || view === "leads") && (
+                <>
+                  <select
+                    className="h-11 rounded-lg border border-white/10 bg-white/[0.04] px-3 text-sm text-zinc-300 outline-none transition focus:border-[#8B5CF6]"
+                    onChange={(event) => setStatusFilter(event.target.value as LeadStatus | "all")}
+                    value={statusFilter}
+                  >
+                    <option value="all">Todas etapas</option>
+                    {pipelineColumns.map((column) => (
+                      <option key={column.id} value={column.id}>
+                        {column.title}
+                      </option>
+                    ))}
+                  </select>
+                  <select
+                    className="h-11 rounded-lg border border-white/10 bg-white/[0.04] px-3 text-sm text-zinc-300 outline-none transition focus:border-[#8B5CF6]"
+                    onChange={(event) =>
+                      setTemperatureFilter(event.target.value as Lead["temperature"] | "all")
+                    }
+                    value={temperatureFilter ?? "all"}
+                  >
+                    <option value="all">Temperatura</option>
+                    <option value="frio">Frio</option>
+                    <option value="morno">Morno</option>
+                    <option value="quente">Quente</option>
+                  </select>
+                  <select
+                    className="h-11 rounded-lg border border-white/10 bg-white/[0.04] px-3 text-sm text-zinc-300 outline-none transition focus:border-[#8B5CF6]"
+                    onChange={(event) => setDateFilter(event.target.value as "all" | "today" | "overdue")}
+                    value={dateFilter}
+                  >
+                    <option value="all">Todas datas</option>
+                    <option value="today">Criados hoje</option>
+                    <option value="overdue">Follow-up atrasado</option>
+                  </select>
+                  <button
+                    className="h-11 rounded-lg border border-white/10 px-4 text-sm text-zinc-300 transition hover:bg-white/[0.06]"
+                    onClick={exportFilteredLeads}
+                    type="button"
+                  >
+                    Exportar CSV
+                  </button>
+                </>
+              )}
               {view !== "whatsapp" && view !== "settings" && (
                 <button
-                  className="flex h-11 items-center justify-center gap-2 rounded-lg bg-[#7C3AED] px-4 text-sm font-medium transition hover:bg-[#6D28D9]"
+                  className="flex h-11 items-center justify-center gap-2 rounded-lg bg-[#8B5CF6] px-4 text-sm font-medium transition hover:bg-[#7C3AED]"
                   onClick={() => {
                     setEditingLead(null);
                     setLeadFormOpen(true);
@@ -547,24 +768,27 @@ function Workspace({ user, onLogout }: { user: AuthUser; onLogout: () => void })
           <div className="p-5">
             {loading ? (
               <div className="flex h-96 items-center justify-center">
-                <Loader2 className="h-6 w-6 animate-spin text-[#7C3AED]" />
+                <Loader2 className="h-6 w-6 animate-spin text-[#8B5CF6]" />
               </div>
             ) : (
               <>
                 {view === "dashboard" && (
                   <Dashboard
-                    activeLeads={activeLeads}
+                    interactions={interactions}
                     leads={leads}
-                    leadsToday={leadsToday}
                     onOpen={(lead) => setSelectedLeadId(lead.id)}
-                    priorityLeads={priorityLeads}
-                    recentLeadId={recentLeadId}
+                    onQuickSchedule={(lead) => scheduleFollowup(lead, addDays(1))}
+                    onQuickWhatsApp={(lead) => setSelectedLeadId(lead.id)}
+                    onViewConversations={() => navigateView("conversations")}
+                    whatsappLogs={whatsappLogs}
+                    whatsappMessages={whatsappMessages}
                   />
                 )}
                 {view === "pipeline" && (
                   <Pipeline
                     leads={filteredLeads}
                     onLeadClick={(lead) => setSelectedLeadId(lead.id)}
+                    onLeadDelete={(lead) => setLeadPendingDelete(lead)}
                     onQuickSchedule={(lead) => scheduleFollowup(lead, addDays(1))}
                     onQuickWhatsApp={(lead) => setSelectedLeadId(lead.id)}
                     onStatusChange={updateLeadStatus}
@@ -578,6 +802,7 @@ function Workspace({ user, onLogout }: { user: AuthUser; onLogout: () => void })
                       setEditingLead(lead);
                       setLeadFormOpen(true);
                     }}
+                    onDelete={(lead) => setLeadPendingDelete(lead)}
                     onOpen={(lead) => setSelectedLeadId(lead.id)}
                   />
                 )}
@@ -593,7 +818,7 @@ function Workspace({ user, onLogout }: { user: AuthUser; onLogout: () => void })
                     }}
                     onOpenLead={(lead) => {
                       setSelectedLeadId(lead.id);
-                      setView("pipeline");
+                      navigateView("pipeline");
                     }}
                   />
                 )}
@@ -623,8 +848,18 @@ function Workspace({ user, onLogout }: { user: AuthUser; onLogout: () => void })
           lead={selectedLead}
           onAddInteraction={addInteraction}
           onClose={() => setSelectedLeadId(null)}
+          onDelete={(lead) => setLeadPendingDelete(lead)}
+          onScheduleFollowup={scheduleFollowup}
           onSend={sendWhatsApp}
+          onUpdateTemperature={updateLeadTemperature}
           templates={templates}
+        />
+      )}
+      {leadPendingDelete && (
+        <ConfirmDeleteLead
+          lead={leadPendingDelete}
+          onCancel={() => setLeadPendingDelete(null)}
+          onConfirm={() => void deleteLead(leadPendingDelete)}
         />
       )}
     </main>
@@ -632,61 +867,297 @@ function Workspace({ user, onLogout }: { user: AuthUser; onLogout: () => void })
 }
 
 function Dashboard({
-  leadsToday,
-  activeLeads,
   leads,
-  priorityLeads,
-  recentLeadId,
+  interactions,
+  whatsappMessages,
+  whatsappLogs,
   onOpen,
+  onQuickWhatsApp,
+  onQuickSchedule,
+  onViewConversations,
 }: {
-  leadsToday: number;
-  activeLeads: number;
   leads: Lead[];
-  priorityLeads: Lead[];
-  recentLeadId: string | null;
+  interactions: Interaction[];
+  whatsappMessages: WhatsAppMessage[];
+  whatsappLogs: WhatsAppLog[];
   onOpen: (lead: Lead) => void;
+  onQuickWhatsApp: (lead: Lead) => void;
+  onQuickSchedule: (lead: Lead) => void;
+  onViewConversations: () => void;
 }) {
+  const [dashboardNow] = useState(() => Date.now());
+  const todayAgenda = leads
+    .filter((lead) => lead.next_followup_at && lead.status !== "fechado" && isFollowupDue(lead))
+    .sort(
+      (a, b) =>
+        new Date(a.next_followup_at ?? 0).getTime() -
+        new Date(b.next_followup_at ?? 0).getTime(),
+    );
+  const overdueFollowups = leads.filter((lead) => isFollowupOverdue(lead));
+  const groupedMessages = groupMessagesByPhone(whatsappMessages);
+  const conversationsWithPendingReplies = groupedMessages.filter(
+    (items) => countPendingInboundMessages(items) > 0,
+  );
+  const unlinkedConversations = groupedMessages.filter((items) => {
+    const latestLeadId = [...items].reverse().find((message) => message.lead_id)?.lead_id;
+    const phone = items[0]?.phone_number ?? "";
+    return !latestLeadId && !findLeadByPhone(leads, phone);
+  });
+  const failedMessages = whatsappMessages.filter((message) => message.status === "failed");
+  const hotLeadsWithoutAction = leads.filter(
+    (lead) =>
+      (lead.temperature ?? "morno") === "quente" &&
+      !lead.next_followup_at &&
+      lead.status !== "fechado",
+  );
+  const recentInboundMessages = whatsappMessages
+    .filter((message) => message.direction === "inbound")
+    .slice(0, 5);
+  const recentErrors = whatsappLogs.filter((log) => log.status === "error").slice(0, 4);
+  const sevenDaysAgo = dashboardNow - 7 * 24 * 60 * 60 * 1000;
+  const created7d = leads.filter((lead) => new Date(lead.created_at).getTime() >= sevenDaysAgo).length;
+  const replies7d = whatsappMessages.filter(
+    (message) =>
+      message.direction === "inbound" && new Date(message.created_at).getTime() >= sevenDaysAgo,
+  ).length;
+  const contacts7d = interactions.filter(
+    (interaction) =>
+      interaction.type === "whatsapp_sent" &&
+      new Date(interaction.created_at).getTime() >= sevenDaysAgo,
+  ).length;
+  const responseRate = contacts7d ? Math.round((replies7d / contacts7d) * 100) : 0;
+  const openValue = leads
+    .filter((lead) => lead.status !== "fechado")
+    .reduce((total, lead) => total + (lead.estimated_value ?? 0), 0);
+  const stuckProposals = leads.filter(
+    (lead) =>
+      lead.status === "proposta" &&
+      dashboardNow - new Date(lead.updated_at).getTime() > 3 * 24 * 60 * 60 * 1000,
+  );
+  const noOwner = leads.filter((lead) => lead.status !== "fechado" && !lead.owner_name);
+  const noNextContact = leads.filter(
+    (lead) => lead.status !== "fechado" && lead.status !== "novo" && !lead.next_followup_at,
+  );
+
   return (
     <div className="space-y-5">
-      <div className="grid gap-4 md:grid-cols-3">
-        <Metric title="Leads do dia" value={leadsToday} />
-        <Metric title="Leads ativos" value={activeLeads} />
-        <Metric title="Fechados" value={leads.filter((lead) => lead.status === "fechado").length} />
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+        <DashboardSignal label="Follow-ups vencidos" value={overdueFollowups.length} tone="danger" />
+        <DashboardSignal label="Respostas novas" value={conversationsWithPendingReplies.length} tone="success" />
+        <DashboardSignal label="Conversas sem lead" value={unlinkedConversations.length} tone="warning" />
+        <DashboardSignal label="Mensagens com falha" value={failedMessages.length} tone="danger" />
+        <DashboardSignal label="Quentes sem acao" value={hotLeadsWithoutAction.length} tone="warning" />
       </div>
-      <div className="rounded-xl border border-[#7C3AED]/30 bg-[#7C3AED]/[0.06] p-5">
-        <div className="flex items-center justify-between gap-3">
-          <h2 className="flex items-center gap-2 text-lg font-semibold">
-            <Flame className="h-5 w-5 text-[#A78BFA]" />
-            Prioridade do dia
-          </h2>
-          <span className="rounded-full bg-white/[0.08] px-2 py-1 text-xs text-zinc-300">
-            {priorityLeads.length}
-          </span>
-        </div>
-        <div className="mt-4 grid gap-3 lg:grid-cols-3">
-          {(priorityLeads.length ? priorityLeads : leads.filter((lead) => lead.status !== "fechado"))
-            .slice(0, 6)
-            .map((lead) => (
-              <LeadCard
+
+      <div className="grid gap-5 xl:grid-cols-[1.35fr_0.85fr]">
+        <section className="rounded-lg border border-white/10 bg-white/[0.03] p-5">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <h2 className="text-lg font-semibold">Agenda de hoje</h2>
+              <p className="mt-1 text-sm text-zinc-500">Atrasados primeiro, depois proximos contatos do dia.</p>
+            </div>
+            <span className="rounded-full border border-white/10 px-2 py-1 text-xs text-zinc-400">
+              {todayAgenda.length}
+            </span>
+          </div>
+          <div className="mt-4 space-y-3">
+            {todayAgenda.length === 0 && (
+              <DashboardEmpty text="Nenhum follow-up vencido ou agendado para hoje." />
+            )}
+            {todayAgenda.slice(0, 6).map((lead) => (
+              <DashboardLeadRow
                 key={lead.id}
                 lead={lead}
-                onClick={() => onOpen(lead)}
-                highlighted={recentLeadId === lead.id}
+                onOpen={() => onOpen(lead)}
+                onQuickSchedule={() => onQuickSchedule(lead)}
+                onQuickWhatsApp={() => onQuickWhatsApp(lead)}
               />
             ))}
+          </div>
+        </section>
+
+        <section className="rounded-lg border border-white/10 bg-white/[0.03] p-5">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <h2 className="text-lg font-semibold">WhatsApp agora</h2>
+              <p className="mt-1 text-sm text-zinc-500">Sinais da inbox e da Evolution.</p>
+            </div>
+            <button
+              className="rounded-lg border border-white/10 px-3 py-2 text-xs text-zinc-300 transition hover:bg-white/[0.06]"
+              onClick={onViewConversations}
+              type="button"
+            >
+              Abrir inbox
+            </button>
+          </div>
+          <div className="mt-4 grid gap-3 sm:grid-cols-3 xl:grid-cols-1">
+            <DashboardMiniMetric label="Nao lidas" value={conversationsWithPendingReplies.length} />
+            <DashboardMiniMetric label="Sem lead" value={unlinkedConversations.length} />
+            <DashboardMiniMetric label="Erros Evolution" value={recentErrors.length} />
+          </div>
+          <div className="mt-4 space-y-3">
+            {recentInboundMessages.length === 0 && <DashboardEmpty text="Nenhuma mensagem recebida recentemente." />}
+            {recentInboundMessages.map((message) => (
+              <button
+                className="w-full rounded-lg border border-white/10 bg-black/20 p-3 text-left transition hover:bg-white/[0.05]"
+                key={message.id}
+                onClick={onViewConversations}
+                type="button"
+              >
+                <div className="flex items-center justify-between gap-3 text-xs text-zinc-500">
+                  <span>{message.contact_name || message.phone_number}</span>
+                  <span>
+                    {new Date(message.created_at).toLocaleTimeString("pt-BR", {
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })}
+                  </span>
+                </div>
+                <p className="mt-1 line-clamp-2 text-sm text-zinc-300">
+                  {message.content || "Mensagem sem texto"}
+                </p>
+              </button>
+            ))}
+          </div>
+        </section>
+      </div>
+
+      <div className="grid gap-5 xl:grid-cols-[1fr_1fr]">
+        <section className="rounded-lg border border-amber-400/20 bg-amber-500/[0.04] p-5">
+          <h2 className="flex items-center gap-2 text-lg font-semibold">
+            <AlertTriangle className="h-5 w-5 text-amber-300" />
+            Riscos comerciais
+          </h2>
+          <div className="mt-4 grid gap-3 md:grid-cols-2">
+            <RiskItem label="Leads quentes sem proxima acao" value={hotLeadsWithoutAction.length} />
+            <RiskItem label="Propostas paradas ha 3+ dias" value={stuckProposals.length} />
+            <RiskItem label="Leads sem responsavel" value={noOwner.length} />
+            <RiskItem label="Leads ativos sem proximo contato" value={noNextContact.length} />
+          </div>
+        </section>
+
+        <section className="rounded-lg border border-white/10 bg-white/[0.03] p-5">
+          <h2 className="text-lg font-semibold">Performance leve</h2>
+          <p className="mt-1 text-sm text-zinc-500">Ultimos 7 dias e carteira aberta.</p>
+          <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+            <DashboardMiniMetric label="Leads criados" value={created7d} />
+            <DashboardMiniMetric label="Respostas" value={replies7d} />
+            <DashboardMiniMetric label="Contatos" value={contacts7d} />
+            <DashboardMiniMetric label="Resposta" value={`${responseRate}%`} />
+            <DashboardMiniMetric label="Valor aberto" value={formatCurrency(openValue) ?? "R$ 0"} />
+          </div>
+        </section>
+      </div>
+    </div>
+  );
+}
+
+function DashboardSignal({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: number;
+  tone: "danger" | "success" | "warning";
+}) {
+  const toneClass = {
+    danger: "border-red-400/25 bg-red-500/10 text-red-200",
+    success: "border-[#25D366]/25 bg-[#25D366]/10 text-[#9AF0B8]",
+    warning: "border-amber-400/25 bg-amber-500/10 text-amber-100",
+  }[tone];
+
+  return (
+    <div className={`rounded-lg border p-4 ${toneClass}`}>
+      <div className="text-xs uppercase text-current/70">{label}</div>
+      <div className="mt-2 text-3xl font-semibold">{value}</div>
+    </div>
+  );
+}
+
+function DashboardMiniMetric({ label, value }: { label: string; value: string | number }) {
+  return (
+    <div className="rounded-lg border border-white/10 bg-black/20 p-3">
+      <div className="text-xs text-zinc-500">{label}</div>
+      <div className="mt-1 text-xl font-semibold text-zinc-100">{value}</div>
+    </div>
+  );
+}
+
+function DashboardEmpty({ text }: { text: string }) {
+  return (
+    <div className="rounded-lg border border-dashed border-white/10 p-4 text-sm text-zinc-500">
+      {text}
+    </div>
+  );
+}
+
+function DashboardLeadRow({
+  lead,
+  onOpen,
+  onQuickWhatsApp,
+  onQuickSchedule,
+}: {
+  lead: Lead;
+  onOpen: () => void;
+  onQuickWhatsApp: () => void;
+  onQuickSchedule: () => void;
+}) {
+  const followup = getFollowupLabel(lead);
+
+  return (
+    <div className="rounded-lg border border-white/10 bg-black/20 p-4">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+        <button className="min-w-0 text-left" onClick={onOpen} type="button">
+          <div className="font-medium text-white">{lead.name}</div>
+          <div className="mt-1 text-sm text-zinc-500">{lead.company || "Sem empresa"}</div>
+          <div className={`mt-2 text-xs ${followup.tone}`}>{followup.text}</div>
+        </button>
+        <div className="flex flex-wrap gap-2">
+          <button
+            className="h-9 rounded-lg border border-white/10 px-3 text-xs text-zinc-300 transition hover:bg-white/[0.06]"
+            onClick={onOpen}
+            type="button"
+          >
+            Abrir
+          </button>
+          <button
+            className="h-9 rounded-lg border border-[#25D366]/25 bg-[#25D366]/10 px-3 text-xs text-[#9AF0B8] transition hover:bg-[#25D366]/20"
+            onClick={onQuickWhatsApp}
+            type="button"
+          >
+            WhatsApp
+          </button>
+          <button
+            className="h-9 rounded-lg border border-[#8B5CF6]/25 bg-[#8B5CF6]/10 px-3 text-xs text-[#DDD6FE] transition hover:bg-[#8B5CF6]/20"
+            onClick={onQuickSchedule}
+            type="button"
+          >
+            Reagendar
+          </button>
         </div>
       </div>
     </div>
   );
 }
 
-function Metric({ title, value }: { title: string; value: number }) {
+function RiskItem({ label, value }: { label: string; value: number }) {
   return (
-    <div className="rounded-xl border border-white/10 bg-white/[0.04] p-5">
-      <div className="text-sm text-zinc-500">{title}</div>
-      <div className="mt-3 text-4xl font-semibold">{value}</div>
+    <div className="flex items-center justify-between gap-3 rounded-lg border border-white/10 bg-black/20 p-3">
+      <span className="text-sm text-zinc-300">{label}</span>
+      <span className="rounded-full bg-white/[0.08] px-2 py-1 text-xs text-zinc-100">{value}</span>
     </div>
   );
+}
+
+function groupMessagesByPhone(messages: WhatsAppMessage[]) {
+  const grouped = new Map<string, WhatsAppMessage[]>();
+  for (const message of [...messages].sort(
+    (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
+  )) {
+    grouped.set(message.phone_number, [...(grouped.get(message.phone_number) ?? []), message]);
+  }
+  return Array.from(grouped.values());
 }
 
 const pipelineMeta: Record<
@@ -699,7 +1170,7 @@ const pipelineMeta: Record<
     empty: "Nenhum lead novo",
   },
   contatado: {
-    accent: "bg-[#7C3AED]",
+    accent: "bg-[#8B5CF6]",
     description: "Contato iniciado e aguardando retorno",
     empty: "Nenhum contato em andamento",
   },
@@ -724,6 +1195,7 @@ function Pipeline({
   leads,
   recentLeadId,
   onLeadClick,
+  onLeadDelete,
   onStatusChange,
   onQuickWhatsApp,
   onQuickSchedule,
@@ -731,6 +1203,7 @@ function Pipeline({
   leads: Lead[];
   recentLeadId: string | null;
   onLeadClick: (lead: Lead) => void;
+  onLeadDelete: (lead: Lead) => void;
   onStatusChange: (id: string, status: LeadStatus) => void;
   onQuickWhatsApp: (lead: Lead) => void;
   onQuickSchedule: (lead: Lead) => void;
@@ -768,6 +1241,7 @@ function Pipeline({
                 id={column.id}
                 leads={columnLeads}
                 onLeadClick={onLeadClick}
+                onLeadDelete={onLeadDelete}
                 onQuickSchedule={onQuickSchedule}
                 onQuickWhatsApp={onQuickWhatsApp}
                 recentLeadId={recentLeadId}
@@ -790,7 +1264,7 @@ function PipelineOverview({ leads }: { leads: Lead[] }) {
 
   return (
     <div className="grid gap-3 md:grid-cols-4">
-      <PipelineStat label="Leads ativos" value={activeDeals.toString()} tone="border-[#7C3AED]/30" />
+      <PipelineStat label="Leads ativos" value={activeDeals.toString()} tone="border-[#8B5CF6]/30" />
       <PipelineStat label="Follow-up hoje" value={pendingFollowups.toString()} tone="border-amber-400/30" />
       <PipelineStat label="Responderam" value={replied.toString()} tone="border-[#25D366]/30" />
       <PipelineStat label="Taxa de fechamento" value={`${closeRate}%`} tone="border-white/10" />
@@ -813,6 +1287,15 @@ function isFollowupDue(lead: Lead) {
   const todayEnd = new Date();
   todayEnd.setHours(23, 59, 59, 999);
   return dueAt.getTime() <= todayEnd.getTime();
+}
+
+function isFollowupOverdue(lead: Lead) {
+  if (!lead.next_followup_at || lead.status === "fechado") return false;
+  return new Date(lead.next_followup_at).getTime() < startOfDay(new Date()).getTime();
+}
+
+function isLeadCreatedToday(lead: Lead) {
+  return startOfDay(new Date(lead.created_at)).getTime() === startOfDay(new Date()).getTime();
 }
 
 function getFollowupLabel(lead: Lead) {
@@ -879,12 +1362,39 @@ function getSourceLabel(source: string) {
   return source?.trim() || "Origem nao informada";
 }
 
+function formatCurrency(value?: number | null) {
+  if (!value) return null;
+  return value.toLocaleString("pt-BR", {
+    style: "currency",
+    currency: "BRL",
+    maximumFractionDigits: 0,
+  });
+}
+
+function getTemperatureLabel(temperature?: Lead["temperature"] | null) {
+  if (temperature === "quente") return { text: "Quente", tone: "border-red-400/25 bg-red-500/10 text-red-200" };
+  if (temperature === "frio") return { text: "Frio", tone: "border-sky-400/25 bg-sky-500/10 text-sky-200" };
+  return { text: "Morno", tone: "border-amber-400/25 bg-amber-500/10 text-amber-100" };
+}
+
+function getSlaLabel(lead: Lead) {
+  if (!lead.last_contact_at || !lead.sla_hours || lead.status === "fechado") return null;
+
+  const expiresAt = new Date(lead.last_contact_at).getTime() + lead.sla_hours * 60 * 60 * 1000;
+  const remainingHours = Math.ceil((expiresAt - Date.now()) / 3600000);
+
+  if (remainingHours < 0) return { text: "SLA vencido", tone: "text-red-300" };
+  if (remainingHours <= 4) return { text: `SLA ${remainingHours}h`, tone: "text-amber-300" };
+  return { text: `SLA ${remainingHours}h`, tone: "text-zinc-500" };
+}
+
 function PipelineColumn({
   id,
   title,
   leads,
   recentLeadId,
   onLeadClick,
+  onLeadDelete,
   onQuickWhatsApp,
   onQuickSchedule,
 }: {
@@ -893,6 +1403,7 @@ function PipelineColumn({
   leads: Lead[];
   recentLeadId: string | null;
   onLeadClick: (lead: Lead) => void;
+  onLeadDelete: (lead: Lead) => void;
   onQuickWhatsApp: (lead: Lead) => void;
   onQuickSchedule: (lead: Lead) => void;
 }) {
@@ -901,8 +1412,8 @@ function PipelineColumn({
 
   return (
     <div
-      className={`min-h-[560px] min-w-72 rounded-xl border p-3 transition ${
-        isOver ? "border-[#7C3AED] bg-[#7C3AED]/10" : "border-white/10 bg-white/[0.025]"
+      className={`min-h-[560px] min-w-72 rounded-lg border p-3 transition ${
+        isOver ? "border-[#8B5CF6] bg-[#8B5CF6]/10" : "border-white/10 bg-white/[0.025]"
       }`}
       ref={setNodeRef}
     >
@@ -930,6 +1441,7 @@ function PipelineColumn({
               highlighted={recentLeadId === lead.id}
               lead={lead}
               onClick={() => onLeadClick(lead)}
+              onDelete={() => onLeadDelete(lead)}
               onQuickSchedule={() => onQuickSchedule(lead)}
               onQuickWhatsApp={() => onQuickWhatsApp(lead)}
             />
@@ -949,12 +1461,14 @@ function SortableLeadCard({
   lead,
   highlighted,
   onClick,
+  onDelete,
   onQuickWhatsApp,
   onQuickSchedule,
 }: {
   lead: Lead;
   highlighted: boolean;
   onClick: () => void;
+  onDelete: () => void;
   onQuickWhatsApp: () => void;
   onQuickSchedule: () => void;
 }) {
@@ -974,6 +1488,7 @@ function SortableLeadCard({
         highlighted={highlighted}
         lead={lead}
         onClick={onClick}
+        onDelete={onDelete}
         onQuickSchedule={onQuickSchedule}
         onQuickWhatsApp={onQuickWhatsApp}
         showQuickActions
@@ -985,6 +1500,7 @@ function SortableLeadCard({
 function LeadCard({
   lead,
   onClick,
+  onDelete,
   dragging = false,
   highlighted = false,
   showQuickActions = false,
@@ -993,12 +1509,17 @@ function LeadCard({
 }: {
   lead: Lead;
   onClick: () => void;
+  onDelete?: () => void;
   dragging?: boolean;
   highlighted?: boolean;
   showQuickActions?: boolean;
   onQuickWhatsApp?: () => void;
   onQuickSchedule?: () => void;
 }) {
+  const temperature = getTemperatureLabel(lead.temperature);
+  const value = formatCurrency(lead.estimated_value);
+  const sla = getSlaLabel(lead);
+
   function quick(event: MouseEvent<HTMLButtonElement>, action?: () => void) {
     event.preventDefault();
     event.stopPropagation();
@@ -1007,8 +1528,8 @@ function LeadCard({
 
   return (
     <div
-      className={`group relative w-full rounded-lg border bg-[#111118] p-4 text-left shadow-lg shadow-black/10 transition hover:border-[#7C3AED]/60 ${
-        highlighted ? "border-[#7C3AED] shadow-[#7C3AED]/30" : "border-white/10"
+      className={`group relative w-full rounded-lg border bg-[#121119] p-3 text-left shadow-lg shadow-black/10 transition hover:border-[#8B5CF6]/60 ${
+        highlighted ? "border-[#8B5CF6] shadow-[#8B5CF6]/30" : "border-white/10"
       } ${dragging ? "opacity-60" : ""}`}
       onClick={onClick}
       onKeyDown={(event) => {
@@ -1028,6 +1549,14 @@ function LeadCard({
       </div>
 
       <div className="mt-4 flex flex-wrap gap-2">
+        <span className={`rounded-full border px-2 py-1 text-[11px] ${temperature.tone}`}>
+          {temperature.text}
+        </span>
+        {value && (
+          <span className="rounded-full border border-[#25D366]/25 bg-[#25D366]/10 px-2 py-1 text-[11px] text-[#9AF0B8]">
+            {value}
+          </span>
+        )}
         <span className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-1 text-[11px] text-zinc-400">
           {getSourceLabel(lead.source)}
         </span>
@@ -1043,10 +1572,14 @@ function LeadCard({
             {getFollowupLabel(lead).text}
           </span>
         </div>
-        <div className="text-zinc-500">{getLastContactLabel(lead)}</div>
+        <div className="flex items-center justify-between gap-3 text-zinc-500">
+          <span>{getLastContactLabel(lead)}</span>
+          {sla && <span className={sla.tone}>{sla.text}</span>}
+        </div>
+        {lead.owner_name && <div className="text-zinc-500">Resp. {lead.owner_name}</div>}
       </div>
       {showQuickActions && (
-        <div className="mt-4 grid grid-cols-3 gap-2 opacity-100 transition sm:opacity-0 sm:group-hover:opacity-100">
+        <div className="mt-4 grid grid-cols-4 gap-2 opacity-100 transition sm:opacity-0 sm:group-hover:opacity-100">
           <button
             className="flex h-8 items-center justify-center rounded-md bg-[#25D366] text-black"
             onClick={(event) => quick(event, onQuickWhatsApp)}
@@ -1071,6 +1604,16 @@ function LeadCard({
           >
             <Clock3 className="h-4 w-4" />
           </button>
+          {onDelete && (
+            <button
+              className="flex h-8 items-center justify-center rounded-md border border-red-400/20 bg-red-500/10 text-red-300 transition hover:bg-red-500/20"
+              onClick={(event) => quick(event, onDelete)}
+              title="Excluir lead"
+              type="button"
+            >
+              <Trash2 className="h-4 w-4" />
+            </button>
+          )}
         </div>
       )}
     </div>
@@ -1081,16 +1624,18 @@ function LeadList({
   leads,
   onOpen,
   onEdit,
+  onDelete,
 }: {
   leads: Lead[];
   onOpen: (lead: Lead) => void;
   onEdit: (lead: Lead) => void;
+  onDelete: (lead: Lead) => void;
 }) {
   return (
     <div className="overflow-hidden rounded-xl border border-white/10">
       {leads.map((lead) => (
         <div
-          className="grid gap-3 border-b border-white/10 bg-white/[0.025] p-4 last:border-b-0 md:grid-cols-[1fr_1fr_140px_96px]"
+          className="grid gap-3 border-b border-white/10 bg-white/[0.025] p-4 last:border-b-0 md:grid-cols-[1fr_1fr_140px_96px_44px]"
           key={lead.id}
         >
           <button className="text-left" onClick={() => onOpen(lead)}>
@@ -1108,6 +1653,14 @@ function LeadList({
           >
             <Edit3 className="h-4 w-4" />
             Editar
+          </button>
+          <button
+            className="flex h-10 items-center justify-center rounded-lg border border-red-400/20 bg-red-500/10 text-red-300 transition hover:bg-red-500/20"
+            onClick={() => onDelete(lead)}
+            title="Excluir lead"
+            type="button"
+          >
+            <Trash2 className="h-4 w-4" />
           </button>
         </div>
       ))}
@@ -1141,20 +1694,20 @@ function Templates({
           Variaveis: {"{{nome}}, {{empresa}}, {{telefone}}, {{origem}}"}
         </p>
         <input
-          className="mt-4 h-11 w-full rounded-lg border border-white/10 bg-black/30 px-3 text-sm outline-none transition focus:border-[#7C3AED]"
+          className="mt-4 h-11 w-full rounded-lg border border-white/10 bg-black/30 px-3 text-sm outline-none transition focus:border-[#8B5CF6]"
           onChange={(event) => setTitle(event.target.value)}
           placeholder="Titulo"
           required
           value={title}
         />
         <textarea
-          className="mt-3 min-h-36 w-full rounded-lg border border-white/10 bg-black/30 p-3 text-sm outline-none transition focus:border-[#7C3AED]"
+          className="mt-3 min-h-36 w-full rounded-lg border border-white/10 bg-black/30 p-3 text-sm outline-none transition focus:border-[#8B5CF6]"
           onChange={(event) => setBody(event.target.value)}
           placeholder="Mensagem"
           required
           value={body}
         />
-        <button className="mt-3 flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-[#7C3AED] text-sm font-medium">
+        <button className="mt-3 flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-[#8B5CF6] text-sm font-medium">
           <Plus className="h-4 w-4" />
           Salvar mensagem
         </button>
@@ -1174,11 +1727,15 @@ function Templates({
 function WhatsAppConnection() {
   const [loading, setLoading] = useState(true);
   const [qrLoading, setQrLoading] = useState(false);
+  const [disconnecting, setDisconnecting] = useState(false);
+  const [lastCheckedAt, setLastCheckedAt] = useState<string | null>(null);
   const [status, setStatus] = useState<{
     configured: boolean;
     connected: boolean;
     state: string;
     instanceName?: string;
+    phoneNumber?: string | null;
+    profileName?: string | null;
     error?: string;
   } | null>(null);
   const [qrCode, setQrCode] = useState<string | null>(null);
@@ -1195,6 +1752,7 @@ function WhatsAppConnection() {
         ...data,
         error: data.error ?? (!response.ok ? "Nao foi possivel consultar a Evolution" : undefined),
       });
+      setLastCheckedAt(new Date().toISOString());
     } catch {
       setStatus({
         configured: true,
@@ -1236,6 +1794,32 @@ function WhatsAppConnection() {
     }
   }
 
+  async function disconnectWhatsApp() {
+    setQrError("");
+    setDisconnecting(true);
+
+    try {
+      const response = await fetch("/api/evolution/disconnect", {
+        method: "DELETE",
+        cache: "no-store",
+      });
+      const data = await response.json();
+
+      if (!response.ok || data.error) {
+        setQrError(data.error ?? "Nao foi possivel desconectar o WhatsApp");
+        return;
+      }
+
+      setQrCode(null);
+      setPairingCode(null);
+      await loadStatus(false);
+    } catch {
+      setQrError("Nao foi possivel desconectar o WhatsApp");
+    } finally {
+      setDisconnecting(false);
+    }
+  }
+
   useEffect(() => {
     const initialLoad = window.setTimeout(() => {
       void loadStatus();
@@ -1252,15 +1836,20 @@ function WhatsAppConnection() {
   }, [loadStatus]);
 
   const connected = status?.connected;
+  const healthTone = connected
+    ? "border-[#25D366]/30 bg-[#25D366]/10 text-[#25D366]"
+    : status?.error
+      ? "border-red-400/30 bg-red-500/10 text-red-200"
+      : "border-amber-400/30 bg-amber-500/10 text-amber-100";
 
   return (
     <div className="grid gap-5 xl:grid-cols-[0.85fr_1.15fr]">
-      <section className="rounded-xl border border-white/10 bg-white/[0.035] p-5">
+      <section className="rounded-lg border border-white/10 bg-white/[0.035] p-5">
         <div className="flex items-center justify-between gap-3">
           <div>
             <h2 className="text-lg font-semibold">Instancia</h2>
             <p className="mt-1 text-sm text-zinc-500">
-              {status?.instanceName || "ORIGOCRM"}
+              {status?.instanceName || "OrigoCRM"}
             </p>
           </div>
           <div
@@ -1273,12 +1862,47 @@ function WhatsAppConnection() {
           </div>
         </div>
 
-        <div className="mt-5 rounded-lg border border-white/10 bg-black/20 p-4">
-          <div className="text-sm text-zinc-500">Estado tecnico</div>
-          <div className="mt-1 font-mono text-sm text-zinc-200">
-            {loading ? "consultando..." : status?.state ?? "indefinido"}
+        <div className="mt-5 grid gap-3">
+          <div className={`rounded-lg border p-4 ${healthTone}`}>
+            <div className="text-sm opacity-80">Saude da conexao</div>
+            <div className="mt-1 font-medium">
+              {connected ? "Operacional" : status?.error ? "Com erro" : "Aguardando conexao"}
+            </div>
           </div>
-          {status?.error && <p className="mt-3 text-sm text-red-300">{status.error}</p>}
+          <div className="rounded-lg border border-white/10 bg-black/20 p-4">
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div>
+                <div className="text-sm text-zinc-500">Estado tecnico</div>
+                <div className="mt-1 font-mono text-sm text-zinc-200">
+                  {loading ? "consultando..." : status?.state ?? "indefinido"}
+                </div>
+              </div>
+              <div>
+                <div className="text-sm text-zinc-500">Numero conectado</div>
+                <div className="mt-1 font-mono text-sm text-zinc-200">
+                  {status?.phoneNumber || "Nao informado pela Evolution"}
+                </div>
+              </div>
+              <div>
+                <div className="text-sm text-zinc-500">Perfil</div>
+                <div className="mt-1 text-sm text-zinc-200">
+                  {status?.profileName || "Nao informado"}
+                </div>
+              </div>
+              <div>
+                <div className="text-sm text-zinc-500">Ultima verificacao</div>
+                <div className="mt-1 text-sm text-zinc-200">
+                  {lastCheckedAt
+                    ? new Date(lastCheckedAt).toLocaleTimeString("pt-BR", {
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })
+                    : "Pendente"}
+                </div>
+              </div>
+            </div>
+            {status?.error && <p className="mt-3 text-sm text-red-300">{status.error}</p>}
+          </div>
         </div>
 
         <div className="mt-5 flex flex-col gap-3 sm:flex-row">
@@ -1290,21 +1914,31 @@ function WhatsAppConnection() {
             <RefreshCw className="h-4 w-4" />
             Atualizar
           </button>
-          {!connected && (
+          {connected ? (
             <button
-              className="flex h-11 items-center justify-center gap-2 rounded-lg bg-[#7C3AED] px-4 text-sm font-medium transition hover:bg-[#6D28D9] disabled:opacity-60"
+              className="flex h-11 items-center justify-center gap-2 rounded-lg border border-red-400/25 bg-red-500/10 px-4 text-sm font-medium text-red-200 transition hover:bg-red-500/20 disabled:opacity-60"
+              disabled={disconnecting}
+              onClick={disconnectWhatsApp}
+              type="button"
+            >
+              {disconnecting ? <Loader2 className="h-4 w-4 animate-spin" /> : <WifiOff className="h-4 w-4" />}
+              Desconectar
+            </button>
+          ) : (
+            <button
+              className="flex h-11 items-center justify-center gap-2 rounded-lg bg-[#8B5CF6] px-4 text-sm font-medium transition hover:bg-[#7C3AED] disabled:opacity-60"
               disabled={qrLoading}
               onClick={loadQrCode}
               type="button"
             >
               {qrLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <QrCode className="h-4 w-4" />}
-              Gerar QR Code
+              Reconectar / Gerar QR
             </button>
           )}
         </div>
       </section>
 
-      <section className="rounded-xl border border-white/10 bg-white/[0.035] p-5">
+      <section className="rounded-lg border border-white/10 bg-white/[0.035] p-5">
         <h2 className="text-lg font-semibold">Conectar WhatsApp</h2>
         <div className="mt-5 flex min-h-80 items-center justify-center rounded-lg border border-dashed border-white/10 bg-black/20 p-5">
           {connected ? (
@@ -1639,7 +2273,7 @@ function Conversations({
   if (loading) {
     return (
       <div className="flex h-96 items-center justify-center">
-        <Loader2 className="h-6 w-6 animate-spin text-[#7C3AED]" />
+        <Loader2 className="h-6 w-6 animate-spin text-[#8B5CF6]" />
       </div>
     );
   }
@@ -1657,7 +2291,7 @@ function Conversations({
   }
 
   return (
-    <div className="grid h-[calc(100vh-11rem)] min-h-[560px] overflow-hidden rounded-xl border border-white/10 bg-[#0D0D12] lg:grid-cols-[340px_1fr]">
+    <div className="grid h-[calc(100vh-11rem)] min-h-[560px] overflow-hidden rounded-xl border border-white/10 bg-[#101018] lg:grid-cols-[340px_1fr]">
       <aside className="flex min-h-0 flex-col border-b border-white/10 bg-white/[0.025] lg:border-b-0 lg:border-r">
         <div className="shrink-0 border-b border-white/10 p-4">
           <div className="flex items-center justify-between gap-3">
@@ -1707,7 +2341,7 @@ function Conversations({
               <button
                 className={`rounded-full border px-2.5 py-1 text-[11px] transition ${
                   statusFilter === tab.id
-                    ? "border-[#7C3AED] bg-[#7C3AED]/20 text-white"
+                    ? "border-[#8B5CF6] bg-[#8B5CF6]/20 text-white"
                     : "border-white/10 text-zinc-400 hover:bg-white/[0.06]"
                 }`}
                 key={tab.id}
@@ -1728,7 +2362,7 @@ function Conversations({
           {filteredConversations.map((conversation) => (
             <button
               className={`block w-full border-b border-white/10 p-4 text-left transition hover:bg-white/[0.05] ${
-                selectedConversation?.phone === conversation.phone ? "bg-[#7C3AED]/15" : ""
+                selectedConversation?.phone === conversation.phone ? "bg-[#8B5CF6]/15" : ""
               }`}
               key={conversation.phone}
               onClick={() => selectConversation(conversation.phone)}
@@ -1768,7 +2402,7 @@ function Conversations({
                   {conversation.statusLabel}
                 </span>
                 {conversation.lead && (
-                  <span className="rounded-full border border-[#7C3AED]/30 bg-[#7C3AED]/10 px-2 py-1 text-[11px] text-[#C4B5FD]">
+                  <span className="rounded-full border border-[#8B5CF6]/30 bg-[#8B5CF6]/10 px-2 py-1 text-[11px] text-[#C4B5FD]">
                     Lead
                   </span>
                 )}
@@ -1889,7 +2523,7 @@ function Conversations({
           {actionError && <p className="mb-3 text-sm text-red-300">{actionError}</p>}
           <div className="mb-3 flex flex-wrap items-center gap-2">
             <select
-              className="h-10 rounded-lg border border-white/10 bg-black/30 px-3 text-sm text-zinc-300 outline-none transition focus:border-[#7C3AED]"
+              className="h-10 rounded-lg border border-white/10 bg-black/30 px-3 text-sm text-zinc-300 outline-none transition focus:border-[#8B5CF6]"
               disabled={templates.length === 0}
               onChange={(event) => applyTemplate(event.target.value)}
               value=""
@@ -1907,13 +2541,13 @@ function Conversations({
             <span className="text-xs text-zinc-600">Enter envia, Shift+Enter quebra linha</span>
           </div>
           {replyText.includes("{{") && (
-            <div className="mb-3 rounded-lg border border-[#7C3AED]/20 bg-[#7C3AED]/10 p-3 text-xs text-zinc-300">
+            <div className="mb-3 rounded-lg border border-[#8B5CF6]/20 bg-[#8B5CF6]/10 p-3 text-xs text-zinc-300">
               Preview: {previewTemplateText(replyText, selectedConversation)}
             </div>
           )}
           <div className="flex flex-col gap-3 sm:flex-row">
             <textarea
-              className="min-h-12 flex-1 resize-none rounded-lg border border-white/10 bg-black/30 px-4 py-3 text-sm outline-none transition focus:border-[#7C3AED]"
+              className="min-h-12 flex-1 resize-none rounded-lg border border-white/10 bg-black/30 px-4 py-3 text-sm outline-none transition focus:border-[#8B5CF6]"
               maxLength={1024}
               onChange={(event) => setReplyText(event.target.value)}
               onKeyDown={handleReplyKeyDown}
@@ -2000,7 +2634,7 @@ function ConversationLeadModal({
         <label className="block text-sm text-zinc-300">
           Status inicial
           <select
-            className="mt-2 h-11 w-full rounded-lg border border-white/10 bg-[#101018] px-3 text-white outline-none transition focus:border-[#7C3AED]"
+            className="mt-2 h-11 w-full rounded-lg border border-white/10 bg-[#14131B] px-3 text-white outline-none transition focus:border-[#8B5CF6]"
             onChange={(event) => setStatus(event.target.value as LeadStatus)}
             value={status}
           >
@@ -2014,7 +2648,7 @@ function ConversationLeadModal({
         <label className="block text-sm text-zinc-300">
           Proximo follow-up
           <input
-            className="mt-2 h-11 w-full rounded-lg border border-white/10 bg-black/30 px-3 text-white outline-none transition focus:border-[#7C3AED]"
+            className="mt-2 h-11 w-full rounded-lg border border-white/10 bg-black/30 px-3 text-white outline-none transition focus:border-[#8B5CF6]"
             onChange={(event) => setNextFollowupAt(event.target.value)}
             type="datetime-local"
             value={nextFollowupAt}
@@ -2283,10 +2917,53 @@ function LeadForm({
         />
         <Input label="Empresa" onChange={(value) => updateField("company", value)} value={form.company} />
         <Input label="Origem" onChange={(value) => updateField("source", value)} value={form.source} />
+        <Input
+          label="Valor estimado"
+          onChange={(value) =>
+            updateField("estimated_value", value ? Number(value.replace(",", ".")) : null)
+          }
+          type="number"
+          value={form.estimated_value?.toString() ?? ""}
+        />
+        <Input
+          label="Responsavel"
+          onChange={(value) => updateField("owner_name", value)}
+          value={form.owner_name ?? ""}
+        />
+        <div className="grid gap-3 sm:grid-cols-2">
+          <label className="block text-sm text-zinc-300">
+            Temperatura
+            <select
+              className="mt-2 h-11 w-full rounded-lg border border-white/10 bg-[#14131B] px-3 text-white outline-none transition focus:border-[#8B5CF6]"
+              onChange={(event) =>
+                updateField("temperature", event.target.value as Lead["temperature"])
+              }
+              value={form.temperature ?? "morno"}
+            >
+              <option value="frio">Frio</option>
+              <option value="morno">Morno</option>
+              <option value="quente">Quente</option>
+            </select>
+          </label>
+          <Input
+            label="SLA de retorno (h)"
+            onChange={(value) => updateField("sla_hours", value ? Number(value) : null)}
+            type="number"
+            value={form.sla_hours?.toString() ?? ""}
+          />
+        </div>
+        <label className="block text-sm text-zinc-300">
+          Motivo de ganho/perda
+          <textarea
+            className="mt-2 min-h-20 w-full rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-white outline-none transition focus:border-[#8B5CF6]"
+            onChange={(event) => updateField("outcome_reason", event.target.value)}
+            value={form.outcome_reason ?? ""}
+          />
+        </label>
         <label className="block text-sm text-zinc-300">
           Status
           <select
-            className="mt-2 h-11 w-full rounded-lg border border-white/10 bg-[#101018] px-3 text-white outline-none transition focus:border-[#7C3AED]"
+            className="mt-2 h-11 w-full rounded-lg border border-white/10 bg-[#14131B] px-3 text-white outline-none transition focus:border-[#8B5CF6]"
             onChange={(event) => updateField("status", event.target.value as LeadStatus)}
             value={form.status}
           >
@@ -2297,7 +2974,7 @@ function LeadForm({
             ))}
           </select>
         </label>
-        <button className="flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-[#7C3AED] font-medium">
+        <button className="flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-[#8B5CF6] font-medium">
           <Check className="h-4 w-4" />
           Salvar
         </button>
@@ -2313,19 +2990,27 @@ function LeadDetails({
   onClose,
   onSend,
   onAddInteraction,
+  onScheduleFollowup,
+  onUpdateTemperature,
+  onDelete,
 }: {
   lead: Lead;
   templates: MessageTemplate[];
   interactions: Interaction[];
   onClose: () => void;
   onSend: (lead: Lead, message: string, nextFollowupAt: string) => void;
-  onAddInteraction: (leadId: string, note: string) => void;
+  onAddInteraction: (leadId: string, input: InteractionInput) => void;
+  onScheduleFollowup: (lead: Lead, nextFollowupAt: string) => void;
+  onUpdateTemperature: (lead: Lead, temperature: NonNullable<Lead["temperature"]>) => void;
+  onDelete: (lead: Lead) => void;
 }) {
   const automaticTemplate = pickTemplate(templates, lead);
   const [message, setMessage] = useState(automaticTemplate ? renderTemplate(automaticTemplate.body, lead) : "");
-  const [followupDays, setFollowupDays] = useState(1);
+  const [followupAt, setFollowupAt] = useState(() => toDateTimeLocal(lead.next_followup_at ?? addDays(1)));
   const [note, setNote] = useState("");
-  const nextFollowupAt = addDays(followupDays);
+  const [interactionType, setInteractionType] = useState<NonNullable<Interaction["type"]>>("note");
+  const [interactionChannel, setInteractionChannel] = useState<Interaction["channel"]>("whatsapp");
+  const nextFollowupAt = fromDateTimeLocal(followupAt);
 
   return (
     <Modal onClose={onClose} title={lead.name}>
@@ -2333,12 +3018,42 @@ function LeadDetails({
         <div className="rounded-lg border border-white/10 bg-white/[0.035] p-4">
           <div className="text-sm text-zinc-500">Empresa</div>
           <div className="mt-1">{lead.company || "Sem empresa"}</div>
+          <div className="mt-3 grid gap-3 sm:grid-cols-3">
+            <div>
+              <div className="text-sm text-zinc-500">Valor</div>
+              <div className="mt-1">{formatCurrency(lead.estimated_value) ?? "Nao informado"}</div>
+            </div>
+            <div>
+              <div className="text-sm text-zinc-500">Temperatura</div>
+              <select
+                className="mt-1 h-9 w-full rounded-lg border border-white/10 bg-[#14131B] px-2 text-sm capitalize text-zinc-100 outline-none transition focus:border-[#8B5CF6]"
+                onChange={(event) =>
+                  onUpdateTemperature(lead, event.target.value as NonNullable<Lead["temperature"]>)
+                }
+                value={lead.temperature ?? "morno"}
+              >
+                <option value="frio">Frio</option>
+                <option value="morno">Morno</option>
+                <option value="quente">Quente</option>
+              </select>
+            </div>
+            <div>
+              <div className="text-sm text-zinc-500">Responsavel</div>
+              <div className="mt-1">{lead.owner_name || "Nao definido"}</div>
+            </div>
+          </div>
           <div className="mt-3 text-sm text-zinc-500">Proximo contato atual</div>
           <div className="mt-1">
             {lead.next_followup_at
               ? new Date(lead.next_followup_at).toLocaleDateString("pt-BR")
               : "Nao agendado"}
           </div>
+          {lead.outcome_reason && (
+            <>
+              <div className="mt-3 text-sm text-zinc-500">Motivo de ganho/perda</div>
+              <div className="mt-1 text-sm text-zinc-300">{lead.outcome_reason}</div>
+            </>
+          )}
         </div>
 
         <div>
@@ -2346,37 +3061,66 @@ function LeadDetails({
             Mensagem pronta aplicada: {automaticTemplate?.title ?? "Nenhuma"}
           </div>
           <textarea
-            className="min-h-32 w-full rounded-lg border border-white/10 bg-black/30 p-3 text-sm text-zinc-200 outline-none transition focus:border-[#7C3AED]"
+            className="min-h-32 w-full rounded-lg border border-white/10 bg-black/30 p-3 text-sm text-zinc-200 outline-none transition focus:border-[#8B5CF6]"
             onChange={(event) => setMessage(event.target.value)}
             value={message}
           />
         </div>
 
-        <div>
-          <div className="mb-2 text-sm font-medium text-zinc-300">Proximo contato:</div>
-          <div className="grid grid-cols-3 gap-2">
+        <section className="rounded-lg border border-white/10 bg-white/[0.025] p-4">
+          <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h3 className="text-sm font-semibold text-zinc-100">Proximo contato</h3>
+              <p className="text-xs text-zinc-500">
+                Salve a agenda do lead sem precisar enviar mensagem.
+              </p>
+            </div>
+            <div className="text-xs text-zinc-500">
+              Atual:{" "}
+              {lead.next_followup_at
+                ? new Date(lead.next_followup_at).toLocaleString("pt-BR")
+                : "Nao agendado"}
+            </div>
+          </div>
+          <div className="mt-4 grid grid-cols-3 gap-2">
             {[1, 2, 5].map((days) => (
               <button
                 className={`h-10 rounded-lg border text-sm transition ${
-                  followupDays === days
-                    ? "border-[#7C3AED] bg-[#7C3AED] text-white"
+                  isSameFollowupDay(followupAt, days)
+                    ? "border-[#8B5CF6] bg-[#8B5CF6] text-white"
                     : "border-white/10 bg-white/[0.04] text-zinc-300 hover:bg-white/[0.07]"
                 }`}
                 key={days}
-                onClick={() => setFollowupDays(days)}
+                onClick={() => setFollowupAt(toDateTimeLocal(addDays(days)))}
                 type="button"
               >
                 {days === 1 ? "Amanha" : `${days} dias`}
               </button>
             ))}
           </div>
-          <div className="mt-2 text-xs text-zinc-500">
-            Sera salvo para {new Date(nextFollowupAt).toLocaleDateString("pt-BR")}.
+          <div className="mt-3 grid gap-3 sm:grid-cols-[1fr_auto]">
+            <input
+              className="h-11 rounded-lg border border-white/10 bg-black/30 px-3 text-sm text-zinc-100 outline-none transition focus:border-[#8B5CF6]"
+              onChange={(event) => setFollowupAt(event.target.value)}
+              type="datetime-local"
+              value={followupAt}
+            />
+            <button
+              className="flex h-11 items-center justify-center gap-2 rounded-lg border border-[#8B5CF6]/40 bg-[#8B5CF6]/15 px-4 text-sm font-medium text-[#DDD6FE] transition hover:bg-[#8B5CF6]/25"
+              onClick={() => onScheduleFollowup(lead, nextFollowupAt)}
+              type="button"
+            >
+              <Check className="h-4 w-4" />
+              Salvar follow-up
+            </button>
           </div>
-        </div>
+          <div className="mt-2 text-xs text-zinc-500">
+            Sera salvo para {new Date(nextFollowupAt).toLocaleString("pt-BR")}.
+          </div>
+        </section>
 
         <button
-          className="flex h-12 w-full items-center justify-center gap-2 rounded-lg bg-[#25D366] font-semibold text-black shadow-lg shadow-[#7C3AED]/20 transition hover:brightness-110 active:shadow-[#7C3AED]/60"
+          className="flex h-12 w-full items-center justify-center gap-2 rounded-lg bg-[#25D366] font-semibold text-black shadow-lg shadow-[#8B5CF6]/20 transition hover:brightness-110 active:shadow-[#8B5CF6]/60"
           onClick={() => onSend(lead, message, nextFollowupAt)}
           type="button"
         >
@@ -2386,25 +3130,68 @@ function LeadDetails({
         </button>
 
         <form
+          className="rounded-lg border border-white/10 bg-white/[0.025] p-4"
           onSubmit={(event) => {
             event.preventDefault();
-            onAddInteraction(lead.id, note);
+            onAddInteraction(lead.id, {
+              note,
+              type: interactionType,
+              channel: interactionChannel,
+            });
             setNote("");
           }}
         >
+          <div className="mb-3 flex flex-col gap-3 sm:flex-row">
+            <label className="flex-1 text-sm text-zinc-300">
+              Tipo de interacao
+              <select
+                className="mt-2 h-10 w-full rounded-lg border border-white/10 bg-[#14131B] px-3 text-sm text-zinc-100 outline-none transition focus:border-[#8B5CF6]"
+                onChange={(event) => setInteractionType(event.target.value as NonNullable<Interaction["type"]>)}
+                value={interactionType}
+              >
+                <option value="note">Nota</option>
+                <option value="whatsapp_sent">WhatsApp</option>
+                <option value="followup_created">Follow-up</option>
+                <option value="status_changed">Mudanca de status</option>
+              </select>
+            </label>
+            <label className="flex-1 text-sm text-zinc-300">
+              Canal
+              <select
+                className="mt-2 h-10 w-full rounded-lg border border-white/10 bg-[#14131B] px-3 text-sm text-zinc-100 outline-none transition focus:border-[#8B5CF6]"
+                onChange={(event) => setInteractionChannel(event.target.value as Interaction["channel"])}
+                value={interactionChannel}
+              >
+                <option value="whatsapp">WhatsApp</option>
+                <option value="call">Ligacao</option>
+                <option value="email">Email</option>
+                <option value="other">Outro</option>
+              </select>
+            </label>
+          </div>
           <textarea
-            className="min-h-24 w-full rounded-lg border border-white/10 bg-black/30 p-3 text-sm outline-none transition focus:border-[#7C3AED]"
+            className="min-h-24 w-full rounded-lg border border-white/10 bg-black/30 p-3 text-sm outline-none transition focus:border-[#8B5CF6]"
             onChange={(event) => setNote(event.target.value)}
-            placeholder="Registrar interacao"
+            placeholder="Resumo objetivo do contato, combinados, objecoes ou proximo passo"
             required
             value={note}
           />
-          <button className="mt-2 h-10 w-full rounded-lg border border-white/10 text-sm text-zinc-300 transition hover:bg-white/[0.06]">
+          <button className="mt-2 flex h-10 w-full items-center justify-center gap-2 rounded-lg border border-white/10 text-sm text-zinc-300 transition hover:bg-white/[0.06]">
+            <Edit3 className="h-4 w-4" />
             Registrar interacao
           </button>
         </form>
 
         <Timeline interactions={interactions} />
+
+        <button
+          className="flex h-11 w-full items-center justify-center gap-2 rounded-lg border border-red-400/25 bg-red-500/10 text-sm font-medium text-red-200 transition hover:bg-red-500/20"
+          onClick={() => onDelete(lead)}
+          type="button"
+        >
+          <Trash2 className="h-4 w-4" />
+          Excluir lead
+        </button>
       </div>
     </Modal>
   );
@@ -2417,17 +3204,38 @@ function Timeline({ interactions }: { interactions: Interaction[] }) {
 
   return (
     <div className="space-y-3">
-      <h3 className="font-medium">Timeline</h3>
-      {sorted.length === 0 && <p className="text-sm text-zinc-500">Nenhuma interacao ainda.</p>}
+      <div className="flex items-center justify-between gap-3">
+        <h3 className="font-medium">Historico comercial</h3>
+        <span className="rounded-full border border-white/10 px-2 py-1 text-xs text-zinc-500">
+          {sorted.length} registros
+        </span>
+      </div>
+      {sorted.length === 0 && (
+        <div className="rounded-lg border border-dashed border-white/10 p-4 text-sm text-zinc-500">
+          Nenhuma interacao registrada. Use notas objetivas para manter contexto, combinados e
+          proximos passos do lead.
+        </div>
+      )}
       {sorted.map((interaction) => (
         <div className="relative border-l border-white/10 pl-4" key={interaction.id}>
-          <div className="absolute -left-1.5 top-1.5 h-3 w-3 rounded-full bg-[#7C3AED]" />
-          <div className="rounded-lg border border-white/10 bg-white/[0.03] p-3">
-            <div className="flex items-center justify-between gap-3 text-xs text-zinc-500">
-              <span>{timelineTitle(interaction)}</span>
-              <span>{new Date(interaction.created_at).toLocaleString("pt-BR")}</span>
+          <div className={`absolute -left-1.5 top-2 h-3 w-3 rounded-full ${timelineTone(interaction)}`} />
+          <div className="rounded-lg border border-white/10 bg-white/[0.03] p-4">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="font-medium text-zinc-100">{timelineTitle(interaction)}</span>
+                  <span className="rounded-full border border-white/10 px-2 py-0.5 text-[11px] text-zinc-500">
+                    {interactionChannelLabel(interaction.channel)}
+                  </span>
+                </div>
+                <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-zinc-300">
+                  {interaction.message ?? interaction.note}
+                </p>
+              </div>
+              <span className="shrink-0 text-xs text-zinc-500">
+                {new Date(interaction.created_at).toLocaleString("pt-BR")}
+              </span>
             </div>
-            <p className="mt-1 text-sm text-zinc-300">{interaction.message ?? interaction.note}</p>
           </div>
         </div>
       ))}
@@ -2442,24 +3250,106 @@ function timelineTitle(interaction: Interaction) {
   return "Interacao registrada";
 }
 
+function timelineTone(interaction: Interaction) {
+  if (interaction.type === "whatsapp_sent") return "bg-[#25D366]";
+  if (interaction.type === "followup_created") return "bg-amber-300";
+  if (interaction.type === "status_changed") return "bg-[#8B5CF6]";
+  return "bg-zinc-400";
+}
+
+function interactionChannelLabel(channel: Interaction["channel"]) {
+  if (channel === "call") return "Ligacao";
+  if (channel === "email") return "Email";
+  if (channel === "other") return "Outro";
+  return "WhatsApp";
+}
+
+function toDateTimeLocal(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const offsetDate = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
+  return offsetDate.toISOString().slice(0, 16);
+}
+
+function fromDateTimeLocal(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return addDays(1);
+  return date.toISOString();
+}
+
+function isSameFollowupDay(value: string, days: number) {
+  const selected = new Date(value);
+  const quickDate = new Date(addDays(days));
+  return startOfDay(selected).getTime() === startOfDay(quickDate).getTime();
+}
+
+function ConfirmDeleteLead({
+  lead,
+  onCancel,
+  onConfirm,
+}: {
+  lead: Lead;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <Modal onClose={onCancel} title="Excluir lead">
+      <div className="space-y-4">
+        <div className="rounded-lg border border-red-400/25 bg-red-500/10 p-4">
+          <div className="flex items-start gap-3">
+            <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-red-300" />
+            <div>
+              <p className="font-medium text-red-100">Esta acao nao pode ser desfeita.</p>
+              <p className="mt-2 text-sm leading-6 text-red-100/80">
+                O lead {lead.name} e suas interacoes serao apagados. O historico do WhatsApp sera
+                preservado, mas ficara desvinculado deste lead.
+              </p>
+            </div>
+          </div>
+        </div>
+        <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+          <button
+            className="h-10 rounded-lg border border-white/10 px-4 text-sm text-zinc-300 transition hover:bg-white/[0.06]"
+            onClick={onCancel}
+            type="button"
+          >
+            Cancelar
+          </button>
+          <button
+            className="flex h-10 items-center justify-center gap-2 rounded-lg bg-red-500 px-4 text-sm font-semibold text-white transition hover:bg-red-400"
+            onClick={onConfirm}
+            type="button"
+          >
+            <Trash2 className="h-4 w-4" />
+            Excluir definitivamente
+          </button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 function Input({
   label,
   value,
   required,
   onChange,
+  type = "text",
 }: {
   label: string;
   value: string;
   required?: boolean;
   onChange: (value: string) => void;
+  type?: string;
 }) {
   return (
     <label className="block text-sm text-zinc-300">
       {label}
       <input
-        className="mt-2 h-11 w-full rounded-lg border border-white/10 bg-black/30 px-3 text-white outline-none transition focus:border-[#7C3AED]"
+        className="mt-2 h-11 w-full rounded-lg border border-white/10 bg-black/30 px-3 text-white outline-none transition focus:border-[#8B5CF6]"
         onChange={(event) => onChange(event.target.value)}
         required={required}
+        type={type}
         value={value}
       />
     </label>
@@ -2492,3 +3382,4 @@ function Modal({
     </div>
   );
 }
+

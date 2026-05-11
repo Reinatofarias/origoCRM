@@ -13,6 +13,11 @@ export type Lead = {
   company: string;
   source: string;
   status: LeadStatus;
+  estimated_value?: number | null;
+  owner_name?: string | null;
+  temperature?: "frio" | "morno" | "quente" | null;
+  outcome_reason?: string | null;
+  sla_hours?: number | null;
   last_contact_at?: string | null;
   next_followup_at?: string | null;
   created_at: string;
@@ -44,6 +49,11 @@ export type LeadInput = {
   company: string;
   source: string;
   status: LeadStatus;
+  estimated_value?: number | null;
+  owner_name?: string | null;
+  temperature?: "frio" | "morno" | "quente" | null;
+  outcome_reason?: string | null;
+  sla_hours?: number | null;
 };
 
 /**

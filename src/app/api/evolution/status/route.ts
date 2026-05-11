@@ -11,8 +11,13 @@ export const dynamic = "force-dynamic";
 
 type EvolutionConnectionStateResponse = {
   instance?: {
+    ownerJid?: string;
+    profileName?: string;
     state?: string;
   };
+  ownerJid?: string;
+  profileName?: string;
+  number?: string;
   state?: string;
 };
 
@@ -71,6 +76,15 @@ export async function GET() {
     configured: true,
     connected: ["open", "connected"].includes(state),
     instanceName: config.instanceName?.trim() ?? "",
+    phoneNumber: normalizeOwnerPhone(
+      response.data.instance?.ownerJid ?? response.data.ownerJid ?? response.data.number,
+    ),
+    profileName: response.data.instance?.profileName ?? response.data.profileName ?? null,
     state,
   });
+}
+
+function normalizeOwnerPhone(value?: string) {
+  if (!value) return null;
+  return value.split("@")[0]?.replace(/\D/g, "") || null;
 }

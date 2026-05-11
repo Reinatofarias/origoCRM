@@ -13,8 +13,12 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "ORIGOCRM",
-  description: "CRM de prospeccao via WhatsApp",
+  title: "OrigoCRM",
+  description: "Converse, organize e feche pelo WhatsApp",
+  icons: {
+    icon: "/origocrm-icon.png",
+    apple: "/origocrm-icon.png",
+  },
 };
 
 export default function RootLayout({

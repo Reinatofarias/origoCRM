@@ -1,8 +1,12 @@
 @import "tailwindcss";
 
 :root {
-  --background: #0b0b0f;
-  --foreground: #f8fafc;
+  --background: #09090d;
+  --foreground: #f5f3ff;
+  --brand-purple: #8b5cf6;
+  --brand-purple-strong: #6d28d9;
+  --brand-silver: #d9d6e7;
+  --brand-panel: #121119;
 }
 
 @theme inline {
@@ -20,10 +24,10 @@ body {
 
 * {
   scrollbar-width: thin;
-  scrollbar-color: #27272a #0b0b0f;
+  scrollbar-color: #3b2a63 #09090d;
 }
 
 ::selection {
-  background: #7c3aed;
+  background: #8b5cf6;
   color: white;
 }

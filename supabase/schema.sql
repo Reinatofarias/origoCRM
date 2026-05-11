@@ -8,6 +8,11 @@ create table if not exists public.leads (
   company text not null default '',
   source text not null default '',
   status text not null default 'novo' check (status in ('novo', 'contatado', 'respondeu', 'proposta', 'fechado')),
+  estimated_value numeric(12,2),
+  owner_name text not null default '',
+  temperature text not null default 'morno' check (temperature in ('frio', 'morno', 'quente')),
+  outcome_reason text not null default '',
+  sla_hours integer not null default 24,
   last_contact_at timestamptz,
   next_followup_at timestamptz,
   created_at timestamptz not null default now(),
@@ -17,6 +22,11 @@ create table if not exists public.leads (
 alter table public.leads add column if not exists last_contact_at timestamptz;
 alter table public.leads add column if not exists next_followup_at timestamptz;
 alter table public.leads add column if not exists updated_at timestamptz not null default now();
+alter table public.leads add column if not exists estimated_value numeric(12,2);
+alter table public.leads add column if not exists owner_name text not null default '';
+alter table public.leads add column if not exists temperature text not null default 'morno';
+alter table public.leads add column if not exists outcome_reason text not null default '';
+alter table public.leads add column if not exists sla_hours integer not null default 24;
 
 create table if not exists public.message_templates (
   id uuid primary key default gen_random_uuid(),

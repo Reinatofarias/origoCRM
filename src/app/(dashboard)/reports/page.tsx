@@ -1,11 +1,5 @@
-/**
- * Página de Relatórios
- */
+import { CrmApp } from "@/components/crm-app";
+
 export default function ReportsPage() {
-  return (
-    <div>
-      {/* TODO: Implementar dashboard de analytics */}
-      <h1>Relatórios</h1>
-    </div>
-  );
+  return <CrmApp initialView="dashboard" />;
 }

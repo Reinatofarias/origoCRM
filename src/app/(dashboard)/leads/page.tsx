@@ -1,11 +1,5 @@
-/**
- * Página de Leads
- */
+import { CrmApp } from "@/components/crm-app";
+
 export default function LeadsPage() {
-  return (
-    <div>
-      {/* TODO: Implementar listagem de leads */}
-      <h1>Leads</h1>
-    </div>
-  );
+  return <CrmApp initialView="leads" />;
 }
