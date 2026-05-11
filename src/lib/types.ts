@@ -43,6 +43,20 @@ export type Interaction = {
   created_at: string;
 };
 
+export type Task = {
+  id: string;
+  user_id?: string | null;
+  lead_id: string;
+  type: "followup" | "call" | "email" | "whatsapp" | "other";
+  title: string;
+  notes?: string | null;
+  due_at: string;
+  status: "open" | "completed" | "canceled";
+  completed_at?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 export type LeadInput = {
   name: string;
   phone: string;

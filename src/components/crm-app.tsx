@@ -57,6 +57,7 @@ import type {
   LeadInput,
   LeadStatus,
   MessageTemplate,
+  Task,
   WhatsAppLog,
   WhatsAppMessage,
 } from "@/lib/types";
@@ -76,6 +77,12 @@ import {
 type View = "dashboard" | "pipeline" | "leads" | "templates" | "conversations" | "whatsapp" | "settings";
 type AuthUser = { id: string; email?: string };
 type Toast = { id: string; text: string };
+type DashboardAgendaItem = {
+  lead: Lead;
+  dueAt: string;
+  title: string;
+  task?: Task;
+};
 type InteractionInput = {
   note: string;
   type: NonNullable<Interaction["type"]>;
@@ -291,11 +298,13 @@ function Workspace({
   const [remoteLeads, setRemoteLeads] = useState<Lead[]>([]);
   const [remoteTemplates, setRemoteTemplates] = useState<MessageTemplate[]>([]);
   const [remoteInteractions, setRemoteInteractions] = useState<Interaction[]>([]);
+  const [remoteTasks, setRemoteTasks] = useState<Task[]>([]);
   const [remoteWhatsAppMessages, setRemoteWhatsAppMessages] = useState<WhatsAppMessage[]>([]);
   const [remoteWhatsAppLogs, setRemoteWhatsAppLogs] = useState<WhatsAppLog[]>([]);
   const leads = remoteLeads;
   const templates = remoteTemplates;
   const interactions = remoteInteractions;
+  const tasks = remoteTasks;
   const whatsappMessages = remoteWhatsAppMessages;
   const whatsappLogs = remoteWhatsAppLogs;
   const priorityLeads = useMemo(() => getPriorityLeads(leads), [leads]);
@@ -308,10 +317,18 @@ function Workspace({
       }
 
       setLoading(true);
-      const [leadResult, templateResult, interactionResult, whatsappMessageResult, whatsappLogResult] = await Promise.all([
+      const [
+        leadResult,
+        templateResult,
+        interactionResult,
+        taskResult,
+        whatsappMessageResult,
+        whatsappLogResult,
+      ] = await Promise.all([
         supabase.from("leads").select("*").order("created_at", { ascending: false }),
         supabase.from("message_templates").select("*").order("created_at", { ascending: true }),
         supabase.from("interactions").select("*").order("created_at", { ascending: false }),
+        supabase.from("tasks").select("*").order("due_at", { ascending: true }).limit(200),
         supabase.from("whatsapp_messages").select("*").order("created_at", { ascending: false }).limit(100),
         supabase.from("whatsapp_logs").select("*").order("created_at", { ascending: false }).limit(30),
       ]);
@@ -332,6 +349,7 @@ function Workspace({
       setRemoteLeads((leadResult.data as Lead[] | null) ?? []);
       setRemoteTemplates((templateResult.data as MessageTemplate[] | null) ?? []);
       setRemoteInteractions((interactionResult.data as Interaction[] | null) ?? []);
+      setRemoteTasks((taskResult.data as Task[] | null) ?? []);
       setRemoteWhatsAppMessages((whatsappMessageResult.data as WhatsAppMessage[] | null) ?? []);
       setRemoteWhatsAppLogs((whatsappLogResult.data as WhatsAppLog[] | null) ?? []);
       setLoading(false);
@@ -489,6 +507,19 @@ function Workspace({
   }
 
   async function scheduleFollowup(lead: Lead, nextFollowupAt: string) {
+    const task: Task = {
+      id: newId("task"),
+      lead_id: lead.id,
+      user_id: user.id,
+      type: "followup",
+      title: `Follow-up com ${lead.name}`,
+      notes: null,
+      due_at: nextFollowupAt,
+      status: "open",
+      completed_at: null,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
     patchLeadOptimistic(lead.id, {
       next_followup_at: nextFollowupAt,
       updated_at: new Date().toISOString(),
@@ -499,14 +530,25 @@ function Workspace({
       "followup_created",
     );
     addInteractionOptimistic(interaction);
+    setRemoteTasks((items) => [task, ...items.filter((item) => item.id !== task.id)]);
     showToast("Follow-up agendado");
 
     if (supabase) {
-      const [{ error: leadError }, { error: interactionError }] = await Promise.all([
+      const [{ error: leadError }, { error: interactionError }, { error: taskError }] = await Promise.all([
         supabase.from("leads").update({ next_followup_at: nextFollowupAt }).eq("id", lead.id),
         supabase.from("interactions").insert({ ...interaction, user_id: user.id }),
+        supabase.from("tasks").insert({
+          lead_id: lead.id,
+          user_id: user.id,
+          type: task.type,
+          title: task.title,
+          notes: task.notes,
+          due_at: task.due_at,
+          status: task.status,
+        }),
       ]);
       if (leadError || interactionError) showToast("Erro ao salvar follow-up");
+      if (taskError) showToast("Follow-up salvo; aplique a migracao de tarefas no Supabase");
     }
   }
 
@@ -776,6 +818,7 @@ function Workspace({
                   <Dashboard
                     interactions={interactions}
                     leads={leads}
+                    tasks={tasks}
                     onOpen={(lead) => setSelectedLeadId(lead.id)}
                     onQuickSchedule={(lead) => scheduleFollowup(lead, addDays(1))}
                     onQuickWhatsApp={(lead) => setSelectedLeadId(lead.id)}
@@ -869,6 +912,7 @@ function Workspace({
 function Dashboard({
   leads,
   interactions,
+  tasks,
   whatsappMessages,
   whatsappLogs,
   onOpen,
@@ -878,6 +922,7 @@ function Dashboard({
 }: {
   leads: Lead[];
   interactions: Interaction[];
+  tasks: Task[];
   whatsappMessages: WhatsAppMessage[];
   whatsappLogs: WhatsAppLog[];
   onOpen: (lead: Lead) => void;
@@ -886,14 +931,39 @@ function Dashboard({
   onViewConversations: () => void;
 }) {
   const [dashboardNow] = useState(() => Date.now());
-  const todayAgenda = leads
-    .filter((lead) => lead.next_followup_at && lead.status !== "fechado" && isFollowupDue(lead))
-    .sort(
-      (a, b) =>
-        new Date(a.next_followup_at ?? 0).getTime() -
-        new Date(b.next_followup_at ?? 0).getTime(),
-    );
-  const overdueFollowups = leads.filter((lead) => isFollowupOverdue(lead));
+  const taskAgenda: DashboardAgendaItem[] = tasks
+    .filter((task) => task.status === "open" && isTaskDueToday(task))
+    .map((task) => ({
+      task,
+      lead: leads.find((lead) => lead.id === task.lead_id) ?? null,
+      dueAt: task.due_at,
+      title: task.title,
+    }))
+    .filter((item): item is DashboardAgendaItem & { task: Task } => Boolean(item.lead));
+  const legacyAgenda: DashboardAgendaItem[] = leads
+    .filter(
+      (lead) =>
+        lead.next_followup_at &&
+        lead.status !== "fechado" &&
+        isFollowupDue(lead) &&
+        !taskAgenda.some((item) => item.lead.id === lead.id),
+    )
+    .map((lead) => ({
+      lead,
+      dueAt: lead.next_followup_at ?? "",
+      title: "Follow-up pendente",
+    }));
+  const todayAgenda = [...taskAgenda, ...legacyAgenda].sort(
+    (a, b) => new Date(a.dueAt).getTime() - new Date(b.dueAt).getTime(),
+  );
+  const overdueFollowups = [
+    ...tasks.filter((task) => task.status === "open" && isTaskOverdue(task)),
+    ...leads.filter(
+      (lead) =>
+        isFollowupOverdue(lead) &&
+        !tasks.some((task) => task.status === "open" && task.lead_id === lead.id),
+    ),
+  ];
   const groupedMessages = groupMessagesByPhone(whatsappMessages);
   const conversationsWithPendingReplies = groupedMessages.filter(
     (items) => countPendingInboundMessages(items) > 0,
@@ -964,13 +1034,15 @@ function Dashboard({
             {todayAgenda.length === 0 && (
               <DashboardEmpty text="Nenhum follow-up vencido ou agendado para hoje." />
             )}
-            {todayAgenda.slice(0, 6).map((lead) => (
+            {todayAgenda.slice(0, 6).map((item) => (
               <DashboardLeadRow
-                key={lead.id}
-                lead={lead}
-                onOpen={() => onOpen(lead)}
-                onQuickSchedule={() => onQuickSchedule(lead)}
-                onQuickWhatsApp={() => onQuickWhatsApp(lead)}
+                dueAt={item.dueAt}
+                key={item.task?.id ?? `${item.lead.id}-${item.dueAt}`}
+                lead={item.lead}
+                onOpen={() => onOpen(item.lead)}
+                onQuickSchedule={() => onQuickSchedule(item.lead)}
+                onQuickWhatsApp={() => onQuickWhatsApp(item.lead)}
+                title={item.title}
               />
             ))}
           </div>
@@ -1094,16 +1166,20 @@ function DashboardEmpty({ text }: { text: string }) {
 
 function DashboardLeadRow({
   lead,
+  dueAt,
+  title,
   onOpen,
   onQuickWhatsApp,
   onQuickSchedule,
 }: {
   lead: Lead;
+  dueAt: string;
+  title: string;
   onOpen: () => void;
   onQuickWhatsApp: () => void;
   onQuickSchedule: () => void;
 }) {
-  const followup = getFollowupLabel(lead);
+  const followup = getDueAtLabel(dueAt);
 
   return (
     <div className="rounded-lg border border-white/10 bg-black/20 p-4">
@@ -1111,6 +1187,7 @@ function DashboardLeadRow({
         <button className="min-w-0 text-left" onClick={onOpen} type="button">
           <div className="font-medium text-white">{lead.name}</div>
           <div className="mt-1 text-sm text-zinc-500">{lead.company || "Sem empresa"}</div>
+          <div className="mt-2 text-sm text-zinc-300">{title}</div>
           <div className={`mt-2 text-xs ${followup.tone}`}>{followup.text}</div>
         </button>
         <div className="flex flex-wrap gap-2">
@@ -1294,6 +1371,20 @@ function isFollowupOverdue(lead: Lead) {
   return new Date(lead.next_followup_at).getTime() < startOfDay(new Date()).getTime();
 }
 
+function isTaskDueToday(task: Task) {
+  const dueAt = new Date(task.due_at);
+  if (Number.isNaN(dueAt.getTime())) return false;
+  const todayEnd = new Date();
+  todayEnd.setHours(23, 59, 59, 999);
+  return dueAt.getTime() <= todayEnd.getTime();
+}
+
+function isTaskOverdue(task: Task) {
+  const dueAt = new Date(task.due_at);
+  if (Number.isNaN(dueAt.getTime())) return false;
+  return dueAt.getTime() < startOfDay(new Date()).getTime();
+}
+
 function isLeadCreatedToday(lead: Lead) {
   return startOfDay(new Date(lead.created_at)).getTime() === startOfDay(new Date()).getTime();
 }
@@ -1312,6 +1403,25 @@ function getFollowupLabel(lead: Lead) {
   if (diffDays === 1) return { text: "Follow-up amanha", tone: "text-[#25D366]" };
   return {
     text: `Follow-up ${dueAt.toLocaleDateString("pt-BR")}`,
+    tone: "text-zinc-400",
+  };
+}
+
+function getDueAtLabel(value: string) {
+  const dueAt = new Date(value);
+  if (Number.isNaN(dueAt.getTime())) return { text: "Data invalida", tone: "text-red-300" };
+
+  const today = new Date();
+  const diffDays = Math.ceil(
+    (startOfDay(dueAt).getTime() - startOfDay(today).getTime()) / 86400000,
+  );
+  const time = dueAt.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+
+  if (diffDays < 0) return { text: `Atrasado desde ${dueAt.toLocaleDateString("pt-BR")}`, tone: "text-red-300" };
+  if (diffDays === 0) return { text: `Hoje as ${time}`, tone: "text-amber-300" };
+  if (diffDays === 1) return { text: `Amanha as ${time}`, tone: "text-[#25D366]" };
+  return {
+    text: `${dueAt.toLocaleDateString("pt-BR")} as ${time}`,
     tone: "text-zinc-400",
   };
 }
