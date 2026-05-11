@@ -16,7 +16,11 @@ export const metadata: Metadata = {
   title: "OrigoCRM",
   description: "Converse, organize e feche pelo WhatsApp",
   icons: {
-    icon: "/origocrm-icon.png",
+    icon: [
+      { url: "/icon.png", type: "image/png" },
+      { url: "/favicon.ico", sizes: "any" },
+    ],
+    shortcut: "/favicon.ico",
     apple: "/origocrm-icon.png",
   },
 };
