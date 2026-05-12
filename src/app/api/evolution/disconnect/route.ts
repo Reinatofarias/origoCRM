@@ -17,12 +17,13 @@ async function requireUser() {
     data: { user },
   } = await supabase.auth.getUser();
 
-  return user ?? null;
+  if (!user) return null;
+  return { supabase, user };
 }
 
 export async function DELETE() {
-  const user = await requireUser();
-  if (!user) {
+  const auth = await requireUser();
+  if (!auth) {
     return NextResponse.json({ configured: false, error: "Nao autenticado" }, { status: 401 });
   }
 
@@ -50,6 +51,14 @@ export async function DELETE() {
       { status: response.status >= 400 ? response.status : 502 },
     );
   }
+
+  await auth.supabase.from("audit_logs").insert({
+    user_id: auth.user.id,
+    entity_type: "whatsapp",
+    action: "whatsapp.disconnected",
+    summary: "WhatsApp desconectado",
+    metadata: { instanceName: config.instanceName?.trim() ?? "" },
+  });
 
   return NextResponse.json({
     configured: true,

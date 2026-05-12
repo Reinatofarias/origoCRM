@@ -110,6 +110,17 @@ create table if not exists public.whatsapp_logs (
   created_at timestamptz not null default now()
 );
 
+create table if not exists public.audit_logs (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  entity_type text not null check (entity_type in ('lead', 'task', 'template', 'whatsapp', 'system')),
+  entity_id uuid,
+  action text not null,
+  summary text not null,
+  metadata jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now()
+);
+
 alter table public.whatsapp_messages alter column lead_id drop not null;
 alter table public.whatsapp_messages add column if not exists remote_jid text;
 alter table public.whatsapp_messages add column if not exists contact_name text;
@@ -126,6 +137,8 @@ create unique index if not exists whatsapp_messages_message_id_idx on public.wha
 create index if not exists whatsapp_conversations_user_id_updated_at_idx on public.whatsapp_conversations(user_id, updated_at desc);
 create index if not exists whatsapp_conversations_user_id_status_idx on public.whatsapp_conversations(user_id, status);
 create index if not exists whatsapp_logs_user_id_created_at_idx on public.whatsapp_logs(user_id, created_at desc);
+create index if not exists audit_logs_user_id_created_at_idx on public.audit_logs(user_id, created_at desc);
+create index if not exists audit_logs_user_id_entity_idx on public.audit_logs(user_id, entity_type, entity_id);
 
 alter table public.leads enable row level security;
 alter table public.message_templates enable row level security;
@@ -134,6 +147,7 @@ alter table public.tasks enable row level security;
 alter table public.whatsapp_messages enable row level security;
 alter table public.whatsapp_conversations enable row level security;
 alter table public.whatsapp_logs enable row level security;
+alter table public.audit_logs enable row level security;
 
 drop policy if exists "Users can manage own leads" on public.leads;
 create policy "Users can manage own leads"
@@ -175,6 +189,16 @@ drop policy if exists "Users can read own whatsapp logs" on public.whatsapp_logs
 create policy "Users can read own whatsapp logs"
   on public.whatsapp_logs for select
   using (auth.uid() = user_id);
+
+drop policy if exists "Users can read own audit logs" on public.audit_logs;
+create policy "Users can read own audit logs"
+  on public.audit_logs for select
+  using (auth.uid() = user_id);
+
+drop policy if exists "Users can create own audit logs" on public.audit_logs;
+create policy "Users can create own audit logs"
+  on public.audit_logs for insert
+  with check (auth.uid() = user_id);
 
 create or replace function public.set_updated_at()
 returns trigger as $$

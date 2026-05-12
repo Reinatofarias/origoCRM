@@ -55,6 +55,7 @@ import {
 import { pipelineColumns } from "@/lib/constants";
 import { createSupabaseClient, isSupabaseConfigured } from "@/lib/db";
 import type {
+  AuditLog,
   Interaction,
   Lead,
   LeadInput,
@@ -64,6 +65,7 @@ import type {
   WhatsAppLog,
   WhatsAppMessage,
 } from "@/lib/types";
+import { getViewSubtitle, pathViews, type View, viewPaths, viewTitles } from "@/lib/navigation";
 import {
   newId,
   normalizePhone,
@@ -77,7 +79,6 @@ import {
   getNextLeadAfterSend,
 } from "@/lib/services/leads";
 
-type View = "dashboard" | "pipeline" | "tasks" | "leads" | "templates" | "conversations" | "whatsapp" | "settings";
 type AuthUser = { id: string; email?: string };
 type Toast = { id: string; text: string };
 type DashboardAgendaItem = {
@@ -102,6 +103,13 @@ type MigrationCheck = {
   label: string;
   status: "checking" | "ok" | "missing";
   detail: string;
+};
+type AuditLogInput = {
+  entity_type: AuditLog["entity_type"];
+  entity_id?: string | null;
+  action: string;
+  summary: string;
+  metadata?: Record<string, unknown>;
 };
 
 const emptyLead: LeadInput = {
@@ -272,21 +280,6 @@ function AuthScreen() {
   );
 }
 
-const viewPaths: Record<View, string> = {
-  dashboard: "/dashboard",
-  pipeline: "/pipeline",
-  tasks: "/tasks",
-  leads: "/leads",
-  templates: "/templates",
-  conversations: "/conversations",
-  whatsapp: "/whatsapp",
-  settings: "/settings",
-};
-
-const pathViews: Record<string, View> = Object.fromEntries(
-  Object.entries(viewPaths).map(([view, path]) => [path, view]),
-) as Record<string, View>;
-
 function Workspace({
   user,
   onLogout,
@@ -317,12 +310,14 @@ function Workspace({
   const [remoteTasks, setRemoteTasks] = useState<Task[]>([]);
   const [remoteWhatsAppMessages, setRemoteWhatsAppMessages] = useState<WhatsAppMessage[]>([]);
   const [remoteWhatsAppLogs, setRemoteWhatsAppLogs] = useState<WhatsAppLog[]>([]);
+  const [remoteAuditLogs, setRemoteAuditLogs] = useState<AuditLog[]>([]);
   const leads = remoteLeads;
   const templates = remoteTemplates;
   const interactions = remoteInteractions;
   const tasks = remoteTasks;
   const whatsappMessages = remoteWhatsAppMessages;
   const whatsappLogs = remoteWhatsAppLogs;
+  const auditLogs = remoteAuditLogs;
   const priorityLeads = useMemo(() => getPriorityLeads(leads), [leads]);
 
   useEffect(() => {
@@ -340,6 +335,7 @@ function Workspace({
         taskResult,
         whatsappMessageResult,
         whatsappLogResult,
+        auditLogResult,
       ] = await Promise.all([
         supabase.from("leads").select("*").order("created_at", { ascending: false }),
         supabase.from("message_templates").select("*").order("created_at", { ascending: true }),
@@ -347,6 +343,7 @@ function Workspace({
         supabase.from("tasks").select("*").order("due_at", { ascending: true }).limit(200),
         supabase.from("whatsapp_messages").select("*").order("created_at", { ascending: false }).limit(100),
         supabase.from("whatsapp_logs").select("*").order("created_at", { ascending: false }).limit(30),
+        supabase.from("audit_logs").select("*").order("created_at", { ascending: false }).limit(80),
       ]);
 
       if (
@@ -368,6 +365,7 @@ function Workspace({
       setRemoteTasks((taskResult.data as Task[] | null) ?? []);
       setRemoteWhatsAppMessages((whatsappMessageResult.data as WhatsAppMessage[] | null) ?? []);
       setRemoteWhatsAppLogs((whatsappLogResult.data as WhatsAppLog[] | null) ?? []);
+      setRemoteAuditLogs((auditLogResult.data as AuditLog[] | null) ?? []);
       setLoading(false);
     }
 
@@ -456,6 +454,38 @@ function Workspace({
     setRemoteInteractions((items) => [interaction, ...items]);
   }
 
+  async function recordAuditLog(input: AuditLogInput) {
+    const auditLog: AuditLog = {
+      id: newId("audit"),
+      user_id: user.id,
+      entity_type: input.entity_type,
+      entity_id: input.entity_id ?? null,
+      action: input.action,
+      summary: input.summary,
+      metadata: input.metadata ?? {},
+      created_at: new Date().toISOString(),
+    };
+
+    setRemoteAuditLogs((items) => [auditLog, ...items].slice(0, 80));
+
+    if (!supabase) return;
+
+    const { error } = await supabase.from("audit_logs").insert({
+      id: auditLog.id,
+      user_id: user.id,
+      entity_type: auditLog.entity_type,
+      entity_id: auditLog.entity_id,
+      action: auditLog.action,
+      summary: auditLog.summary,
+      metadata: auditLog.metadata,
+      created_at: auditLog.created_at,
+    });
+
+    if (error) {
+      setRemoteAuditLogs((items) => items.filter((item) => item.id !== auditLog.id));
+    }
+  }
+
   async function saveLead(input: LeadInput, id?: string) {
     const timestamp = new Date().toISOString();
 
@@ -471,7 +501,15 @@ function Workspace({
       if (error) {
         setRemoteLeads(previous);
         showToast("Erro ao atualizar lead");
+        return;
       }
+      await recordAuditLog({
+        entity_type: "lead",
+        entity_id: id,
+        action: "lead.updated",
+        summary: `Lead atualizado: ${input.name}`,
+        metadata: { status: input.status, temperature: input.temperature, owner_name: input.owner_name },
+      });
       return;
     }
 
@@ -486,7 +524,17 @@ function Workspace({
       return;
     }
 
-    if (data) setRemoteLeads((items) => [data as Lead, ...items]);
+    if (data) {
+      const createdLead = data as Lead;
+      setRemoteLeads((items) => [createdLead, ...items]);
+      await recordAuditLog({
+        entity_type: "lead",
+        entity_id: createdLead.id,
+        action: "lead.created",
+        summary: `Lead criado: ${createdLead.name}`,
+        metadata: { status: createdLead.status, source: createdLead.source },
+      });
+    }
   }
 
   async function deleteLead(lead: Lead) {
@@ -505,7 +553,16 @@ function Workspace({
       setRemoteLeads(previousLeads);
       setRemoteInteractions(previousInteractions);
       showToast(result.error ?? "Erro ao excluir lead");
+      return;
     }
+
+    await recordAuditLog({
+      entity_type: "lead",
+      entity_id: lead.id,
+      action: "lead.deleted",
+      summary: `Lead excluido: ${lead.name}`,
+      metadata: { phone: lead.phone, company: lead.company, status: lead.status },
+    });
   }
 
   async function updateLeadStatus(id: string, status: LeadStatus) {
@@ -519,6 +576,13 @@ function Workspace({
     if (supabase) {
       const { error } = await supabase.from("leads").update({ status }).eq("id", id);
       if (error) showToast("Erro ao atualizar status");
+      else await recordAuditLog({
+        entity_type: "lead",
+        entity_id: id,
+        action: "lead.status_changed",
+        summary: `Status alterado para ${status}`,
+        metadata: { previous_status: before?.status, next_status: status },
+      });
     }
   }
 
@@ -586,6 +650,15 @@ function Workspace({
       ]);
       if (leadError || interactionError) showToast("Erro ao salvar follow-up");
       if (taskError) showToast("Follow-up salvo; aplique a migracao de tarefas no Supabase");
+      if (!leadError && !interactionError) {
+        await recordAuditLog({
+          entity_type: "task",
+          entity_id: task.id,
+          action: "task.followup_scheduled",
+          summary: `Follow-up agendado para ${lead.name}`,
+          metadata: { lead_id: lead.id, due_at: nextFollowupAt },
+        });
+      }
     }
   }
 
@@ -667,7 +740,16 @@ function Workspace({
         setRemoteLeads(previousLeads);
         setRemoteInteractions(previousInteractions);
         showToast("Erro ao criar tarefa. Verifique a migracao de tarefas no Supabase");
+        return;
       }
+
+      await recordAuditLog({
+        entity_type: "task",
+        entity_id: task.id,
+        action: "task.created",
+        summary: `Tarefa criada: ${task.title}`,
+        metadata: { lead_id: lead.id, type: task.type, due_at: task.due_at },
+      });
     }
   }
 
@@ -713,7 +795,16 @@ function Workspace({
         setRemoteLeads(previousLeads);
         setRemoteInteractions(previousInteractions);
         showToast("Erro ao concluir follow-up");
+        return;
       }
+
+      await recordAuditLog({
+        entity_type: "task",
+        entity_id: task.id,
+        action: "task.completed",
+        summary: `Tarefa concluida: ${task.title}`,
+        metadata: { lead_id: lead.id, type: task.type, completed_at: now },
+      });
     }
   }
 
@@ -756,7 +847,16 @@ function Workspace({
         setRemoteTasks(previousTasks);
         setRemoteLeads(previousLeads);
         showToast("Erro ao reagendar tarefa");
+        return;
       }
+
+      await recordAuditLog({
+        entity_type: "task",
+        entity_id: task.id,
+        action: "task.rescheduled",
+        summary: `Tarefa reagendada: ${task.title}`,
+        metadata: { lead_id: lead.id, type: task.type, due_at: dueAt },
+      });
     }
   }
 
@@ -788,7 +888,16 @@ function Workspace({
         setRemoteLeads(previousLeads);
         setRemoteInteractions(previousInteractions);
         showToast("Erro ao atualizar temperatura");
+        return;
       }
+
+      await recordAuditLog({
+        entity_type: "lead",
+        entity_id: lead.id,
+        action: "lead.temperature_changed",
+        summary: `Temperatura alterada para ${temperature}`,
+        metadata: { previous_temperature: lead.temperature, next_temperature: temperature },
+      });
     }
   }
 
@@ -808,6 +917,13 @@ function Workspace({
     if (supabase) {
       const { error } = await supabase.from("interactions").insert({ ...interaction, user_id: user.id });
       if (error) showToast("Erro ao registrar interacao");
+      else await recordAuditLog({
+        entity_type: "lead",
+        entity_id: leadId,
+        action: "interaction.created",
+        summary: "Interacao registrada",
+        metadata: { type: input.type, channel: input.channel },
+      });
     }
   }
 
@@ -837,6 +953,13 @@ function Workspace({
     }
 
     showToast("Mensagem enviada pelo WhatsApp");
+    await recordAuditLog({
+      entity_type: "whatsapp",
+      entity_id: lead.id,
+      action: "whatsapp.message_sent",
+      summary: `Mensagem enviada para ${lead.name}`,
+      metadata: { lead_id: lead.id, next_followup_at: nextFollowupAt },
+    });
   }
 
   function getNextLeadAfterSendWrapper(currentLead: Lead) {
@@ -860,7 +983,16 @@ function Workspace({
       return;
     }
 
-    if (data) setRemoteTemplates((items) => [...items, data as MessageTemplate]);
+    if (data) {
+      const template = data as MessageTemplate;
+      setRemoteTemplates((items) => [...items, template]);
+      await recordAuditLog({
+        entity_type: "template",
+        entity_id: template.id,
+        action: "template.created",
+        summary: `Template criado: ${template.title}`,
+      });
+    }
   }
 
   async function logout() {
@@ -928,27 +1060,8 @@ function Workspace({
         <section className="flex-1 overflow-hidden">
           <header className="flex flex-col gap-4 border-b border-white/10 px-5 py-4 xl:flex-row xl:items-center xl:justify-between">
             <div>
-              <h1 className="text-2xl font-semibold">
-                {view === "dashboard" && "Dashboard"}
-                {view === "pipeline" && "Pipeline"}
-                {view === "tasks" && "Agenda"}
-                {view === "leads" && "Leads"}
-                {view === "templates" && "Mensagens prontas"}
-                {view === "conversations" && "Conversas"}
-                {view === "whatsapp" && "Conexao WhatsApp"}
-                {view === "settings" && "Configuracoes"}
-              </h1>
-              <p className="mt-1 text-sm text-zinc-500">
-                {view === "conversations"
-                  ? "Mensagens salvas pelo webhook da Evolution."
-                  : view === "tasks"
-                    ? "Tarefas comerciais, follow-ups e proximas acoes."
-                  : view === "whatsapp"
-                    ? "Conecte a instancia OrigoCRM pelo QR Code."
-                    : view === "settings"
-                      ? "Status das conexoes e proximos ajustes do CRM."
-                      : "Cadencia continua: abrir, enviar, proximo."}
-              </p>
+              <h1 className="text-2xl font-semibold">{viewTitles[view]}</h1>
+              <p className="mt-1 text-sm text-zinc-500">{getViewSubtitle(view)}</p>
             </div>
             <div className="flex flex-col gap-3 sm:flex-row">
               <div className="relative">
@@ -1088,7 +1201,7 @@ function Workspace({
                   />
                 )}
                 {view === "whatsapp" && <WhatsAppConnection />}
-                {view === "settings" && <SettingsView />}
+                {view === "settings" && <SettingsView auditLogs={auditLogs} />}
               </>
             )}
           </div>
@@ -3438,6 +3551,11 @@ function migrationChecksInitialState(configured: boolean): MigrationCheck[] {
         status: "missing",
         detail: "Supabase nao configurado neste ambiente",
       },
+      {
+        label: "Trilha de auditoria",
+        status: "missing",
+        detail: "Supabase nao configurado neste ambiente",
+      },
     ];
   }
 
@@ -3452,10 +3570,15 @@ function migrationChecksInitialState(configured: boolean): MigrationCheck[] {
       status: "checking",
       detail: "Verificando tasks_migration.sql",
     },
+    {
+      label: "Trilha de auditoria",
+      status: "checking",
+      detail: "Verificando audit_logs_migration.sql",
+    },
   ];
 }
 
-function SettingsView() {
+function SettingsView({ auditLogs }: { auditLogs: AuditLog[] }) {
   const supabase = useMemo(() => createSupabaseClient(), []);
   const [checks, setChecks] = useState<MigrationCheck[]>(() => migrationChecksInitialState(Boolean(supabase)));
 
@@ -3468,7 +3591,7 @@ function SettingsView() {
     const client = supabase;
 
     async function runChecks() {
-      const [commercial, tasksResult] = await Promise.all([
+      const [commercial, tasksResult, auditResult] = await Promise.all([
         client
           .from("leads")
           .select("id,estimated_value,owner_name,temperature,outcome_reason,sla_hours")
@@ -3476,6 +3599,10 @@ function SettingsView() {
         client
           .from("tasks")
           .select("id,lead_id,type,title,due_at,status,completed_at")
+          .limit(1),
+        client
+          .from("audit_logs")
+          .select("id,entity_type,entity_id,action,summary,metadata")
           .limit(1),
       ]);
 
@@ -3495,6 +3622,13 @@ function SettingsView() {
           detail: tasksResult.error
             ? "Aplique supabase/tasks_migration.sql e tasks_meeting_type_migration.sql"
             : "Tabela tasks disponivel para agenda profissional",
+        },
+        {
+          label: "Trilha de auditoria",
+          status: auditResult.error ? "missing" : "ok",
+          detail: auditResult.error
+            ? "Aplique supabase/audit_logs_migration.sql"
+            : "Tabela audit_logs pronta para acoes sensiveis",
         },
       ]);
     }
@@ -3555,6 +3689,39 @@ function SettingsView() {
               EVOLUTION_WEBHOOK_KEY
             </div>
           </div>
+        </div>
+      </section>
+
+      <section className="rounded-xl border border-white/10 bg-white/[0.035] p-5 xl:col-span-2">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h2 className="text-lg font-semibold">Auditoria recente</h2>
+            <p className="mt-1 text-sm text-zinc-500">Acoes sensiveis registradas para rastreabilidade operacional.</p>
+          </div>
+          <span className="rounded-full border border-white/10 px-2 py-1 text-xs text-zinc-500">
+            {auditLogs.length}
+          </span>
+        </div>
+        <div className="mt-4 divide-y divide-white/10 overflow-hidden rounded-lg border border-white/10">
+          {auditLogs.length === 0 ? (
+            <div className="p-4 text-sm text-zinc-500">
+              Nenhum registro carregado. Se a migracao estiver pendente, aplique audit_logs_migration.sql.
+            </div>
+          ) : (
+            auditLogs.slice(0, 10).map((log) => (
+              <div className="grid gap-2 bg-black/20 p-3 text-sm md:grid-cols-[1fr_auto]" key={log.id}>
+                <div>
+                  <div className="font-medium text-zinc-100">{log.summary}</div>
+                  <div className="mt-1 text-xs text-zinc-500">
+                    {log.entity_type} · {log.action}
+                  </div>
+                </div>
+                <div className="text-xs text-zinc-500">
+                  {new Date(log.created_at).toLocaleString("pt-BR")}
+                </div>
+              </div>
+            ))
+          )}
         </div>
       </section>
     </div>

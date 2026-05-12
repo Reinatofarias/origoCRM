@@ -57,6 +57,17 @@ export type Task = {
   updated_at: string;
 };
 
+export type AuditLog = {
+  id: string;
+  user_id?: string | null;
+  entity_type: "lead" | "task" | "template" | "whatsapp" | "system";
+  entity_id?: string | null;
+  action: string;
+  summary: string;
+  metadata: Record<string, unknown>;
+  created_at: string;
+};
+
 export type LeadInput = {
   name: string;
   phone: string;
