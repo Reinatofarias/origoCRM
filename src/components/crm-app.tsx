@@ -1724,93 +1724,239 @@ function Dashboard({
   onQuickSchedule: (lead: Lead) => void;
   onViewConversations: () => void;
 }) {
+  const [periodDays, setPeriodDays] = useState(7);
+  const [ownerFilter, setOwnerFilter] = useState("all");
   const [dashboardNow] = useState(() => Date.now());
-  const taskAgenda: DashboardAgendaItem[] = tasks
-    .filter((task) => task.status === "open" && isTaskDueToday(task))
-    .map((task) => ({
-      task,
-      lead: leads.find((lead) => lead.id === task.lead_id) ?? null,
-      dueAt: task.due_at,
-      title: task.title,
-    }))
-    .filter((item): item is DashboardAgendaItem & { task: Task } => Boolean(item.lead));
-  const legacyAgenda: DashboardAgendaItem[] = leads
-    .filter(
-      (lead) =>
-        lead.next_followup_at &&
-        lead.status !== "fechado" &&
-        isFollowupDue(lead) &&
-        !taskAgenda.some((item) => item.lead.id === lead.id),
-    )
-    .map((lead) => ({
-      lead,
-      dueAt: lead.next_followup_at ?? "",
-      title: "Follow-up pendente",
-    }));
-  const todayAgenda = [...taskAgenda, ...legacyAgenda].sort(
-    (a, b) => new Date(a.dueAt).getTime() - new Date(b.dueAt).getTime(),
+  const [whatsappStatus, setWhatsappStatus] = useState<{
+    connected: boolean;
+    state: string;
+    phoneNumber?: string | null;
+    profileName?: string | null;
+    error?: string;
+  } | null>(null);
+
+  useEffect(() => {
+    let mounted = true;
+
+    async function loadStatus() {
+      try {
+        const response = await fetch("/api/evolution/status", { cache: "no-store" });
+        const data = await response.json();
+        if (!mounted) return;
+        setWhatsappStatus({
+          connected: Boolean(data.connected),
+          state: data.state ?? "indefinido",
+          phoneNumber: data.phoneNumber ?? null,
+          profileName: data.profileName ?? null,
+          error: data.error ?? (!response.ok ? "Nao foi possivel consultar a Evolution" : undefined),
+        });
+      } catch {
+        if (mounted) {
+          setWhatsappStatus({
+            connected: false,
+            state: "error",
+            error: "Nao foi possivel consultar a Evolution",
+          });
+        }
+      }
+    }
+
+    void loadStatus();
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  const owners = useMemo(
+    () =>
+      Array.from(
+        new Set(leads.map((lead) => lead.owner_name?.trim()).filter((item): item is string => Boolean(item))),
+      ).sort((a, b) => a.localeCompare(b)),
+    [leads],
   );
-  const overdueFollowups = [
-    ...tasks.filter((task) => task.status === "open" && isTaskOverdue(task)),
-    ...leads.filter(
-      (lead) =>
-        isFollowupOverdue(lead) &&
-        !tasks.some((task) => task.status === "open" && task.lead_id === lead.id),
-    ),
-  ];
-  const groupedMessages = groupMessagesByPhone(whatsappMessages);
-  const conversationsWithPendingReplies = groupedMessages.filter(
-    (items) => countPendingInboundMessages(items) > 0,
+  const leadById = useMemo(() => new Map(leads.map((lead) => [lead.id, lead])), [leads]);
+  const leadByPhone = useMemo(() => {
+    const index = new Map<string, Lead>();
+    for (const lead of leads) {
+      for (const phone of getPhoneCandidates(lead.phone)) {
+        if (!index.has(phone)) index.set(phone, lead);
+      }
+    }
+    return index;
+  }, [leads]);
+  const operationalLeads = useMemo(
+    () =>
+      leads.filter(
+        (lead) =>
+          lead.status !== "fechado" &&
+          (ownerFilter === "all" || lead.owner_name === ownerFilter),
+      ),
+    [leads, ownerFilter],
   );
-  const unlinkedConversations = groupedMessages.filter((items) => {
-    const latestLeadId = [...items].reverse().find((message) => message.lead_id)?.lead_id;
-    const phone = items[0]?.phone_number ?? "";
-    return !latestLeadId && !findLeadByPhone(leads, phone);
-  });
-  const failedMessages = whatsappMessages.filter((message) => message.status === "failed");
-  const hotLeadsWithoutAction = leads.filter(
-    (lead) =>
-      (lead.temperature ?? "morno") === "quente" &&
-      !lead.next_followup_at &&
-      lead.status !== "fechado",
+  const openTasks = useMemo(
+    () =>
+      tasks.filter((task) => {
+        if (task.status !== "open") return false;
+        const lead = leadById.get(task.lead_id);
+        return Boolean(lead) && (ownerFilter === "all" || lead?.owner_name === ownerFilter);
+      }),
+    [leadById, ownerFilter, tasks],
   );
-  const recentInboundMessages = whatsappMessages
-    .filter((message) => message.direction === "inbound")
-    .slice(0, 5);
-  const recentErrors = whatsappLogs.filter((log) => log.status === "error").slice(0, 4);
-  const sevenDaysAgo = dashboardNow - 7 * 24 * 60 * 60 * 1000;
-  const created7d = leads.filter((lead) => new Date(lead.created_at).getTime() >= sevenDaysAgo).length;
-  const replies7d = whatsappMessages.filter(
+  const taskAgenda: DashboardAgendaItem[] = useMemo(
+    () =>
+      openTasks
+        .filter(isTaskDueToday)
+        .map((task) => ({
+          task,
+          lead: leadById.get(task.lead_id) ?? null,
+          dueAt: task.due_at,
+          title: task.title,
+        }))
+        .filter((item): item is DashboardAgendaItem & { task: Task } => Boolean(item.lead)),
+    [leadById, openTasks],
+  );
+  const taskAgendaLeadIds = useMemo(
+    () => new Set(taskAgenda.map((item) => item.lead.id)),
+    [taskAgenda],
+  );
+  const legacyAgenda: DashboardAgendaItem[] = useMemo(
+    () =>
+      operationalLeads
+        .filter(
+          (lead) =>
+            Boolean(lead.next_followup_at) &&
+            isFollowupDue(lead) &&
+            !taskAgendaLeadIds.has(lead.id),
+        )
+        .map((lead) => ({
+          lead,
+          dueAt: lead.next_followup_at ?? "",
+          title: "Follow-up pendente",
+        })),
+    [operationalLeads, taskAgendaLeadIds],
+  );
+  const todayAgenda = useMemo(
+    () =>
+      [...taskAgenda, ...legacyAgenda].sort(
+        (a, b) => new Date(a.dueAt).getTime() - new Date(b.dueAt).getTime(),
+      ),
+    [legacyAgenda, taskAgenda],
+  );
+  const overdueFollowups = useMemo(() => {
+    const openTaskLeadIds = new Set(openTasks.map((task) => task.lead_id));
+    return [
+      ...openTasks.filter(isTaskOverdue),
+      ...operationalLeads.filter(
+        (lead) => isFollowupOverdue(lead) && !openTaskLeadIds.has(lead.id),
+      ),
+    ];
+  }, [openTasks, operationalLeads]);
+  const groupedMessages = useMemo(() => groupMessagesByPhone(whatsappMessages), [whatsappMessages]);
+  const conversationsWithPendingReplies = useMemo(
+    () => groupedMessages.filter((items) => countPendingInboundMessages(items) > 0),
+    [groupedMessages],
+  );
+  const unlinkedConversations = useMemo(
+    () =>
+      groupedMessages.filter((items) => {
+        const latestLeadId = [...items].reverse().find((message) => message.lead_id)?.lead_id;
+        const phone = items[0]?.phone_number ?? "";
+        const linkedLead = latestLeadId ? leadById.get(latestLeadId) : leadByPhone.get(normalizePhone(phone));
+        return !linkedLead;
+      }),
+    [groupedMessages, leadById, leadByPhone],
+  );
+  const failedMessages = useMemo(
+    () => whatsappMessages.filter((message) => message.status === "failed"),
+    [whatsappMessages],
+  );
+  const hotLeadsWithoutAction = useMemo(
+    () =>
+      operationalLeads.filter(
+        (lead) => (lead.temperature ?? "morno") === "quente" && !lead.next_followup_at,
+      ),
+    [operationalLeads],
+  );
+  const recentInboundMessages = useMemo(
+    () => whatsappMessages.filter((message) => message.direction === "inbound").slice(0, 5),
+    [whatsappMessages],
+  );
+  const recentErrors = useMemo(
+    () => whatsappLogs.filter((log) => log.status === "error").slice(0, 4),
+    [whatsappLogs],
+  );
+  const periodStart = dashboardNow - periodDays * 24 * 60 * 60 * 1000;
+  const createdInPeriod = operationalLeads.filter((lead) => new Date(lead.created_at).getTime() >= periodStart).length;
+  const repliesInPeriod = whatsappMessages.filter(
     (message) =>
-      message.direction === "inbound" && new Date(message.created_at).getTime() >= sevenDaysAgo,
+      message.direction === "inbound" && new Date(message.created_at).getTime() >= periodStart,
   ).length;
-  const contacts7d = interactions.filter(
+  const contactsInPeriod = interactions.filter(
     (interaction) =>
       interaction.type === "whatsapp_sent" &&
-      new Date(interaction.created_at).getTime() >= sevenDaysAgo,
+      new Date(interaction.created_at).getTime() >= periodStart,
   ).length;
-  const responseRate = contacts7d ? Math.round((replies7d / contacts7d) * 100) : 0;
-  const openValue = leads
-    .filter((lead) => lead.status !== "fechado")
-    .reduce((total, lead) => total + (lead.estimated_value ?? 0), 0);
-  const stuckProposals = leads.filter(
+  const responseRate = contactsInPeriod ? Math.min(100, Math.round((repliesInPeriod / contactsInPeriod) * 100)) : 0;
+  const openValue = operationalLeads.reduce((total, lead) => total + (lead.estimated_value ?? 0), 0);
+  const openProposals = operationalLeads.filter((lead) => lead.status === "proposta");
+  const stuckProposals = operationalLeads.filter(
     (lead) =>
       lead.status === "proposta" &&
       dashboardNow - new Date(lead.updated_at).getTime() > 3 * 24 * 60 * 60 * 1000,
   );
-  const noOwner = leads.filter((lead) => lead.status !== "fechado" && !lead.owner_name);
-  const noNextContact = leads.filter(
-    (lead) => lead.status !== "fechado" && lead.status !== "novo" && !lead.next_followup_at,
+  const noOwner = operationalLeads.filter((lead) => !lead.owner_name);
+  const noNextContact = operationalLeads.filter(
+    (lead) => lead.status !== "novo" && !lead.next_followup_at,
   );
+  const lastWebhook = whatsappLogs[0] ?? null;
+  const riskRows = [
+    ...hotLeadsWithoutAction.slice(0, 2).map((lead) => ({ lead, reason: "Quente sem proxima acao" })),
+    ...stuckProposals.slice(0, 2).map((lead) => ({ lead, reason: "Proposta parada ha 3+ dias" })),
+    ...noOwner.slice(0, 2).map((lead) => ({ lead, reason: "Sem responsavel" })),
+    ...noNextContact.slice(0, 2).map((lead) => ({ lead, reason: "Sem proximo contato" })),
+  ].filter((item, index, items) => items.findIndex((candidate) => candidate.lead.id === item.lead.id) === index);
 
   return (
     <div className="space-y-5">
+      <section className="rounded-lg border border-white/10 bg-white/[0.03] p-4">
+        <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+          <div>
+            <h2 className="text-lg font-semibold">Central do dia</h2>
+            <p className="mt-1 text-sm text-zinc-500">Prioridades comerciais, WhatsApp e riscos em uma unica fila de decisao.</p>
+          </div>
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <select
+              className="h-10 rounded-lg border border-white/10 bg-black/30 px-3 text-sm text-zinc-200 outline-none transition focus:border-[#8B5CF6]"
+              onChange={(event) => setOwnerFilter(event.target.value)}
+              value={ownerFilter}
+            >
+              <option value="all">Todos responsaveis</option>
+              {owners.map((owner) => (
+                <option key={owner} value={owner}>
+                  {owner}
+                </option>
+              ))}
+            </select>
+            <select
+              className="h-10 rounded-lg border border-white/10 bg-black/30 px-3 text-sm text-zinc-200 outline-none transition focus:border-[#8B5CF6]"
+              onChange={(event) => setPeriodDays(Number(event.target.value))}
+              value={periodDays}
+            >
+              <option value={7}>7 dias</option>
+              <option value={14}>14 dias</option>
+              <option value={30}>30 dias</option>
+            </select>
+          </div>
+        </div>
+      </section>
+
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
-        <DashboardSignal label="Follow-ups vencidos" value={overdueFollowups.length} tone="danger" />
-        <DashboardSignal label="Respostas novas" value={conversationsWithPendingReplies.length} tone="success" />
-        <DashboardSignal label="Conversas sem lead" value={unlinkedConversations.length} tone="warning" />
-        <DashboardSignal label="Mensagens com falha" value={failedMessages.length} tone="danger" />
-        <DashboardSignal label="Quentes sem acao" value={hotLeadsWithoutAction.length} tone="warning" />
+        <DashboardPriorityCard description="Acoes fora do prazo" label="Follow-ups vencidos" value={overdueFollowups.length} tone="danger" />
+        <DashboardPriorityCard description="Entradas que pedem resposta" label="Respostas novas" onClick={onViewConversations} value={conversationsWithPendingReplies.length} tone="success" />
+        <DashboardPriorityCard description="Contatos para converter" label="Conversas sem lead" onClick={onViewConversations} value={unlinkedConversations.length} tone="warning" />
+        <DashboardPriorityCard description="Saida bloqueada" label="Mensagens com falha" onClick={onViewConversations} value={failedMessages.length} tone="danger" />
+        <DashboardPriorityCard description="Sem proximo passo" label="Quentes sem acao" value={hotLeadsWithoutAction.length} tone="warning" />
       </div>
 
       <div className="grid gap-5 xl:grid-cols-[1.35fr_0.85fr]">
@@ -1847,50 +1993,16 @@ function Dashboard({
           </div>
         </section>
 
-        <section className="rounded-lg border border-white/10 bg-white/[0.03] p-5">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <h2 className="text-lg font-semibold">WhatsApp agora</h2>
-              <p className="mt-1 text-sm text-zinc-500">Sinais da inbox e da Evolution.</p>
-            </div>
-            <button
-              className="rounded-lg border border-white/10 px-3 py-2 text-xs text-zinc-300 transition hover:bg-white/[0.06]"
-              onClick={onViewConversations}
-              type="button"
-            >
-              Abrir inbox
-            </button>
-          </div>
-          <div className="mt-4 grid gap-3 sm:grid-cols-3 xl:grid-cols-1">
-            <DashboardMiniMetric label="Nao lidas" value={conversationsWithPendingReplies.length} />
-            <DashboardMiniMetric label="Sem lead" value={unlinkedConversations.length} />
-            <DashboardMiniMetric label="Erros Evolution" value={recentErrors.length} />
-          </div>
-          <div className="mt-4 space-y-3">
-            {recentInboundMessages.length === 0 && <DashboardEmpty text="Nenhuma mensagem recebida recentemente." />}
-            {recentInboundMessages.map((message) => (
-              <button
-                className="w-full rounded-lg border border-white/10 bg-black/20 p-3 text-left transition hover:bg-white/[0.05]"
-                key={message.id}
-                onClick={onViewConversations}
-                type="button"
-              >
-                <div className="flex items-center justify-between gap-3 text-xs text-zinc-500">
-                  <span>{message.contact_name || message.phone_number}</span>
-                  <span>
-                    {new Date(message.created_at).toLocaleTimeString("pt-BR", {
-                      hour: "2-digit",
-                      minute: "2-digit",
-                    })}
-                  </span>
-                </div>
-                <p className="mt-1 line-clamp-2 text-sm text-zinc-300">
-                  {message.content || "Mensagem sem texto"}
-                </p>
-              </button>
-            ))}
-          </div>
-        </section>
+        <DashboardWhatsAppHealth
+          failedMessages={failedMessages.length}
+          lastWebhook={lastWebhook}
+          onViewConversations={onViewConversations}
+          recentErrors={recentErrors}
+          recentInboundMessages={recentInboundMessages}
+          status={whatsappStatus}
+          unlinkedConversations={unlinkedConversations.length}
+          unreadConversations={conversationsWithPendingReplies.length}
+        />
       </div>
 
       <div className="grid gap-5 xl:grid-cols-[1fr_1fr]">
@@ -1900,22 +2012,35 @@ function Dashboard({
             Riscos comerciais
           </h2>
           <div className="mt-4 grid gap-3 md:grid-cols-2">
-            <RiskItem label="Leads quentes sem proxima acao" value={hotLeadsWithoutAction.length} />
-            <RiskItem label="Propostas paradas ha 3+ dias" value={stuckProposals.length} />
-            <RiskItem label="Leads sem responsavel" value={noOwner.length} />
-            <RiskItem label="Leads ativos sem proximo contato" value={noNextContact.length} />
+            <DashboardCompactMetric label="Leads quentes sem proxima acao" value={hotLeadsWithoutAction.length} />
+            <DashboardCompactMetric label="Propostas paradas ha 3+ dias" value={stuckProposals.length} />
+            <DashboardCompactMetric label="Leads sem responsavel" value={noOwner.length} />
+            <DashboardCompactMetric label="Leads ativos sem proximo contato" value={noNextContact.length} />
+          </div>
+          <div className="mt-4 space-y-2">
+            {riskRows.length === 0 && <DashboardEmpty text="Nenhum risco comercial critico para este filtro." />}
+            {riskRows.slice(0, 5).map(({ lead, reason }) => (
+              <DashboardRiskLeadRow
+                key={lead.id}
+                lead={lead}
+                onOpen={() => onOpen(lead)}
+                onQuickSchedule={() => onQuickSchedule(lead)}
+                reason={reason}
+              />
+            ))}
           </div>
         </section>
 
         <section className="rounded-lg border border-white/10 bg-white/[0.03] p-5">
           <h2 className="text-lg font-semibold">Performance leve</h2>
-          <p className="mt-1 text-sm text-zinc-500">Ultimos 7 dias e carteira aberta.</p>
-          <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-            <DashboardMiniMetric label="Leads criados" value={created7d} />
-            <DashboardMiniMetric label="Respostas" value={replies7d} />
-            <DashboardMiniMetric label="Contatos" value={contacts7d} />
-            <DashboardMiniMetric label="Resposta" value={`${responseRate}%`} />
-            <DashboardMiniMetric label="Valor aberto" value={formatCurrency(openValue) ?? "R$ 0"} />
+          <p className="mt-1 text-sm text-zinc-500">Periodo selecionado e carteira aberta.</p>
+          <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            <DashboardCompactMetric label="Leads criados" value={createdInPeriod} />
+            <DashboardCompactMetric label="Respostas" value={repliesInPeriod} />
+            <DashboardCompactMetric label="Contatos" value={contactsInPeriod} />
+            <DashboardCompactMetric label="Taxa de resposta" value={`${responseRate}%`} />
+            <DashboardCompactMetric label="Valor aberto" value={formatCurrency(openValue) ?? "R$ 0"} />
+            <DashboardCompactMetric label="Propostas abertas" value={openProposals.length} />
           </div>
         </section>
       </div>
@@ -1923,35 +2048,152 @@ function Dashboard({
   );
 }
 
-function DashboardSignal({
+function DashboardPriorityCard({
   label,
   value,
   tone,
+  description,
+  onClick,
 }: {
   label: string;
   value: number;
   tone: "danger" | "success" | "warning";
+  description: string;
+  onClick?: () => void;
 }) {
   const toneClass = {
     danger: "border-red-400/25 bg-red-500/10 text-red-200",
     success: "border-[#25D366]/25 bg-[#25D366]/10 text-[#9AF0B8]",
     warning: "border-amber-400/25 bg-amber-500/10 text-amber-100",
   }[tone];
+  const Element = onClick ? "button" : "div";
 
   return (
-    <div className={`rounded-lg border p-4 ${toneClass}`}>
+    <Element
+      className={`rounded-lg border p-4 text-left transition ${toneClass} ${onClick ? "hover:brightness-110" : ""}`}
+      onClick={onClick}
+      type={onClick ? "button" : undefined}
+    >
       <div className="text-xs uppercase text-current/70">{label}</div>
       <div className="mt-2 text-3xl font-semibold">{value}</div>
-    </div>
+      <div className="mt-1 text-xs text-current/70">{description}</div>
+    </Element>
   );
 }
 
-function DashboardMiniMetric({ label, value }: { label: string; value: string | number }) {
+function DashboardCompactMetric({ label, value }: { label: string; value: string | number }) {
   return (
     <div className="rounded-lg border border-white/10 bg-black/20 p-3">
       <div className="text-xs text-zinc-500">{label}</div>
       <div className="mt-1 text-xl font-semibold text-zinc-100">{value}</div>
     </div>
+  );
+}
+
+function DashboardWhatsAppHealth({
+  status,
+  lastWebhook,
+  recentErrors,
+  recentInboundMessages,
+  unreadConversations,
+  unlinkedConversations,
+  failedMessages,
+  onViewConversations,
+}: {
+  status: {
+    connected: boolean;
+    state: string;
+    phoneNumber?: string | null;
+    profileName?: string | null;
+    error?: string;
+  } | null;
+  lastWebhook: WhatsAppLog | null;
+  recentErrors: WhatsAppLog[];
+  recentInboundMessages: WhatsAppMessage[];
+  unreadConversations: number;
+  unlinkedConversations: number;
+  failedMessages: number;
+  onViewConversations: () => void;
+}) {
+  return (
+    <section className="rounded-lg border border-white/10 bg-white/[0.03] p-5">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <h2 className="text-lg font-semibold">Saude do WhatsApp</h2>
+          <p className="mt-1 text-sm text-zinc-500">Status da Evolution, inbox e ultimas entradas.</p>
+        </div>
+        <button
+          className="rounded-lg border border-white/10 px-3 py-2 text-xs text-zinc-300 transition hover:bg-white/[0.06]"
+          onClick={onViewConversations}
+          type="button"
+        >
+          Abrir inbox
+        </button>
+      </div>
+      <div className="mt-4 rounded-lg border border-white/10 bg-black/20 p-4">
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-sm text-zinc-400">Evolution</span>
+          <span
+            className={`rounded-full px-2 py-1 text-xs ${
+              status?.connected
+                ? "bg-[#25D366]/10 text-[#9AF0B8]"
+                : "bg-red-500/10 text-red-200"
+            }`}
+          >
+            {status?.connected ? "Conectado" : "Desconectado"}
+          </span>
+        </div>
+        <div className="mt-2 text-xs text-zinc-500">
+          {status?.phoneNumber || status?.profileName || status?.state || "Consultando status..."}
+        </div>
+        {status?.error && <div className="mt-2 text-xs text-red-300">{status.error}</div>}
+        <div className="mt-3 text-xs text-zinc-500">
+          Ultimo webhook:{" "}
+          {lastWebhook ? new Date(lastWebhook.created_at).toLocaleString("pt-BR") : "sem registro"}
+        </div>
+      </div>
+      <div className="mt-4 grid gap-3 sm:grid-cols-3 xl:grid-cols-1">
+        <DashboardCompactMetric label="Nao lidas" value={unreadConversations} />
+        <DashboardCompactMetric label="Sem lead" value={unlinkedConversations} />
+        <DashboardCompactMetric label="Falhas de mensagem" value={failedMessages} />
+      </div>
+      <div className="mt-4 space-y-3">
+        {recentInboundMessages.length === 0 && <DashboardEmpty text="Nenhuma mensagem recebida recentemente." />}
+        {recentInboundMessages.map((message) => (
+          <button
+            className="w-full rounded-lg border border-white/10 bg-black/20 p-3 text-left transition hover:bg-white/[0.05]"
+            key={message.id}
+            onClick={onViewConversations}
+            type="button"
+          >
+            <div className="flex items-center justify-between gap-3 text-xs text-zinc-500">
+              <span>{message.contact_name || message.phone_number}</span>
+              <span>
+                {new Date(message.created_at).toLocaleTimeString("pt-BR", {
+                  hour: "2-digit",
+                  minute: "2-digit",
+                })}
+              </span>
+            </div>
+            <p className="mt-1 line-clamp-2 text-sm text-zinc-300">
+              {message.content || "Mensagem sem texto"}
+            </p>
+          </button>
+        ))}
+      </div>
+      {recentErrors.length > 0 && (
+        <div className="mt-4 rounded-lg border border-red-400/20 bg-red-500/10 p-3">
+          <div className="text-xs font-medium text-red-200">Erros recentes da Evolution</div>
+          <div className="mt-2 space-y-1">
+            {recentErrors.slice(0, 2).map((log) => (
+              <div className="truncate text-xs text-red-100/80" key={log.id}>
+                {log.error_message || log.event_type}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -2029,11 +2271,41 @@ function DashboardLeadRow({
   );
 }
 
-function RiskItem({ label, value }: { label: string; value: number }) {
+function DashboardRiskLeadRow({
+  lead,
+  reason,
+  onOpen,
+  onQuickSchedule,
+}: {
+  lead: Lead;
+  reason: string;
+  onOpen: () => void;
+  onQuickSchedule: () => void;
+}) {
   return (
-    <div className="flex items-center justify-between gap-3 rounded-lg border border-white/10 bg-black/20 p-3">
-      <span className="text-sm text-zinc-300">{label}</span>
-      <span className="rounded-full bg-white/[0.08] px-2 py-1 text-xs text-zinc-100">{value}</span>
+    <div className="rounded-lg border border-white/10 bg-black/20 p-3">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <button className="min-w-0 text-left" onClick={onOpen} type="button">
+          <div className="truncate text-sm font-medium text-zinc-100">{lead.name}</div>
+          <div className="mt-1 truncate text-xs text-zinc-500">{reason} - {lead.company || "Sem empresa"}</div>
+        </button>
+        <div className="flex gap-2">
+          <button
+            className="h-8 rounded-lg border border-white/10 px-3 text-xs text-zinc-300 transition hover:bg-white/[0.06]"
+            onClick={onOpen}
+            type="button"
+          >
+            Abrir
+          </button>
+          <button
+            className="h-8 rounded-lg border border-[#8B5CF6]/25 bg-[#8B5CF6]/10 px-3 text-xs text-[#DDD6FE] transition hover:bg-[#8B5CF6]/20"
+            onClick={onQuickSchedule}
+            type="button"
+          >
+            Reagendar
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
