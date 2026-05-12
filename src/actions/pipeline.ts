@@ -11,6 +11,18 @@ type ActionResult<T = unknown> = {
   error?: string;
 };
 
+function formatLeadDatabaseError(message: string) {
+  if (message.includes("leads_status_check")) {
+    return "O banco ainda bloqueia etapas personalizadas. Aplique supabase/custom_pipeline_stages_migration.sql no SQL Editor do Supabase e tente novamente.";
+  }
+
+  if (message.includes("leads_closed_outcome_reason_check")) {
+    return "O contrato antigo de fechamento ainda esta ativo. Aplique supabase/custom_pipeline_stages_migration.sql no SQL Editor do Supabase.";
+  }
+
+  return message;
+}
+
 async function getAuthenticatedSupabase() {
   const supabase = await createSupabaseServerClient();
   if (!supabase) return { error: "Supabase nao configurado" };
@@ -42,7 +54,7 @@ export async function moveLeadStage(id: string, status: LeadStatus, outcomeReaso
     .eq("id", id)
     .eq("user_id", auth.user.id);
 
-  if (error) return { success: false, error: error.message } satisfies ActionResult;
+  if (error) return { success: false, error: formatLeadDatabaseError(error.message) } satisfies ActionResult;
 
   await auth.supabase.from("interactions").insert({
     lead_id: id,

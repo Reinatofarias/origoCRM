@@ -142,6 +142,43 @@ type PipelineStage = {
 };
 
 const defaultClosedStageIds = new Set<LeadStatus>(["fechado"]);
+const defaultPipelineStageIds = new Set<LeadStatus>(defaultPipelineColumns.map((column) => column.id));
+const canonicalStageAliases: Record<string, LeadStatus> = {
+  novo_lead: "novo",
+  novos_leads: "novo",
+  primeiro_contato: "contatado",
+  primeiro_contacto: "contatado",
+  contato_inicial: "contatado",
+  follow_up: "respondeu",
+  followup: "respondeu",
+  acompanhamento: "respondeu",
+  reuniao_agendada: "proposta",
+  reuniao: "proposta",
+  proposta_enviada: "proposta",
+  fechado: "fechado",
+  fechados: "fechado",
+  ganho: "fechado",
+};
+
+function normalizeStageKey(value: string) {
+  return value
+    .replace(/^custom[_-]/i, "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
+function getCanonicalStageId(value: string) {
+  const key = normalizeStageKey(value);
+  return canonicalStageAliases[key];
+}
+
+function resolvePipelineStageId(id: string, title: string) {
+  if (defaultPipelineStageIds.has(id)) return id;
+  return getCanonicalStageId(title) ?? getCanonicalStageId(id) ?? id;
+}
 
 const emptyLead: LeadInput = {
   name: "",
@@ -179,8 +216,13 @@ function readSavedPipelineFilters() {
       temperatureFilter?: Lead["temperature"] | "all";
       dateFilter?: "all" | "today" | "overdue";
     };
+    const statusFilter =
+      parsed.statusFilter && parsed.statusFilter !== "all"
+        ? resolvePipelineStageId(parsed.statusFilter, parsed.statusFilter)
+        : "all";
+
     return {
-      statusFilter: parsed.statusFilter ?? "all",
+      statusFilter,
       temperatureFilter: parsed.temperatureFilter ?? "all",
       dateFilter: parsed.dateFilter ?? "all",
     };
@@ -223,9 +265,10 @@ function normalizePipelineStages(input: unknown): PipelineStage[] {
       if (!item || typeof item !== "object") return null;
       const stage = item as Partial<PipelineStage>;
       if (!stage.id || !stage.title) return null;
+      const title = String(stage.title).trim() || String(stage.id);
       return {
-        id: String(stage.id),
-        title: String(stage.title).trim() || String(stage.id),
+        id: resolvePipelineStageId(String(stage.id), title),
+        title,
         kind: (stage.kind === "closed" ? "closed" : "open") as NonNullable<PipelineStage["kind"]>,
       };
     })
@@ -249,6 +292,10 @@ function readPipelineStages(): PipelineStage[] {
 }
 
 function createPipelineStageId(title: string, existingStages: PipelineStage[]) {
+  const canonicalId = getCanonicalStageId(title);
+  const existingIds = new Set(existingStages.map((stage) => stage.id));
+  if (canonicalId && !existingIds.has(canonicalId)) return canonicalId;
+
   const base = title
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
@@ -256,7 +303,6 @@ function createPipelineStageId(title: string, existingStages: PipelineStage[]) {
     .replace(/[^a-z0-9]+/g, "_")
     .replace(/^_+|_+$/g, "")
     .slice(0, 32) || "etapa";
-  const existingIds = new Set(existingStages.map((stage) => stage.id));
   let next = `custom_${base}`;
   let suffix = 2;
 
@@ -642,7 +688,11 @@ function Workspace({
     const preset = savedFilterPresets.find((item) => item.id === id);
     if (!preset) return;
     setQuery(preset.filters.query ?? "");
-    setStatusFilter(preset.filters.statusFilter);
+    setStatusFilter(
+      preset.filters.statusFilter === "all"
+        ? "all"
+        : resolvePipelineStageId(preset.filters.statusFilter, preset.filters.statusFilter),
+    );
     setTemperatureFilter(preset.filters.temperatureFilter);
     setDateFilter(preset.filters.dateFilter);
     showToast(`Filtro aplicado: ${preset.name}`);
