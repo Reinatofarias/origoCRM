@@ -47,7 +47,7 @@ export type Task = {
   id: string;
   user_id?: string | null;
   lead_id: string;
-  type: "followup" | "call" | "email" | "whatsapp" | "other";
+  type: "followup" | "call" | "email" | "whatsapp" | "meeting" | "other";
   title: string;
   notes?: string | null;
   due_at: string;

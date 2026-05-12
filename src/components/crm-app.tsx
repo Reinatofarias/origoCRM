@@ -19,6 +19,7 @@ import { CSS } from "@dnd-kit/utilities";
 import {
   AlertTriangle,
   BarChart3,
+  CalendarClock,
   Check,
   CheckCheck,
   Clock3,
@@ -30,6 +31,8 @@ import {
   Plus,
   QrCode,
   RefreshCw,
+  RotateCcw,
+  Save,
   Search,
   Send,
   Settings,
@@ -74,7 +77,7 @@ import {
   getNextLeadAfterSend,
 } from "@/lib/services/leads";
 
-type View = "dashboard" | "pipeline" | "leads" | "templates" | "conversations" | "whatsapp" | "settings";
+type View = "dashboard" | "pipeline" | "tasks" | "leads" | "templates" | "conversations" | "whatsapp" | "settings";
 type AuthUser = { id: string; email?: string };
 type Toast = { id: string; text: string };
 type DashboardAgendaItem = {
@@ -87,6 +90,18 @@ type InteractionInput = {
   note: string;
   type: NonNullable<Interaction["type"]>;
   channel: Interaction["channel"];
+};
+type TaskInput = {
+  type: Task["type"];
+  title: string;
+  notes?: string | null;
+  due_at: string;
+};
+type TaskScope = "open" | "overdue" | "today" | "upcoming" | "completed";
+type MigrationCheck = {
+  label: string;
+  status: "checking" | "ok" | "missing";
+  detail: string;
 };
 
 const emptyLead: LeadInput = {
@@ -260,6 +275,7 @@ function AuthScreen() {
 const viewPaths: Record<View, string> = {
   dashboard: "/dashboard",
   pipeline: "/pipeline",
+  tasks: "/tasks",
   leads: "/leads",
   templates: "/templates",
   conversations: "/conversations",
@@ -553,6 +569,7 @@ function Workspace({
         if (cancelTaskError) return { error: cancelTaskError };
 
         return supabase.from("tasks").insert({
+          id: task.id,
           lead_id: lead.id,
           user_id: user.id,
           type: task.type,
@@ -569,6 +586,88 @@ function Workspace({
       ]);
       if (leadError || interactionError) showToast("Erro ao salvar follow-up");
       if (taskError) showToast("Follow-up salvo; aplique a migracao de tarefas no Supabase");
+    }
+  }
+
+  async function createTask(lead: Lead, input: TaskInput) {
+    const now = new Date().toISOString();
+    const task: Task = {
+      id: newId("task"),
+      lead_id: lead.id,
+      user_id: user.id,
+      type: input.type,
+      title: input.title.trim(),
+      notes: input.notes?.trim() || null,
+      due_at: input.due_at,
+      status: "open",
+      completed_at: null,
+      created_at: now,
+      updated_at: now,
+    };
+    const previousTasks = remoteTasks;
+    const previousLeads = remoteLeads;
+    const previousInteractions = remoteInteractions;
+    const interaction = makeInteraction(
+      lead.id,
+      `Tarefa criada: ${task.title} (${taskTypeLabel(task.type)})`,
+      task.type === "followup" ? "followup_created" : "note",
+    );
+
+    setRemoteTasks((items) => [
+      task,
+      ...items.map((item) =>
+        task.type === "followup" &&
+        item.lead_id === lead.id &&
+        item.status === "open" &&
+        item.type === "followup"
+          ? { ...item, status: "canceled" as const, updated_at: now }
+          : item,
+      ),
+    ]);
+    if (task.type === "followup") {
+      patchLeadOptimistic(lead.id, { next_followup_at: task.due_at, updated_at: now });
+    }
+    addInteractionOptimistic(interaction);
+    showToast("Tarefa criada");
+
+    if (supabase) {
+      const saveTask = async () => {
+        if (task.type === "followup") {
+          const { error: cancelTaskError } = await supabase
+            .from("tasks")
+            .update({ status: "canceled", updated_at: now })
+            .eq("lead_id", lead.id)
+            .eq("type", "followup")
+            .eq("status", "open");
+
+          if (cancelTaskError) return { error: cancelTaskError };
+        }
+
+        return supabase.from("tasks").insert({
+          id: task.id,
+          lead_id: lead.id,
+          user_id: user.id,
+          type: task.type,
+          title: task.title,
+          notes: task.notes,
+          due_at: task.due_at,
+          status: task.status,
+        });
+      };
+      const [{ error: taskError }, { error: leadError }, { error: interactionError }] = await Promise.all([
+        saveTask(),
+        task.type === "followup"
+          ? supabase.from("leads").update({ next_followup_at: task.due_at }).eq("id", lead.id)
+          : Promise.resolve({ error: null }),
+        supabase.from("interactions").insert({ ...interaction, user_id: user.id }),
+      ]);
+
+      if (taskError || leadError || interactionError) {
+        setRemoteTasks(previousTasks);
+        setRemoteLeads(previousLeads);
+        setRemoteInteractions(previousInteractions);
+        showToast("Erro ao criar tarefa. Verifique a migracao de tarefas no Supabase");
+      }
     }
   }
 
@@ -614,6 +713,49 @@ function Workspace({
         setRemoteLeads(previousLeads);
         setRemoteInteractions(previousInteractions);
         showToast("Erro ao concluir follow-up");
+      }
+    }
+  }
+
+  async function rescheduleTask(task: Task, lead: Lead, dueAt: string) {
+    const now = new Date().toISOString();
+    const previousTasks = remoteTasks;
+    const previousLeads = remoteLeads;
+    const interaction = makeInteraction(
+      lead.id,
+      `Tarefa reagendada: ${task.title} para ${new Date(dueAt).toLocaleString("pt-BR")}`,
+      task.type === "followup" ? "followup_created" : "note",
+    );
+
+    setRemoteTasks((items) =>
+      items.map((item) =>
+        item.id === task.id
+          ? { ...item, due_at: dueAt, status: "open", completed_at: null, updated_at: now }
+          : item,
+      ),
+    );
+    if (task.type === "followup") {
+      patchLeadOptimistic(lead.id, { next_followup_at: dueAt, updated_at: now });
+    }
+    addInteractionOptimistic(interaction);
+    showToast("Tarefa reagendada");
+
+    if (supabase) {
+      const [{ error: taskError }, { error: leadError }, { error: interactionError }] = await Promise.all([
+        supabase
+          .from("tasks")
+          .update({ due_at: dueAt, status: "open", completed_at: null, updated_at: now })
+          .eq("id", task.id),
+        task.type === "followup"
+          ? supabase.from("leads").update({ next_followup_at: dueAt }).eq("id", lead.id)
+          : Promise.resolve({ error: null }),
+        supabase.from("interactions").insert({ ...interaction, user_id: user.id }),
+      ]);
+
+      if (taskError || leadError || interactionError) {
+        setRemoteTasks(previousTasks);
+        setRemoteLeads(previousLeads);
+        showToast("Erro ao reagendar tarefa");
       }
     }
   }
@@ -753,6 +895,7 @@ function Workspace({
             {[
               ["dashboard", "Dashboard", BarChart3],
               ["pipeline", "Pipeline", Sparkles],
+              ["tasks", "Agenda", CalendarClock],
               ["leads", "Leads", UserRound],
               ["templates", "Mensagens prontas", MessageCircle],
               ["conversations", "Conversas", MessageCircle],
@@ -788,6 +931,7 @@ function Workspace({
               <h1 className="text-2xl font-semibold">
                 {view === "dashboard" && "Dashboard"}
                 {view === "pipeline" && "Pipeline"}
+                {view === "tasks" && "Agenda"}
                 {view === "leads" && "Leads"}
                 {view === "templates" && "Mensagens prontas"}
                 {view === "conversations" && "Conversas"}
@@ -797,6 +941,8 @@ function Workspace({
               <p className="mt-1 text-sm text-zinc-500">
                 {view === "conversations"
                   ? "Mensagens salvas pelo webhook da Evolution."
+                  : view === "tasks"
+                    ? "Tarefas comerciais, follow-ups e proximas acoes."
                   : view === "whatsapp"
                     ? "Conecte a instancia OrigoCRM pelo QR Code."
                     : view === "settings"
@@ -905,6 +1051,15 @@ function Workspace({
                     recentLeadId={recentLeadId}
                   />
                 )}
+                {view === "tasks" && (
+                  <TasksView
+                    leads={leads}
+                    onCompleteTask={completeTask}
+                    onOpenLead={(lead) => setSelectedLeadId(lead.id)}
+                    onRescheduleTask={rescheduleTask}
+                    tasks={tasks}
+                  />
+                )}
                 {view === "leads" && (
                   <LeadList
                     leads={filteredLeads}
@@ -957,12 +1112,21 @@ function Workspace({
           key={selectedLead.id}
           lead={selectedLead}
           onAddInteraction={addInteraction}
+          onCompleteTask={completeTask}
+          onCreateTask={createTask}
           onClose={() => setSelectedLeadId(null)}
           onDelete={(lead) => setLeadPendingDelete(lead)}
           onScheduleFollowup={scheduleFollowup}
           onSend={sendWhatsApp}
+          onSaveLead={(input) => saveLead(input, selectedLead.id)}
           onUpdateTemperature={updateLeadTemperature}
+          tasks={tasks.filter((item) => item.lead_id === selectedLead.id)}
           templates={templates}
+          whatsappMessages={whatsappMessages.filter(
+            (message) =>
+              message.lead_id === selectedLead.id ||
+              normalizePhone(message.phone_number) === normalizePhone(selectedLead.phone),
+          )}
         />
       )}
       {leadPendingDelete && (
@@ -1313,6 +1477,190 @@ function RiskItem({ label, value }: { label: string; value: number }) {
   );
 }
 
+function TasksView({
+  tasks,
+  leads,
+  onOpenLead,
+  onCompleteTask,
+  onRescheduleTask,
+}: {
+  tasks: Task[];
+  leads: Lead[];
+  onOpenLead: (lead: Lead) => void;
+  onCompleteTask: (task: Task, lead: Lead) => void;
+  onRescheduleTask: (task: Task, lead: Lead, dueAt: string) => void;
+}) {
+  const [scope, setScope] = useState<TaskScope>("open");
+  const [owner, setOwner] = useState("all");
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
+  const owners = Array.from(
+    new Set(leads.map((lead) => lead.owner_name?.trim()).filter((item): item is string => Boolean(item))),
+  ).sort((a, b) => a.localeCompare(b));
+  const taskRows = tasks
+    .map((task) => ({ task, lead: leads.find((lead) => lead.id === task.lead_id) ?? null }))
+    .filter((item): item is { task: Task; lead: Lead } => Boolean(item.lead))
+    .filter(({ task, lead }) => {
+      if (owner !== "all" && lead.owner_name !== owner) return false;
+      if (scope === "completed") return task.status === "completed";
+      if (task.status !== "open") return false;
+      if (scope === "overdue") return isTaskOverdue(task);
+      if (scope === "today") return isTaskDueOnDate(task, new Date());
+      if (scope === "upcoming") return new Date(task.due_at).getTime() > endOfDay(new Date()).getTime();
+      return true;
+    })
+    .sort((a, b) => new Date(a.task.due_at).getTime() - new Date(b.task.due_at).getTime());
+  const selectedRows = taskRows.filter(({ task }) => selectedIds.has(task.id));
+  const counts = {
+    open: tasks.filter((task) => task.status === "open").length,
+    overdue: tasks.filter((task) => task.status === "open" && isTaskOverdue(task)).length,
+    today: tasks.filter((task) => task.status === "open" && isTaskDueOnDate(task, new Date())).length,
+    upcoming: tasks.filter((task) => task.status === "open" && new Date(task.due_at).getTime() > endOfDay(new Date()).getTime()).length,
+    completed: tasks.filter((task) => task.status === "completed").length,
+  };
+
+  function toggleTask(id: string) {
+    setSelectedIds((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function bulkReschedule(days: number) {
+    for (const { task, lead } of selectedRows) {
+      onRescheduleTask(task, lead, addDays(days));
+    }
+    setSelectedIds(new Set());
+  }
+
+  return (
+    <div className="space-y-5">
+      <div className="grid gap-3 md:grid-cols-5">
+        {([
+          ["open", "Abertas"],
+          ["overdue", "Vencidas"],
+          ["today", "Hoje"],
+          ["upcoming", "Proximas"],
+          ["completed", "Concluidas"],
+        ] as Array<[TaskScope, string]>).map(([key, label]) => (
+          <button
+            className={`rounded-lg border p-4 text-left transition ${
+              scope === key
+                ? "border-[#8B5CF6]/50 bg-[#8B5CF6]/15"
+                : "border-white/10 bg-white/[0.035] hover:bg-white/[0.06]"
+            }`}
+            key={key}
+            onClick={() => setScope(key)}
+            type="button"
+          >
+            <div className="text-xs uppercase text-zinc-500">{label}</div>
+            <div className="mt-2 text-2xl font-semibold">{counts[key]}</div>
+          </button>
+        ))}
+      </div>
+
+      <section className="rounded-lg border border-white/10 bg-white/[0.03] p-4">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <h2 className="text-lg font-semibold">Controle de agenda</h2>
+            <p className="mt-1 text-sm text-zinc-500">Conclua, abra o lead ou reagende proximas acoes.</p>
+          </div>
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <select
+              className="h-10 rounded-lg border border-white/10 bg-black/30 px-3 text-sm text-zinc-200 outline-none transition focus:border-[#8B5CF6]"
+              onChange={(event) => setOwner(event.target.value)}
+              value={owner}
+            >
+              <option value="all">Todos responsaveis</option>
+              {owners.map((item) => (
+                <option key={item} value={item}>{item}</option>
+              ))}
+            </select>
+            <button
+              className="flex h-10 items-center justify-center gap-2 rounded-lg border border-white/10 px-3 text-sm text-zinc-300 transition hover:bg-white/[0.06] disabled:opacity-50"
+              disabled={selectedRows.length === 0}
+              onClick={() => bulkReschedule(1)}
+              type="button"
+            >
+              <RotateCcw className="h-4 w-4" />
+              Reagendar selecionadas
+            </button>
+          </div>
+        </div>
+
+        <div className="mt-4 overflow-hidden rounded-lg border border-white/10">
+          {taskRows.length === 0 ? (
+            <div className="p-6 text-sm text-zinc-500">Nenhuma tarefa encontrada para este filtro.</div>
+          ) : (
+            <div className="divide-y divide-white/10">
+              {taskRows.map(({ task, lead }) => {
+                const due = getDueAtLabel(task.due_at);
+                return (
+                  <div className="grid gap-3 bg-black/20 p-4 lg:grid-cols-[auto_1.4fr_1fr_auto] lg:items-center" key={task.id}>
+                    <input
+                      checked={selectedIds.has(task.id)}
+                      className="mt-1 h-4 w-4 accent-[#8B5CF6] lg:mt-0"
+                      onChange={() => toggleTask(task.id)}
+                      type="checkbox"
+                    />
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="rounded-full border border-white/10 px-2 py-0.5 text-[11px] text-zinc-400">
+                          {taskTypeLabel(task.type)}
+                        </span>
+                        <span className="font-medium text-zinc-100">{task.title}</span>
+                      </div>
+                      <button
+                        className="mt-1 text-left text-sm text-zinc-500 transition hover:text-zinc-200"
+                        onClick={() => onOpenLead(lead)}
+                        type="button"
+                      >
+                        {lead.name} · {lead.company || "Sem empresa"}
+                      </button>
+                    </div>
+                    <div>
+                      <div className={`text-sm ${due.tone}`}>{due.text}</div>
+                      <div className="mt-1 text-xs text-zinc-500">{lead.owner_name || "Sem responsavel"}</div>
+                    </div>
+                    <div className="flex flex-wrap gap-2 lg:justify-end">
+                      <button
+                        className="h-9 rounded-lg border border-white/10 px-3 text-xs text-zinc-300 transition hover:bg-white/[0.06]"
+                        onClick={() => onOpenLead(lead)}
+                        type="button"
+                      >
+                        Abrir
+                      </button>
+                      {task.status === "open" && (
+                        <>
+                          <button
+                            className="h-9 rounded-lg border border-[#8B5CF6]/25 bg-[#8B5CF6]/10 px-3 text-xs text-[#DDD6FE] transition hover:bg-[#8B5CF6]/20"
+                            onClick={() => onRescheduleTask(task, lead, addDays(1))}
+                            type="button"
+                          >
+                            Amanha
+                          </button>
+                          <button
+                            className="h-9 rounded-lg border border-[#25D366]/25 bg-[#25D366]/10 px-3 text-xs text-[#9AF0B8] transition hover:bg-[#25D366]/20"
+                            onClick={() => onCompleteTask(task, lead)}
+                            type="button"
+                          >
+                            Concluir
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </section>
+    </div>
+  );
+}
+
 function groupMessagesByPhone(messages: WhatsAppMessage[]) {
   const grouped = new Map<string, WhatsAppMessage[]>();
   for (const message of [...messages].sort(
@@ -1465,10 +1813,22 @@ function isTaskDueToday(task: Task) {
   return dueAt.getTime() <= todayEnd.getTime();
 }
 
+function isTaskDueOnDate(task: Task, date: Date) {
+  const dueAt = new Date(task.due_at);
+  if (Number.isNaN(dueAt.getTime())) return false;
+  return startOfDay(dueAt).getTime() === startOfDay(date).getTime();
+}
+
 function isTaskOverdue(task: Task) {
   const dueAt = new Date(task.due_at);
   if (Number.isNaN(dueAt.getTime())) return false;
   return dueAt.getTime() < startOfDay(new Date()).getTime();
+}
+
+function endOfDay(date: Date) {
+  const next = new Date(date);
+  next.setHours(23, 59, 59, 999);
+  return next;
 }
 
 function isLeadCreatedToday(lead: Lead) {
@@ -1510,6 +1870,15 @@ function getDueAtLabel(value: string) {
     text: `${dueAt.toLocaleDateString("pt-BR")} as ${time}`,
     tone: "text-zinc-400",
   };
+}
+
+function taskTypeLabel(type: Task["type"]) {
+  if (type === "followup") return "Follow-up";
+  if (type === "call") return "Ligacao";
+  if (type === "email") return "Email";
+  if (type === "whatsapp") return "WhatsApp";
+  if (type === "meeting") return "Reuniao";
+  return "Outro";
 }
 
 function getLastContactLabel(lead: Lead) {
@@ -1565,6 +1934,21 @@ function formatCurrency(value?: number | null) {
     currency: "BRL",
     maximumFractionDigits: 0,
   });
+}
+
+function leadToInput(lead: Lead): LeadInput {
+  return {
+    name: lead.name,
+    phone: lead.phone,
+    company: lead.company,
+    source: lead.source,
+    status: lead.status,
+    estimated_value: lead.estimated_value ?? null,
+    owner_name: lead.owner_name ?? "",
+    temperature: lead.temperature ?? "morno",
+    outcome_reason: lead.outcome_reason ?? "",
+    sla_hours: lead.sla_hours ?? 24,
+  };
 }
 
 function getTemperatureLabel(temperature?: Lead["temperature"] | null) {
@@ -3041,7 +3425,87 @@ function sortWhatsAppMessages(a: WhatsAppMessage, b: WhatsAppMessage) {
   return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
 }
 
+function migrationChecksInitialState(configured: boolean): MigrationCheck[] {
+  if (!configured) {
+    return [
+      {
+        label: "Campos comerciais",
+        status: "missing",
+        detail: "Supabase nao configurado neste ambiente",
+      },
+      {
+        label: "Tabela de tarefas",
+        status: "missing",
+        detail: "Supabase nao configurado neste ambiente",
+      },
+    ];
+  }
+
+  return [
+    {
+      label: "Campos comerciais",
+      status: "checking",
+      detail: "Verificando commercial_pipeline_migration.sql",
+    },
+    {
+      label: "Tabela de tarefas",
+      status: "checking",
+      detail: "Verificando tasks_migration.sql",
+    },
+  ];
+}
+
 function SettingsView() {
+  const supabase = useMemo(() => createSupabaseClient(), []);
+  const [checks, setChecks] = useState<MigrationCheck[]>(() => migrationChecksInitialState(Boolean(supabase)));
+
+  useEffect(() => {
+    if (!supabase) {
+      return;
+    }
+
+    let mounted = true;
+    const client = supabase;
+
+    async function runChecks() {
+      const [commercial, tasksResult] = await Promise.all([
+        client
+          .from("leads")
+          .select("id,estimated_value,owner_name,temperature,outcome_reason,sla_hours")
+          .limit(1),
+        client
+          .from("tasks")
+          .select("id,lead_id,type,title,due_at,status,completed_at")
+          .limit(1),
+      ]);
+
+      if (!mounted) return;
+
+      setChecks([
+        {
+          label: "Campos comerciais",
+          status: commercial.error ? "missing" : "ok",
+          detail: commercial.error
+            ? "Aplique supabase/commercial_pipeline_migration.sql"
+            : "Campos comerciais disponiveis em leads",
+        },
+        {
+          label: "Tabela de tarefas",
+          status: tasksResult.error ? "missing" : "ok",
+          detail: tasksResult.error
+            ? "Aplique supabase/tasks_migration.sql e tasks_meeting_type_migration.sql"
+            : "Tabela tasks disponivel para agenda profissional",
+        },
+      ]);
+    }
+
+    void runChecks();
+
+    return () => {
+      mounted = false;
+    };
+  }, [supabase]);
+
   return (
     <div className="grid gap-5 xl:grid-cols-2">
       <section className="rounded-xl border border-white/10 bg-white/[0.035] p-5">
@@ -3053,8 +3517,25 @@ function SettingsView() {
           </div>
           <div className="flex items-center justify-between gap-3 rounded-lg border border-white/10 bg-black/20 p-3">
             <span>Tabelas do CRM</span>
-            <span>leads, interacoes, mensagens</span>
+            <span>leads, interacoes, mensagens, tarefas</span>
           </div>
+          {checks.map((check) => (
+            <div className="rounded-lg border border-white/10 bg-black/20 p-3" key={check.label}>
+              <div className="flex items-center justify-between gap-3">
+                <span>{check.label}</span>
+                <span className={
+                  check.status === "ok"
+                    ? "text-[#25D366]"
+                    : check.status === "missing"
+                      ? "text-amber-300"
+                      : "text-zinc-500"
+                }>
+                  {check.status === "ok" ? "Aplicada" : check.status === "missing" ? "Pendente" : "Verificando"}
+                </span>
+              </div>
+              <p className="mt-2 text-xs text-zinc-500">{check.detail}</p>
+            </div>
+          ))}
         </div>
       </section>
 
@@ -3183,38 +3664,261 @@ function LeadDetails({
   lead,
   templates,
   interactions,
+  tasks,
+  whatsappMessages,
   onClose,
   onSend,
   onAddInteraction,
+  onCreateTask,
+  onCompleteTask,
   onScheduleFollowup,
+  onSaveLead,
   onUpdateTemperature,
   onDelete,
 }: {
   lead: Lead;
   templates: MessageTemplate[];
   interactions: Interaction[];
+  tasks: Task[];
+  whatsappMessages: WhatsAppMessage[];
   onClose: () => void;
   onSend: (lead: Lead, message: string, nextFollowupAt: string) => void;
   onAddInteraction: (leadId: string, input: InteractionInput) => void;
+  onCreateTask: (lead: Lead, input: TaskInput) => void;
+  onCompleteTask: (task: Task, lead: Lead) => void;
   onScheduleFollowup: (lead: Lead, nextFollowupAt: string) => void;
+  onSaveLead: (input: LeadInput) => void;
   onUpdateTemperature: (lead: Lead, temperature: NonNullable<Lead["temperature"]>) => void;
   onDelete: (lead: Lead) => void;
 }) {
   const automaticTemplate = pickTemplate(templates, lead);
   const [message, setMessage] = useState(automaticTemplate ? renderTemplate(automaticTemplate.body, lead) : "");
   const [followupAt, setFollowupAt] = useState(() => toDateTimeLocal(lead.next_followup_at ?? addDays(1)));
+  const [commercialForm, setCommercialForm] = useState<LeadInput>(() => leadToInput(lead));
+  const [taskForm, setTaskForm] = useState<TaskInput>(() => ({
+    type: "followup",
+    title: `Follow-up com ${lead.name}`,
+    notes: "",
+    due_at: addDays(1),
+  }));
   const [note, setNote] = useState("");
   const [interactionType, setInteractionType] = useState<NonNullable<Interaction["type"]>>("note");
   const [interactionChannel, setInteractionChannel] = useState<Interaction["channel"]>("whatsapp");
   const nextFollowupAt = fromDateTimeLocal(followupAt);
+  const openTasks = tasks
+    .filter((task) => task.status === "open")
+    .sort((a, b) => new Date(a.due_at).getTime() - new Date(b.due_at).getTime());
+
+  function updateCommercialField<K extends keyof LeadInput>(key: K, value: LeadInput[K]) {
+    setCommercialForm((current) => ({ ...current, [key]: value }));
+  }
+
+  function updateTaskField<K extends keyof TaskInput>(key: K, value: TaskInput[K]) {
+    setTaskForm((current) => ({ ...current, [key]: value }));
+  }
 
   return (
-    <Modal onClose={onClose} title={lead.name}>
+    <Modal onClose={onClose} title={lead.name} wide>
       <div className="space-y-5">
+        <section className="rounded-lg border border-white/10 bg-white/[0.035] p-4">
+          <form
+            className="space-y-4"
+            onSubmit={(event) => {
+              event.preventDefault();
+              onSaveLead(commercialForm);
+            }}
+          >
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+              <div>
+                <h3 className="font-semibold text-zinc-100">Dados comerciais</h3>
+                <p className="mt-1 text-sm text-zinc-500">Edite qualificacao, responsavel e etapa sem sair do lead.</p>
+              </div>
+              <button
+                className="flex h-10 items-center justify-center gap-2 rounded-lg bg-[#8B5CF6] px-4 text-sm font-medium transition hover:bg-[#7C3AED]"
+                type="submit"
+              >
+                <Save className="h-4 w-4" />
+                Salvar dados
+              </button>
+            </div>
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+              <Input label="Nome" onChange={(value) => updateCommercialField("name", value)} required value={commercialForm.name} />
+              <Input
+                label="Telefone"
+                onChange={(value) => updateCommercialField("phone", normalizePhone(value))}
+                required
+                value={commercialForm.phone}
+              />
+              <Input label="Empresa" onChange={(value) => updateCommercialField("company", value)} value={commercialForm.company} />
+              <Input label="Origem" onChange={(value) => updateCommercialField("source", value)} value={commercialForm.source} />
+              <Input
+                label="Valor estimado"
+                onChange={(value) =>
+                  updateCommercialField("estimated_value", value ? Number(value.replace(",", ".")) : null)
+                }
+                type="number"
+                value={commercialForm.estimated_value?.toString() ?? ""}
+              />
+              <Input label="Responsavel" onChange={(value) => updateCommercialField("owner_name", value)} value={commercialForm.owner_name ?? ""} />
+              <label className="block text-sm text-zinc-300">
+                Temperatura
+                <select
+                  className="mt-2 h-11 w-full rounded-lg border border-white/10 bg-[#14131B] px-3 text-white outline-none transition focus:border-[#8B5CF6]"
+                  onChange={(event) => {
+                    const temperature = event.target.value as NonNullable<Lead["temperature"]>;
+                    updateCommercialField("temperature", temperature);
+                    onUpdateTemperature(lead, temperature);
+                  }}
+                  value={commercialForm.temperature ?? lead.temperature ?? "morno"}
+                >
+                  <option value="frio">Frio</option>
+                  <option value="morno">Morno</option>
+                  <option value="quente">Quente</option>
+                </select>
+              </label>
+              <label className="block text-sm text-zinc-300">
+                Etapa
+                <select
+                  className="mt-2 h-11 w-full rounded-lg border border-white/10 bg-[#14131B] px-3 text-white outline-none transition focus:border-[#8B5CF6]"
+                  onChange={(event) => updateCommercialField("status", event.target.value as LeadStatus)}
+                  value={commercialForm.status}
+                >
+                  {pipelineColumns.map((column) => (
+                    <option key={column.id} value={column.id}>{column.title}</option>
+                  ))}
+                </select>
+              </label>
+              <Input
+                label="SLA de retorno (h)"
+                onChange={(value) => updateCommercialField("sla_hours", value ? Number(value) : null)}
+                type="number"
+                value={commercialForm.sla_hours?.toString() ?? ""}
+              />
+            </div>
+            <label className="block text-sm text-zinc-300">
+              Motivo de ganho/perda
+              <textarea
+                className="mt-2 min-h-20 w-full rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-white outline-none transition focus:border-[#8B5CF6]"
+                onChange={(event) => updateCommercialField("outcome_reason", event.target.value)}
+                value={commercialForm.outcome_reason ?? ""}
+              />
+            </label>
+          </form>
+        </section>
+
+        <section className="grid gap-5 xl:grid-cols-[1fr_1fr]">
+          <div className="rounded-lg border border-white/10 bg-white/[0.025] p-4">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-semibold text-zinc-100">Tarefas abertas</h3>
+                <p className="mt-1 text-xs text-zinc-500">Proximas acoes deste lead.</p>
+              </div>
+              <span className="rounded-full border border-white/10 px-2 py-1 text-xs text-zinc-400">{openTasks.length}</span>
+            </div>
+            <div className="mt-3 space-y-2">
+              {openTasks.length === 0 && (
+                <div className="rounded-lg border border-dashed border-white/10 p-4 text-sm text-zinc-500">
+                  Nenhuma tarefa aberta para este lead.
+                </div>
+              )}
+              {openTasks.map((task) => {
+                const due = getDueAtLabel(task.due_at);
+                return (
+                  <div className="rounded-lg border border-white/10 bg-black/20 p-3" key={task.id}>
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                      <div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="rounded-full border border-white/10 px-2 py-0.5 text-[11px] text-zinc-400">
+                            {taskTypeLabel(task.type)}
+                          </span>
+                          <span className="text-sm font-medium text-zinc-100">{task.title}</span>
+                        </div>
+                        <div className={`mt-2 text-xs ${due.tone}`}>{due.text}</div>
+                        {task.notes && <p className="mt-2 text-xs leading-5 text-zinc-500">{task.notes}</p>}
+                      </div>
+                      <button
+                        className="h-9 rounded-lg border border-[#25D366]/25 bg-[#25D366]/10 px-3 text-xs text-[#9AF0B8] transition hover:bg-[#25D366]/20"
+                        onClick={() => onCompleteTask(task, lead)}
+                        type="button"
+                      >
+                        Concluir
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          <form
+            className="rounded-lg border border-white/10 bg-white/[0.025] p-4"
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (!taskForm.title.trim()) return;
+              onCreateTask(lead, taskForm);
+              setTaskForm({
+                type: taskForm.type,
+                title: taskForm.type === "followup" ? `Follow-up com ${lead.name}` : "",
+                notes: "",
+                due_at: addDays(1),
+              });
+            }}
+          >
+            <h3 className="text-sm font-semibold text-zinc-100">Criar tarefa</h3>
+            <div className="mt-3 grid gap-3 sm:grid-cols-2">
+              <label className="block text-sm text-zinc-300">
+                Tipo
+                <select
+                  className="mt-2 h-11 w-full rounded-lg border border-white/10 bg-[#14131B] px-3 text-white outline-none transition focus:border-[#8B5CF6]"
+                  onChange={(event) => {
+                    const type = event.target.value as Task["type"];
+                    updateTaskField("type", type);
+                    if (!taskForm.title.trim() || taskForm.title.startsWith("Follow-up")) {
+                      updateTaskField("title", type === "followup" ? `Follow-up com ${lead.name}` : taskTypeLabel(type));
+                    }
+                  }}
+                  value={taskForm.type}
+                >
+                  <option value="followup">Follow-up</option>
+                  <option value="whatsapp">WhatsApp</option>
+                  <option value="call">Ligacao</option>
+                  <option value="email">Email</option>
+                  <option value="meeting">Reuniao</option>
+                  <option value="other">Outro</option>
+                </select>
+              </label>
+              <label className="block text-sm text-zinc-300">
+                Quando
+                <input
+                  className="mt-2 h-11 w-full rounded-lg border border-white/10 bg-black/30 px-3 text-sm text-zinc-100 outline-none transition focus:border-[#8B5CF6]"
+                  onChange={(event) => updateTaskField("due_at", fromDateTimeLocal(event.target.value))}
+                  type="datetime-local"
+                  value={toDateTimeLocal(taskForm.due_at)}
+                />
+              </label>
+            </div>
+            <Input label="Titulo" onChange={(value) => updateTaskField("title", value)} required value={taskForm.title} />
+            <label className="mt-3 block text-sm text-zinc-300">
+              Observacao
+              <textarea
+                className="mt-2 min-h-20 w-full rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-white outline-none transition focus:border-[#8B5CF6]"
+                onChange={(event) => updateTaskField("notes", event.target.value)}
+                value={taskForm.notes ?? ""}
+              />
+            </label>
+            <button className="mt-3 flex h-10 w-full items-center justify-center gap-2 rounded-lg border border-[#8B5CF6]/40 bg-[#8B5CF6]/15 text-sm font-medium text-[#DDD6FE] transition hover:bg-[#8B5CF6]/25">
+              <CalendarClock className="h-4 w-4" />
+              Criar tarefa
+            </button>
+          </form>
+        </section>
+
         <div className="rounded-lg border border-white/10 bg-white/[0.035] p-4">
-          <div className="text-sm text-zinc-500">Empresa</div>
-          <div className="mt-1">{lead.company || "Sem empresa"}</div>
-          <div className="mt-3 grid gap-3 sm:grid-cols-3">
+          <div className="grid gap-3 sm:grid-cols-4">
+            <div>
+              <div className="text-sm text-zinc-500">Empresa</div>
+              <div className="mt-1">{lead.company || "Sem empresa"}</div>
+            </div>
             <div>
               <div className="text-sm text-zinc-500">Valor</div>
               <div className="mt-1">{formatCurrency(lead.estimated_value) ?? "Nao informado"}</div>
@@ -3378,7 +4082,7 @@ function LeadDetails({
           </button>
         </form>
 
-        <Timeline interactions={interactions} />
+        <LeadHistory interactions={interactions} whatsappMessages={whatsappMessages} />
 
         <button
           className="flex h-11 w-full items-center justify-center gap-2 rounded-lg border border-red-400/25 bg-red-500/10 text-sm font-medium text-red-200 transition hover:bg-red-500/20"
@@ -3393,7 +4097,94 @@ function LeadDetails({
   );
 }
 
-function Timeline({ interactions }: { interactions: Interaction[] }) {
+function LeadHistory({
+  interactions,
+  whatsappMessages,
+}: {
+  interactions: Interaction[];
+  whatsappMessages: WhatsAppMessage[];
+}) {
+  const commercialChanges = interactions.filter(isCommercialInteraction);
+  const operationalInteractions = interactions.filter(
+    (interaction) => !isCommercialInteraction(interaction) && interaction.type !== "whatsapp_sent",
+  );
+  const whatsappInteractions = interactions.filter((interaction) => interaction.type === "whatsapp_sent");
+
+  return (
+    <div className="grid gap-5 xl:grid-cols-3">
+      <Timeline
+        emptyText="Nenhuma interacao manual registrada."
+        interactions={operationalInteractions}
+        title="Interacoes"
+      />
+      <WhatsAppHistory interactions={whatsappInteractions} messages={whatsappMessages} />
+      <Timeline
+        emptyText="Nenhuma mudanca comercial registrada."
+        interactions={commercialChanges}
+        title="Mudancas comerciais"
+      />
+    </div>
+  );
+}
+
+function WhatsAppHistory({
+  interactions,
+  messages,
+}: {
+  interactions: Interaction[];
+  messages: WhatsAppMessage[];
+}) {
+  const sortedMessages = [...messages].sort(
+    (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+  );
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between gap-3">
+        <h3 className="font-medium">WhatsApp</h3>
+        <span className="rounded-full border border-white/10 px-2 py-1 text-xs text-zinc-500">
+          {sortedMessages.length || interactions.length} registros
+        </span>
+      </div>
+      {sortedMessages.length === 0 && interactions.length === 0 && (
+        <div className="rounded-lg border border-dashed border-white/10 p-4 text-sm text-zinc-500">
+          Nenhuma mensagem de WhatsApp vinculada a este lead.
+        </div>
+      )}
+      {sortedMessages.slice(0, 8).map((message) => (
+        <div className="rounded-lg border border-white/10 bg-white/[0.03] p-4" key={message.id}>
+          <div className="flex items-center justify-between gap-3">
+            <span className={`rounded-full px-2 py-0.5 text-[11px] ${
+              message.direction === "inbound"
+                ? "bg-[#25D366]/10 text-[#9AF0B8]"
+                : "bg-[#8B5CF6]/10 text-[#DDD6FE]"
+            }`}>
+              {message.direction === "inbound" ? "Recebida" : "Enviada"}
+            </span>
+            <span className="text-xs text-zinc-500">{new Date(message.created_at).toLocaleString("pt-BR")}</span>
+          </div>
+          <p className="mt-2 line-clamp-3 text-sm leading-6 text-zinc-300">{message.content || "Mensagem sem texto"}</p>
+        </div>
+      ))}
+      {sortedMessages.length === 0 && interactions.map((interaction) => (
+        <div className="rounded-lg border border-white/10 bg-white/[0.03] p-4" key={interaction.id}>
+          <div className="text-sm font-medium text-zinc-100">Mensagem enviada</div>
+          <p className="mt-2 text-sm leading-6 text-zinc-300">{interaction.message ?? interaction.note}</p>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function Timeline({
+  interactions,
+  title = "Historico comercial",
+  emptyText = "Nenhuma interacao registrada. Use notas objetivas para manter contexto, combinados e proximos passos do lead.",
+}: {
+  interactions: Interaction[];
+  title?: string;
+  emptyText?: string;
+}) {
   const sorted = [...interactions].sort(
     (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
   );
@@ -3401,15 +4192,14 @@ function Timeline({ interactions }: { interactions: Interaction[] }) {
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between gap-3">
-        <h3 className="font-medium">Historico comercial</h3>
+        <h3 className="font-medium">{title}</h3>
         <span className="rounded-full border border-white/10 px-2 py-1 text-xs text-zinc-500">
           {sorted.length} registros
         </span>
       </div>
       {sorted.length === 0 && (
         <div className="rounded-lg border border-dashed border-white/10 p-4 text-sm text-zinc-500">
-          Nenhuma interacao registrada. Use notas objetivas para manter contexto, combinados e
-          proximos passos do lead.
+          {emptyText}
         </div>
       )}
       {sorted.map((interaction) => (
@@ -3451,6 +4241,18 @@ function timelineTone(interaction: Interaction) {
   if (interaction.type === "followup_created") return "bg-amber-300";
   if (interaction.type === "status_changed") return "bg-[#8B5CF6]";
   return "bg-zinc-400";
+}
+
+function isCommercialInteraction(interaction: Interaction) {
+  const text = `${interaction.message ?? ""} ${interaction.note ?? ""}`.toLowerCase();
+  return (
+    interaction.type === "status_changed" ||
+    interaction.type === "followup_created" ||
+    text.includes("temperatura alterada") ||
+    text.includes("tarefa criada") ||
+    text.includes("tarefa reagendada") ||
+    text.includes("follow-up concluido")
+  );
 }
 
 function interactionChannelLabel(channel: Interaction["channel"]) {
@@ -3556,14 +4358,18 @@ function Modal({
   title,
   children,
   onClose,
+  wide = false,
 }: {
   title: string;
   children: React.ReactNode;
   onClose: () => void;
+  wide?: boolean;
 }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
-      <div className="max-h-[90vh] w-full max-w-xl overflow-y-auto rounded-xl border border-white/10 bg-[#0F0F16] p-5 shadow-2xl shadow-black">
+      <div className={`max-h-[90vh] w-full overflow-y-auto rounded-xl border border-white/10 bg-[#0F0F16] p-5 shadow-2xl shadow-black ${
+        wide ? "max-w-6xl" : "max-w-xl"
+      }`}>
         <div className="mb-5 flex items-center justify-between gap-4">
           <h2 className="text-xl font-semibold">{title}</h2>
           <button
