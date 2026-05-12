@@ -48,8 +48,8 @@ import { FormEvent, KeyboardEvent, MouseEvent, useCallback, useEffect, useMemo, 
 
 import { recordAuditLog as recordAuditLogAction } from "@/actions/audit";
 import {
-  archiveLead as archiveLeadAction,
   createLead as createLeadAction,
+  deleteLead as deleteLeadAction,
   unarchiveLead as unarchiveLeadAction,
   updateLead as updateLeadAction,
 } from "@/actions/leads";
@@ -64,7 +64,7 @@ import {
   sendWhatsAppConversationMessage,
   sendWhatsAppMessage,
 } from "@/actions/whatsapp";
-import { pipelineColumns } from "@/lib/constants";
+import { pipelineColumns as defaultPipelineColumns } from "@/lib/constants";
 import { createSupabaseClient, isSupabaseConfigured } from "@/lib/db";
 import type {
   AuditLog,
@@ -137,6 +137,10 @@ type SavedPipelineFilter = {
     dateFilter: "all" | "today" | "overdue";
   };
 };
+type PipelineStage = {
+  id: LeadStatus;
+  title: string;
+};
 
 const emptyLead: LeadInput = {
   name: "",
@@ -199,6 +203,64 @@ function readSavedPipelineFilterPresets(): SavedPipelineFilter[] {
   } catch {
     return [];
   }
+}
+
+function getDefaultPipelineStages(): PipelineStage[] {
+  return defaultPipelineColumns.map((column) => ({ id: column.id, title: column.title }));
+}
+
+function normalizePipelineStages(input: unknown): PipelineStage[] {
+  const defaults = getDefaultPipelineStages();
+  if (!Array.isArray(input)) return defaults;
+
+  const stages = input
+    .map((item) => {
+      if (!item || typeof item !== "object") return null;
+      const stage = item as Partial<PipelineStage>;
+      if (!stage.id || !stage.title) return null;
+      return { id: String(stage.id), title: String(stage.title).trim() || String(stage.id) };
+    })
+    .filter((stage): stage is PipelineStage => Boolean(stage));
+
+  const unique = stages.filter(
+    (stage, index, all) => all.findIndex((item) => item.id === stage.id) === index,
+  );
+  if (!unique.some((stage) => stage.id === "fechado")) {
+    unique.push({ id: "fechado", title: "Fechado" });
+  }
+
+  return unique.length ? unique : defaults;
+}
+
+function readPipelineStages(): PipelineStage[] {
+  if (typeof window === "undefined") return getDefaultPipelineStages();
+
+  try {
+    const raw = window.localStorage.getItem("origocrm:pipeline-stages");
+    return normalizePipelineStages(raw ? JSON.parse(raw) : null);
+  } catch {
+    return getDefaultPipelineStages();
+  }
+}
+
+function createPipelineStageId(title: string, existingStages: PipelineStage[]) {
+  const base = title
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 32) || "etapa";
+  const existingIds = new Set(existingStages.map((stage) => stage.id));
+  let next = `custom_${base}`;
+  let suffix = 2;
+
+  while (existingIds.has(next)) {
+    next = `custom_${base}_${suffix}`;
+    suffix += 1;
+  }
+
+  return next;
 }
 
 function BrandLogo({
@@ -371,6 +433,7 @@ function Workspace({
   const view = pathViews[pathname] ?? initialView;
   const savedFilters = useMemo(() => readSavedPipelineFilters(), []);
   const initialFilterPresets = useMemo(() => readSavedPipelineFilterPresets(), []);
+  const initialPipelineStages = useMemo(() => readPipelineStages(), []);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<LeadStatus | "all">(savedFilters.statusFilter);
@@ -380,7 +443,10 @@ function Workspace({
   const [leadFormOpen, setLeadFormOpen] = useState(false);
   const [editingLead, setEditingLead] = useState<Lead | null>(null);
   const [leadPendingDelete, setLeadPendingDelete] = useState<Lead | null>(null);
+  const [templatePendingDelete, setTemplatePendingDelete] = useState<MessageTemplate | null>(null);
   const [pendingStageChange, setPendingStageChange] = useState<PendingStageChange | null>(null);
+  const [pipelineStagesOpen, setPipelineStagesOpen] = useState(false);
+  const [pipelineStages, setPipelineStages] = useState<PipelineStage[]>(initialPipelineStages);
   const [selectedPipelineLeadIds, setSelectedPipelineLeadIds] = useState<Set<string>>(() => new Set());
   const [bulkOwnerName, setBulkOwnerName] = useState("");
   const [savedFilterPresets, setSavedFilterPresets] = useState<SavedPipelineFilter[]>(initialFilterPresets);
@@ -475,6 +541,10 @@ function Workspace({
     window.localStorage.setItem("origocrm:pipeline-filter-presets", JSON.stringify(savedFilterPresets));
   }, [savedFilterPresets]);
 
+  useEffect(() => {
+    window.localStorage.setItem("origocrm:pipeline-stages", JSON.stringify(pipelineStages));
+  }, [pipelineStages]);
+
   const filteredLeads = useMemo(() => {
     const search = query.trim().toLowerCase();
     return leads.filter((lead) =>
@@ -565,6 +635,41 @@ function Workspace({
     showToast(`Filtro aplicado: ${preset.name}`);
   }
 
+  function addPipelineStage(title: string) {
+    const trimmed = title.trim();
+    if (!trimmed) return;
+
+    setPipelineStages((items) => [
+      ...items,
+      { id: createPipelineStageId(trimmed, items), title: trimmed },
+    ]);
+    showToast("Etapa adicionada");
+  }
+
+  function renamePipelineStage(id: LeadStatus, title: string) {
+    const trimmed = title.trim();
+    if (!trimmed) return;
+    setPipelineStages((items) =>
+      items.map((stage) => (stage.id === id ? { ...stage, title: trimmed } : stage)),
+    );
+  }
+
+  function removePipelineStage(id: LeadStatus) {
+    const hasLeads = leads.some((lead) => lead.status === id);
+    if (id === "fechado") {
+      showToast("A etapa Fechado precisa existir para fechamento comercial");
+      return;
+    }
+    if (hasLeads) {
+      showToast("Mova os leads desta etapa antes de remover");
+      return;
+    }
+
+    setPipelineStages((items) => items.filter((stage) => stage.id !== id));
+    if (statusFilter === id) setStatusFilter("all");
+    showToast("Etapa removida");
+  }
+
   function patchLeadOptimistic(id: string, patch: Partial<Lead>) {
     setRemoteLeads((items) => items.map((lead) => (lead.id === id ? { ...lead, ...patch } : lead)));
     setRecentLeadId(id);
@@ -649,36 +754,46 @@ function Workspace({
     }
   }
 
-  async function archiveLead(lead: Lead) {
+  async function deleteLead(lead: Lead) {
     const previousLeads = remoteLeads;
     const previousArchivedLeads = remoteArchivedLeads;
-    const archivedAt = new Date().toISOString();
+    const previousTasks = remoteTasks;
+    const previousInteractions = remoteInteractions;
+    const previousWhatsAppMessages = remoteWhatsAppMessages;
 
     setSelectedLeadId((current) => (current === lead.id ? null : current));
     setLeadPendingDelete(null);
     setRemoteLeads((items) => items.filter((item) => item.id !== lead.id));
-    setRemoteArchivedLeads((items) => [{ ...lead, archived_at: archivedAt }, ...items]);
+    setRemoteArchivedLeads((items) => items.filter((item) => item.id !== lead.id));
+    setRemoteTasks((items) => items.filter((item) => item.lead_id !== lead.id));
+    setRemoteInteractions((items) => items.filter((item) => item.lead_id !== lead.id));
+    setRemoteWhatsAppMessages((items) =>
+      items.map((message) => (message.lead_id === lead.id ? { ...message, lead_id: null } : message)),
+    );
     setSelectedPipelineLeadIds((current) => {
       const next = new Set(current);
       next.delete(lead.id);
       return next;
     });
-    showToast("Lead arquivado");
+    showToast("Lead excluido");
 
-    const result = await archiveLeadAction(lead.id);
+    const result = await deleteLeadAction(lead.id);
 
     if (!result.success) {
       setRemoteLeads(previousLeads);
       setRemoteArchivedLeads(previousArchivedLeads);
-      showToast(result.error ?? "Erro ao arquivar lead");
+      setRemoteTasks(previousTasks);
+      setRemoteInteractions(previousInteractions);
+      setRemoteWhatsAppMessages(previousWhatsAppMessages);
+      showToast(result.error ?? "Erro ao excluir lead");
       return;
     }
 
     await recordAuditLog({
       entity_type: "lead",
       entity_id: lead.id,
-      action: "lead.archived",
-      summary: `Lead arquivado: ${lead.name}`,
+      action: "lead.deleted",
+      summary: `Lead excluido: ${lead.name}`,
       metadata: { phone: lead.phone, company: lead.company, status: lead.status },
     });
   }
@@ -780,7 +895,7 @@ function Workspace({
     if (selected.length === 0) return;
 
     for (const lead of selected) {
-      await archiveLead(lead);
+      await deleteLead(lead);
     }
     setSelectedPipelineLeadIds(new Set());
   }
@@ -860,24 +975,22 @@ function Workspace({
       created_at: now,
       updated_at: now,
     };
-    patchLeadOptimistic(lead.id, {
-      next_followup_at: nextFollowupAt,
-      updated_at: now,
-    });
+    const shouldUpdateLeadFollowup =
+      !lead.next_followup_at ||
+      new Date(nextFollowupAt).getTime() <= new Date(lead.next_followup_at).getTime();
+    if (shouldUpdateLeadFollowup) {
+      patchLeadOptimistic(lead.id, {
+        next_followup_at: nextFollowupAt,
+        updated_at: now,
+      });
+    }
     const interaction = makeInteraction(
       lead.id,
       `Follow-up criado para ${new Date(nextFollowupAt).toLocaleString("pt-BR")}`,
       "followup_created",
     );
     addInteractionOptimistic(interaction);
-    setRemoteTasks((items) => [
-      task,
-      ...items.map((item) =>
-        item.lead_id === lead.id && item.status === "open" && item.type === "followup"
-          ? { ...item, status: "canceled" as const, updated_at: now }
-          : item,
-      ),
-    ]);
+    setRemoteTasks((items) => [task, ...items]);
     showToast("Follow-up agendado");
 
     if (supabase) {
@@ -891,7 +1004,7 @@ function Workspace({
             notes: task.notes,
             due_at: task.due_at,
           },
-          { cancelOpenFollowups: true },
+          { cancelOpenFollowups: false },
         ),
         supabase.from("interactions").insert({ ...interaction, user_id: user.id }),
       ]);
@@ -933,18 +1046,12 @@ function Workspace({
       task.type === "followup" ? "followup_created" : "note",
     );
 
-    setRemoteTasks((items) => [
-      task,
-      ...items.map((item) =>
-        task.type === "followup" &&
-        item.lead_id === lead.id &&
-        item.status === "open" &&
-        item.type === "followup"
-          ? { ...item, status: "canceled" as const, updated_at: now }
-          : item,
-      ),
-    ]);
-    if (task.type === "followup") {
+    setRemoteTasks((items) => [task, ...items]);
+    const shouldUpdateLeadFollowup =
+      task.type === "followup" &&
+      (!lead.next_followup_at ||
+        new Date(task.due_at).getTime() <= new Date(lead.next_followup_at).getTime());
+    if (shouldUpdateLeadFollowup) {
       patchLeadOptimistic(lead.id, { next_followup_at: task.due_at, updated_at: now });
     }
     addInteractionOptimistic(interaction);
@@ -961,7 +1068,7 @@ function Workspace({
             notes: task.notes,
             due_at: task.due_at,
           },
-          { cancelOpenFollowups: task.type === "followup" },
+          { cancelOpenFollowups: false },
         ),
         supabase.from("interactions").insert({ ...interaction, user_id: user.id }),
       ]);
@@ -1218,6 +1325,37 @@ function Workspace({
     }
   }
 
+  async function deleteTemplate(template: MessageTemplate) {
+    if (!supabase) {
+      showToast("Supabase nao configurado");
+      return;
+    }
+
+    const previousTemplates = remoteTemplates;
+    setTemplatePendingDelete(null);
+    setRemoteTemplates((items) => items.filter((item) => item.id !== template.id));
+    showToast("Mensagem pronta excluida");
+
+    const { error } = await supabase
+      .from("message_templates")
+      .delete()
+      .eq("id", template.id)
+      .eq("user_id", user.id);
+
+    if (error) {
+      setRemoteTemplates(previousTemplates);
+      showToast("Erro ao excluir mensagem pronta");
+      return;
+    }
+
+    await recordAuditLog({
+      entity_type: "template",
+      entity_id: template.id,
+      action: "template.deleted",
+      summary: `Template excluido: ${template.title}`,
+    });
+  }
+
   async function logout() {
     if (supabase) await supabase.auth.signOut();
     onLogout();
@@ -1304,7 +1442,7 @@ function Workspace({
                     value={statusFilter}
                   >
                     <option value="all">Todas etapas</option>
-                    {pipelineColumns.map((column) => (
+                    {pipelineStages.map((column) => (
                       <option key={column.id} value={column.id}>
                         {column.title}
                       </option>
@@ -1356,6 +1494,13 @@ function Workspace({
                       >
                         Salvar filtro
                       </button>
+                      <button
+                        className="h-11 rounded-lg border border-white/10 px-4 text-sm text-zinc-300 transition hover:bg-white/[0.06]"
+                        onClick={() => setPipelineStagesOpen(true)}
+                        type="button"
+                      >
+                        Editar funil
+                      </button>
                     </>
                   )}
                   <button
@@ -1406,6 +1551,7 @@ function Workspace({
                 {view === "pipeline" && (
                   <Pipeline
                     bulkOwnerName={bulkOwnerName}
+                    columns={pipelineStages}
                     leads={filteredLeads}
                     onBulkArchive={() => void bulkArchiveSelectedLeads()}
                     onBulkAssignOwner={() => void bulkAssignOwner()}
@@ -1443,9 +1589,16 @@ function Workspace({
                     onOpen={(lead) => setSelectedLeadId(lead.id)}
                   />
                 )}
-                {view === "templates" && <Templates templates={templates} onAddTemplate={addTemplate} />}
+                {view === "templates" && (
+                  <Templates
+                    templates={templates}
+                    onAddTemplate={addTemplate}
+                    onDeleteTemplate={(template) => setTemplatePendingDelete(template)}
+                  />
+                )}
                 {view === "conversations" && (
                   <Conversations
+                    columns={pipelineStages}
                     leads={leads}
                     templates={templates}
                     onLeadCreated={(lead) => {
@@ -1475,6 +1628,7 @@ function Workspace({
 
       {leadFormOpen && (
         <LeadForm
+          columns={pipelineStages}
           lead={editingLead}
           onClose={() => setLeadFormOpen(false)}
           onSave={async (input) => {
@@ -1488,6 +1642,7 @@ function Workspace({
         <LeadDetails
           interactions={interactions.filter((item) => item.lead_id === selectedLead.id)}
           key={selectedLead.id}
+          columns={pipelineStages}
           lead={selectedLead}
           onAddInteraction={addInteraction}
           onCompleteTask={completeTask}
@@ -1511,7 +1666,24 @@ function Workspace({
         <ConfirmDeleteLead
           lead={leadPendingDelete}
           onCancel={() => setLeadPendingDelete(null)}
-          onConfirm={() => void archiveLead(leadPendingDelete)}
+          onConfirm={() => void deleteLead(leadPendingDelete)}
+        />
+      )}
+      {templatePendingDelete && (
+        <ConfirmDeleteTemplate
+          template={templatePendingDelete}
+          onCancel={() => setTemplatePendingDelete(null)}
+          onConfirm={() => void deleteTemplate(templatePendingDelete)}
+        />
+      )}
+      {pipelineStagesOpen && (
+        <PipelineStagesModal
+          stages={pipelineStages}
+          leads={leads}
+          onAddStage={addPipelineStage}
+          onClose={() => setPipelineStagesOpen(false)}
+          onRemoveStage={removePipelineStage}
+          onRenameStage={renamePipelineStage}
         />
       )}
       {pendingStageChange && (
@@ -2060,10 +2232,7 @@ function groupMessagesByPhone(messages: WhatsAppMessage[]) {
   return Array.from(grouped.values());
 }
 
-const pipelineMeta: Record<
-  LeadStatus,
-  { accent: string; description: string; empty: string }
-> = {
+const pipelineMeta: Record<string, { accent: string; description: string; empty: string }> = {
   novo: {
     accent: "bg-sky-400",
     description: "Entradas recentes para qualificar",
@@ -2091,8 +2260,17 @@ const pipelineMeta: Record<
   },
 };
 
+function getPipelineMeta(id: LeadStatus, title: string) {
+  return pipelineMeta[id] ?? {
+    accent: "bg-zinc-400",
+    description: "Etapa personalizada do funil",
+    empty: `Nenhum lead em ${title.toLowerCase()}`,
+  };
+}
+
 function Pipeline({
   leads,
+  columns,
   recentLeadId,
   selectedLeadIds,
   bulkOwnerName,
@@ -2110,6 +2288,7 @@ function Pipeline({
   onQuickSchedule,
 }: {
   leads: Lead[];
+  columns: PipelineStage[];
   recentLeadId: string | null;
   selectedLeadIds: Set<string>;
   bulkOwnerName: string;
@@ -2139,7 +2318,7 @@ function Pipeline({
     if (!activeLead) return;
 
     const overId = String(over.id);
-    const column = pipelineColumns.find((item) => item.id === overId);
+    const column = columns.find((item) => item.id === overId);
     const overLead = leads.find((lead) => lead.id === overId);
     const nextStatus = (column?.id ?? overLead?.status) as LeadStatus | undefined;
 
@@ -2154,6 +2333,7 @@ function Pipeline({
         <PipelineOverview leads={leads} />
         <PipelineBulkActions
           bulkOwnerName={bulkOwnerName}
+          columns={columns}
           onArchive={onBulkArchive}
           onAssignOwner={onBulkAssignOwner}
           onClear={onClearSelection}
@@ -2163,7 +2343,7 @@ function Pipeline({
           selectedCount={selectedCount}
         />
         <div className="grid gap-4 overflow-x-auto pb-3 xl:grid-cols-5">
-          {pipelineColumns.map((column) => {
+          {columns.map((column) => {
             const columnLeads = sortPipelineLeadsByUrgency(
               leads.filter((lead) => lead.status === column.id),
             );
@@ -2176,6 +2356,7 @@ function Pipeline({
                 onLeadDelete={onLeadDelete}
                 onQuickSchedule={onQuickSchedule}
                 onQuickWhatsApp={onQuickWhatsApp}
+                columns={columns}
                 onStatusChange={onStatusChange}
                 onToggleLeadSelection={onToggleLeadSelection}
                 recentLeadId={recentLeadId}
@@ -2192,6 +2373,7 @@ function Pipeline({
 
 function PipelineBulkActions({
   selectedCount,
+  columns,
   bulkOwnerName,
   onOwnerNameChange,
   onAssignOwner,
@@ -2201,6 +2383,7 @@ function PipelineBulkActions({
   onClear,
 }: {
   selectedCount: number;
+  columns: PipelineStage[];
   bulkOwnerName: string;
   onOwnerNameChange: (value: string) => void;
   onAssignOwner: () => void;
@@ -2229,7 +2412,7 @@ function PipelineBulkActions({
             }}
           >
             <option value="">Mover etapa</option>
-            {pipelineColumns
+            {columns
               .filter((column) => column.id !== "fechado")
               .map((column) => (
                 <option key={column.id} value={column.id}>
@@ -2268,7 +2451,7 @@ function PipelineBulkActions({
             onClick={onArchive}
             type="button"
           >
-            Arquivar
+            Excluir
           </button>
           <button
             className="h-10 rounded-lg border border-white/10 px-3 text-sm text-zinc-500 transition hover:bg-white/[0.06] disabled:opacity-50"
@@ -2281,6 +2464,88 @@ function PipelineBulkActions({
         </div>
       </div>
     </section>
+  );
+}
+
+function PipelineStagesModal({
+  stages,
+  leads,
+  onClose,
+  onAddStage,
+  onRenameStage,
+  onRemoveStage,
+}: {
+  stages: PipelineStage[];
+  leads: Lead[];
+  onClose: () => void;
+  onAddStage: (title: string) => void;
+  onRenameStage: (id: LeadStatus, title: string) => void;
+  onRemoveStage: (id: LeadStatus) => void;
+}) {
+  const [newStageTitle, setNewStageTitle] = useState("");
+
+  function leadCount(stageId: LeadStatus) {
+    return leads.filter((lead) => lead.status === stageId).length;
+  }
+
+  return (
+    <Modal onClose={onClose} title="Editar funil">
+      <div className="space-y-4">
+        <div className="space-y-3">
+          {stages.map((stage) => {
+            const count = leadCount(stage.id);
+            const canRemove = stage.id !== "fechado" && count === 0 && stages.length > 1;
+
+            return (
+              <div
+                className="grid gap-3 rounded-lg border border-white/10 bg-white/[0.035] p-3 sm:grid-cols-[1fr_auto_auto] sm:items-center"
+                key={stage.id}
+              >
+                <input
+                  className="h-10 rounded-lg border border-white/10 bg-black/30 px-3 text-sm text-zinc-100 outline-none transition focus:border-[#8B5CF6]"
+                  onChange={(event) => onRenameStage(stage.id, event.target.value)}
+                  value={stage.title}
+                />
+                <span className="rounded-full border border-white/10 px-2 py-1 text-xs text-zinc-500">
+                  {count} leads
+                </span>
+                <button
+                  className="flex h-10 items-center justify-center gap-2 rounded-lg border border-red-400/20 bg-red-500/10 px-3 text-sm text-red-300 transition hover:bg-red-500/20 disabled:opacity-40"
+                  disabled={!canRemove}
+                  onClick={() => onRemoveStage(stage.id)}
+                  type="button"
+                >
+                  <Trash2 className="h-4 w-4" />
+                  Remover
+                </button>
+              </div>
+            );
+          })}
+        </div>
+        <form
+          className="grid gap-3 sm:grid-cols-[1fr_auto]"
+          onSubmit={(event) => {
+            event.preventDefault();
+            onAddStage(newStageTitle);
+            setNewStageTitle("");
+          }}
+        >
+          <input
+            className="h-11 rounded-lg border border-white/10 bg-black/30 px-3 text-sm text-zinc-100 outline-none transition placeholder:text-zinc-600 focus:border-[#8B5CF6]"
+            onChange={(event) => setNewStageTitle(event.target.value)}
+            placeholder="Nome da nova etapa"
+            value={newStageTitle}
+          />
+          <button
+            className="flex h-11 items-center justify-center gap-2 rounded-lg bg-[#8B5CF6] px-4 text-sm font-medium transition hover:bg-[#7C3AED]"
+            type="submit"
+          >
+            <Plus className="h-4 w-4" />
+            Adicionar etapa
+          </button>
+        </form>
+      </div>
+    </Modal>
   );
 }
 
@@ -2529,6 +2794,7 @@ function PipelineColumn({
   id,
   title,
   leads,
+  columns,
   recentLeadId,
   selectedLeadIds,
   onLeadClick,
@@ -2541,6 +2807,7 @@ function PipelineColumn({
   id: LeadStatus;
   title: string;
   leads: Lead[];
+  columns: PipelineStage[];
   recentLeadId: string | null;
   selectedLeadIds: Set<string>;
   onLeadClick: (lead: Lead) => void;
@@ -2551,7 +2818,7 @@ function PipelineColumn({
   onToggleLeadSelection: (id: string) => void;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id });
-  const meta = pipelineMeta[id];
+  const meta = getPipelineMeta(id, title);
   const stats = getPipelineColumnStats(leads);
 
   return (
@@ -2619,6 +2886,7 @@ function PipelineColumn({
               onDelete={() => onLeadDelete(lead)}
               onQuickSchedule={() => onQuickSchedule(lead)}
               onQuickWhatsApp={() => onQuickWhatsApp(lead)}
+              columns={columns}
               onStatusChange={(status) => onStatusChange(lead.id, status)}
               onToggleSelection={() => onToggleLeadSelection(lead.id)}
               selected={selectedLeadIds.has(lead.id)}
@@ -2637,6 +2905,7 @@ function PipelineColumn({
 
 function SortableLeadCard({
   lead,
+  columns,
   highlighted,
   selected,
   onClick,
@@ -2647,6 +2916,7 @@ function SortableLeadCard({
   onToggleSelection,
 }: {
   lead: Lead;
+  columns: PipelineStage[];
   highlighted: boolean;
   selected: boolean;
   onClick: () => void;
@@ -2669,6 +2939,7 @@ function SortableLeadCard({
     >
       <LeadCard
         dragging={isDragging}
+        columns={columns}
         highlighted={highlighted}
         lead={lead}
         onClick={onClick}
@@ -2686,6 +2957,7 @@ function SortableLeadCard({
 
 function LeadCard({
   lead,
+  columns,
   onClick,
   onDelete,
   selected = false,
@@ -2698,6 +2970,7 @@ function LeadCard({
   onQuickSchedule,
 }: {
   lead: Lead;
+  columns?: PipelineStage[];
   onClick: () => void;
   onDelete?: () => void;
   selected?: boolean;
@@ -2762,7 +3035,7 @@ function LeadCard({
             onPointerDown={(event) => event.stopPropagation()}
             value={lead.status}
           >
-            {pipelineColumns.map((column) => (
+            {(columns ?? getDefaultPipelineStages()).map((column) => (
               <option key={column.id} value={column.id}>
                 {column.title}
               </option>
@@ -2831,7 +3104,7 @@ function LeadCard({
             <button
               className="flex h-8 items-center justify-center rounded-md border border-red-400/20 bg-red-500/10 text-red-300 transition hover:bg-red-500/20"
               onClick={(event) => quick(event, onDelete)}
-              title="Arquivar lead"
+              title="Excluir lead"
               type="button"
             >
               <Trash2 className="h-4 w-4" />
@@ -2880,7 +3153,7 @@ function LeadList({
           <button
             className="flex h-10 items-center justify-center rounded-lg border border-red-400/20 bg-red-500/10 text-red-300 transition hover:bg-red-500/20"
             onClick={() => onDelete(lead)}
-            title="Arquivar lead"
+            title="Excluir lead"
             type="button"
           >
             <Trash2 className="h-4 w-4" />
@@ -2894,9 +3167,11 @@ function LeadList({
 function Templates({
   templates,
   onAddTemplate,
+  onDeleteTemplate,
 }: {
   templates: MessageTemplate[];
   onAddTemplate: (title: string, body: string) => void;
+  onDeleteTemplate: (template: MessageTemplate) => void;
 }) {
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
@@ -2936,9 +3211,24 @@ function Templates({
         </button>
       </form>
       <div className="grid gap-3">
+        {templates.length === 0 && (
+          <div className="rounded-xl border border-dashed border-white/10 bg-white/[0.025] p-5 text-sm text-zinc-500">
+            Nenhuma mensagem pronta cadastrada.
+          </div>
+        )}
         {templates.map((template) => (
           <article className="rounded-xl border border-white/10 bg-white/[0.035] p-5" key={template.id}>
-            <h3 className="font-medium">{template.title}</h3>
+            <div className="flex items-start justify-between gap-3">
+              <h3 className="font-medium">{template.title}</h3>
+              <button
+                className="rounded-md border border-red-400/20 bg-red-500/10 p-2 text-red-300 transition hover:bg-red-500/20"
+                onClick={() => onDeleteTemplate(template)}
+                title="Excluir mensagem pronta"
+                type="button"
+              >
+                <Trash2 className="h-4 w-4" />
+              </button>
+            </div>
             <p className="mt-2 text-sm leading-6 text-zinc-400">{template.body}</p>
           </article>
         ))}
@@ -3221,11 +3511,13 @@ const conversationStatusTabs: Array<{
 ];
 
 function Conversations({
+  columns,
   leads,
   templates,
   onLeadCreated,
   onOpenLead,
 }: {
+  columns: PipelineStage[];
   leads: Lead[];
   templates: MessageTemplate[];
   onLeadCreated: (lead: Lead) => void;
@@ -3790,6 +4082,7 @@ function Conversations({
       </section>
       {leadModalOpen && selectedConversation && (
         <ConversationLeadModal
+          columns={columns}
           initialName={selectedConversation.contactName}
           phoneNumber={selectedConversation.phone}
           saving={savingLead}
@@ -3803,6 +4096,7 @@ function Conversations({
 }
 
 function ConversationLeadModal({
+  columns,
   initialName,
   phoneNumber,
   saving,
@@ -3810,6 +4104,7 @@ function ConversationLeadModal({
   onClose,
   onSave,
 }: {
+  columns: PipelineStage[];
   initialName: string;
   phoneNumber: string;
   saving: boolean;
@@ -3861,7 +4156,7 @@ function ConversationLeadModal({
             onChange={(event) => setStatus(event.target.value as LeadStatus)}
             value={status}
           >
-            {pipelineColumns.map((column) => (
+            {columns.map((column) => (
               <option key={column.id} value={column.id}>
                 {column.title}
               </option>
@@ -4151,8 +4446,8 @@ function SettingsView({
           label: "Campos comerciais",
           status: commercial.error ? "missing" : "ok",
           detail: commercial.error
-            ? "Aplique commercial_pipeline_migration.sql e lead_archiving_contracts_migration.sql"
-            : "Campos comerciais, arquivamento e contratos basicos disponiveis em leads",
+            ? "Aplique commercial_pipeline_migration.sql, lead_archiving_contracts_migration.sql e custom_pipeline_stages_migration.sql"
+            : "Campos comerciais, arquivamento, etapas customizadas e contratos basicos disponiveis em leads",
         },
         {
           label: "Tabela de tarefas",
@@ -4308,10 +4603,12 @@ function SettingsView({
 }
 
 function LeadForm({
+  columns,
   lead,
   onClose,
   onSave,
 }: {
+  columns: PipelineStage[];
   lead: Lead | null;
   onClose: () => void;
   onSave: (input: LeadInput) => void;
@@ -4390,7 +4687,7 @@ function LeadForm({
             onChange={(event) => updateField("status", event.target.value as LeadStatus)}
             value={form.status}
           >
-            {pipelineColumns.map((column) => (
+            {columns.map((column) => (
               <option key={column.id} value={column.id}>
                 {column.title}
               </option>
@@ -4407,6 +4704,7 @@ function LeadForm({
 }
 
 function LeadDetails({
+  columns,
   lead,
   templates,
   interactions,
@@ -4422,6 +4720,7 @@ function LeadDetails({
   onUpdateTemperature,
   onDelete,
 }: {
+  columns: PipelineStage[];
   lead: Lead;
   templates: MessageTemplate[];
   interactions: Interaction[];
@@ -4438,6 +4737,7 @@ function LeadDetails({
   onDelete: (lead: Lead) => void;
 }) {
   const automaticTemplate = pickTemplate(templates, lead);
+  const [selectedTemplateId, setSelectedTemplateId] = useState(automaticTemplate?.id ?? "");
   const [message, setMessage] = useState(automaticTemplate ? renderTemplate(automaticTemplate.body, lead) : "");
   const [followupAt, setFollowupAt] = useState(() => toDateTimeLocal(lead.next_followup_at ?? addDays(1)));
   const [commercialForm, setCommercialForm] = useState<LeadInput>(() => leadToInput(lead));
@@ -4461,6 +4761,12 @@ function LeadDetails({
 
   function updateTaskField<K extends keyof TaskInput>(key: K, value: TaskInput[K]) {
     setTaskForm((current) => ({ ...current, [key]: value }));
+  }
+
+  function selectTemplate(templateId: string) {
+    setSelectedTemplateId(templateId);
+    const template = templates.find((item) => item.id === templateId);
+    if (template) setMessage(renderTemplate(template.body, lead));
   }
 
   return (
@@ -4529,7 +4835,7 @@ function LeadDetails({
                   onChange={(event) => updateCommercialField("status", event.target.value as LeadStatus)}
                   value={commercialForm.status}
                 >
-                  {pipelineColumns.map((column) => (
+                  {columns.map((column) => (
                     <option key={column.id} value={column.id}>{column.title}</option>
                   ))}
                 </select>
@@ -4703,9 +5009,22 @@ function LeadDetails({
         </div>
 
         <div>
-          <div className="mb-2 text-sm text-zinc-300">
-            Mensagem pronta aplicada: {automaticTemplate?.title ?? "Nenhuma"}
-          </div>
+          <label className="mb-2 block text-sm text-zinc-300">
+            Mensagem pronta
+            <select
+              className="mt-2 h-11 w-full rounded-lg border border-white/10 bg-[#14131B] px-3 text-white outline-none transition focus:border-[#8B5CF6]"
+              disabled={templates.length === 0}
+              onChange={(event) => selectTemplate(event.target.value)}
+              value={selectedTemplateId}
+            >
+              <option value="">Escolher mensagem</option>
+              {templates.map((template) => (
+                <option key={template.id} value={template.id}>
+                  {template.title}
+                </option>
+              ))}
+            </select>
+          </label>
           <textarea
             className="min-h-32 w-full rounded-lg border border-white/10 bg-black/30 p-3 text-sm text-zinc-200 outline-none transition focus:border-[#8B5CF6]"
             onChange={(event) => setMessage(event.target.value)}
@@ -4836,7 +5155,7 @@ function LeadDetails({
           type="button"
         >
           <Trash2 className="h-4 w-4" />
-          Arquivar lead
+          Excluir lead
         </button>
       </div>
     </Modal>
@@ -5037,16 +5356,16 @@ function ConfirmDeleteLead({
   onConfirm: () => void;
 }) {
   return (
-    <Modal onClose={onCancel} title="Arquivar lead">
+    <Modal onClose={onCancel} title="Excluir lead">
       <div className="space-y-4">
         <div className="rounded-lg border border-red-400/25 bg-red-500/10 p-4">
           <div className="flex items-start gap-3">
             <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-red-300" />
             <div>
-              <p className="font-medium text-red-100">Este lead sairá da operação ativa.</p>
+              <p className="font-medium text-red-100">Esta acao remove o lead da base.</p>
               <p className="mt-2 text-sm leading-6 text-red-100/80">
-                O lead {lead.name} sera arquivado, mantendo interacoes, tarefas e historico de
-                WhatsApp preservados para auditoria.
+                O lead {lead.name}, suas tarefas e interacoes serao apagados. O historico de
+                WhatsApp sera preservado desvinculado.
               </p>
             </div>
           </div>
@@ -5065,7 +5384,52 @@ function ConfirmDeleteLead({
             type="button"
           >
             <Trash2 className="h-4 w-4" />
-            Arquivar lead
+            Excluir lead
+          </button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+function ConfirmDeleteTemplate({
+  template,
+  onCancel,
+  onConfirm,
+}: {
+  template: MessageTemplate;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <Modal onClose={onCancel} title="Excluir mensagem pronta">
+      <div className="space-y-4">
+        <div className="rounded-lg border border-red-400/25 bg-red-500/10 p-4">
+          <div className="flex items-start gap-3">
+            <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-red-300" />
+            <div>
+              <p className="font-medium text-red-100">A mensagem pronta sera removida.</p>
+              <p className="mt-2 text-sm leading-6 text-red-100/80">
+                {template.title} deixara de aparecer nas selecoes de atendimento e follow-up.
+              </p>
+            </div>
+          </div>
+        </div>
+        <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+          <button
+            className="h-10 rounded-lg border border-white/10 px-4 text-sm text-zinc-300 transition hover:bg-white/[0.06]"
+            onClick={onCancel}
+            type="button"
+          >
+            Cancelar
+          </button>
+          <button
+            className="flex h-10 items-center justify-center gap-2 rounded-lg bg-red-500 px-4 text-sm font-semibold text-white transition hover:bg-red-400"
+            onClick={onConfirm}
+            type="button"
+          >
+            <Trash2 className="h-4 w-4" />
+            Excluir mensagem
           </button>
         </div>
       </div>

@@ -1,9 +1,4 @@
-export type LeadStatus =
-  | "novo"
-  | "contatado"
-  | "respondeu"
-  | "proposta"
-  | "fechado";
+export type LeadStatus = string;
 
 export type Lead = {
   id: string;

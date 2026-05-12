@@ -59,11 +59,24 @@ export async function createTask(input: TaskInput, options: { cancelOpenFollowup
   if (error) return { success: false, error: error.message } satisfies ActionResult;
 
   if (input.type === "followup") {
-    await auth.supabase
+    const { data: lead } = await auth.supabase
       .from("leads")
-      .update({ next_followup_at: input.due_at })
+      .select("next_followup_at")
       .eq("id", input.lead_id)
-      .eq("user_id", auth.user.id);
+      .eq("user_id", auth.user.id)
+      .single();
+
+    const currentFollowupValue = (lead as { next_followup_at?: string | null } | null)?.next_followup_at;
+    const currentFollowup = currentFollowupValue ? new Date(currentFollowupValue).getTime() : null;
+    const nextFollowup = new Date(input.due_at).getTime();
+
+    if (!currentFollowup || nextFollowup <= currentFollowup) {
+      await auth.supabase
+        .from("leads")
+        .update({ next_followup_at: input.due_at })
+        .eq("id", input.lead_id)
+        .eq("user_id", auth.user.id);
+    }
   }
 
   revalidatePath("/");
