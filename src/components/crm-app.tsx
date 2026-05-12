@@ -122,6 +122,10 @@ type AuditLogInput = {
   summary: string;
   metadata?: Record<string, unknown>;
 };
+type PendingStageChange = {
+  lead: Lead;
+  status: LeadStatus;
+};
 
 const emptyLead: LeadInput = {
   name: "",
@@ -135,6 +139,43 @@ const emptyLead: LeadInput = {
   outcome_reason: "",
   sla_hours: 24,
 };
+
+function readSavedPipelineFilters() {
+  if (typeof window === "undefined") {
+    return {
+      statusFilter: "all" as LeadStatus | "all",
+      temperatureFilter: "all" as Lead["temperature"] | "all",
+      dateFilter: "all" as "all" | "today" | "overdue",
+    };
+  }
+
+  try {
+    const raw = window.localStorage.getItem("origocrm:pipeline-filters");
+    if (!raw) {
+      return {
+        statusFilter: "all" as LeadStatus | "all",
+        temperatureFilter: "all" as Lead["temperature"] | "all",
+        dateFilter: "all" as "all" | "today" | "overdue",
+      };
+    }
+    const parsed = JSON.parse(raw) as {
+      statusFilter?: LeadStatus | "all";
+      temperatureFilter?: Lead["temperature"] | "all";
+      dateFilter?: "all" | "today" | "overdue";
+    };
+    return {
+      statusFilter: parsed.statusFilter ?? "all",
+      temperatureFilter: parsed.temperatureFilter ?? "all",
+      dateFilter: parsed.dateFilter ?? "all",
+    };
+  } catch {
+    return {
+      statusFilter: "all" as LeadStatus | "all",
+      temperatureFilter: "all" as Lead["temperature"] | "all",
+      dateFilter: "all" as "all" | "today" | "overdue",
+    };
+  }
+}
 
 function BrandLogo({
   compact = false,
@@ -304,15 +345,17 @@ function Workspace({
   const router = useRouter();
   const pathname = usePathname();
   const view = pathViews[pathname] ?? initialView;
+  const savedFilters = useMemo(() => readSavedPipelineFilters(), []);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState<LeadStatus | "all">("all");
-  const [temperatureFilter, setTemperatureFilter] = useState<Lead["temperature"] | "all">("all");
-  const [dateFilter, setDateFilter] = useState<"all" | "today" | "overdue">("all");
+  const [statusFilter, setStatusFilter] = useState<LeadStatus | "all">(savedFilters.statusFilter);
+  const [temperatureFilter, setTemperatureFilter] = useState<Lead["temperature"] | "all">(savedFilters.temperatureFilter);
+  const [dateFilter, setDateFilter] = useState<"all" | "today" | "overdue">(savedFilters.dateFilter);
   const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null);
   const [leadFormOpen, setLeadFormOpen] = useState(false);
   const [editingLead, setEditingLead] = useState<Lead | null>(null);
   const [leadPendingDelete, setLeadPendingDelete] = useState<Lead | null>(null);
+  const [pendingStageChange, setPendingStageChange] = useState<PendingStageChange | null>(null);
   const [toast, setToast] = useState<Toast | null>(null);
   const [recentLeadId, setRecentLeadId] = useState<string | null>(null);
   const [remoteLeads, setRemoteLeads] = useState<Lead[]>([]);
@@ -388,6 +431,13 @@ function Workspace({
     const timeout = window.setTimeout(() => setToast(null), 2200);
     return () => window.clearTimeout(timeout);
   }, [toast]);
+
+  useEffect(() => {
+    window.localStorage.setItem(
+      "origocrm:pipeline-filters",
+      JSON.stringify({ statusFilter, temperatureFilter, dateFilter }),
+    );
+  }, [dateFilter, statusFilter, temperatureFilter]);
 
   const filteredLeads = useMemo(() => {
     const search = query.trim().toLowerCase();
@@ -564,22 +614,33 @@ function Workspace({
     });
   }
 
-  async function updateLeadStatus(id: string, status: LeadStatus) {
+  function requestLeadStatusChange(id: string, status: LeadStatus) {
     const before = leads.find((lead) => lead.id === id);
-    const previousInteractions = remoteInteractions;
-    const outcomeReason =
-      status === "fechado" && !before?.outcome_reason?.trim()
-        ? window.prompt("Informe o motivo de ganho/perda para fechar o lead:")
-        : before?.outcome_reason;
+    if (!before) return;
 
-    if (status === "fechado" && !outcomeReason?.trim()) {
+    if (status === "fechado" && !before.outcome_reason?.trim()) {
+      setPendingStageChange({ lead: before, status });
+      return;
+    }
+
+    void updateLeadStatus(id, status, before.outcome_reason ?? null);
+  }
+
+  async function updateLeadStatus(id: string, status: LeadStatus, outcomeReason?: string | null) {
+    const before = leads.find((lead) => lead.id === id);
+    if (!before) return;
+
+    const previousInteractions = remoteInteractions;
+    const reason = outcomeReason?.trim() ?? before.outcome_reason?.trim() ?? "";
+
+    if (status === "fechado" && !reason) {
       showToast("Motivo obrigatorio para fechar lead");
       return;
     }
 
     patchLeadOptimistic(id, {
       status,
-      ...(status === "fechado" ? { outcome_reason: outcomeReason?.trim() ?? "" } : {}),
+      ...(status === "fechado" ? { outcome_reason: reason } : {}),
       updated_at: new Date().toISOString(),
     });
     if (before && before.status !== status) {
@@ -587,7 +648,7 @@ function Workspace({
       addInteractionOptimistic(interaction);
     }
 
-    const result = await moveLeadStage(id, status, outcomeReason);
+    const result = await moveLeadStage(id, status, reason);
 
     if (!result.success) {
       if (before) patchLeadOptimistic(id, before);
@@ -1143,7 +1204,7 @@ function Workspace({
                     onLeadDelete={(lead) => setLeadPendingDelete(lead)}
                     onQuickSchedule={(lead) => scheduleFollowup(lead, addDays(1))}
                     onQuickWhatsApp={(lead) => setSelectedLeadId(lead.id)}
-                    onStatusChange={updateLeadStatus}
+                    onStatusChange={requestLeadStatusChange}
                     recentLeadId={recentLeadId}
                   />
                 )}
@@ -1230,6 +1291,17 @@ function Workspace({
           lead={leadPendingDelete}
           onCancel={() => setLeadPendingDelete(null)}
           onConfirm={() => void archiveLead(leadPendingDelete)}
+        />
+      )}
+      {pendingStageChange && (
+        <CloseLeadModal
+          lead={pendingStageChange.lead}
+          onCancel={() => setPendingStageChange(null)}
+          onConfirm={(reason) => {
+            const pending = pendingStageChange;
+            setPendingStageChange(null);
+            void updateLeadStatus(pending.lead.id, pending.status, reason);
+          }}
         />
       )}
     </main>
@@ -1841,7 +1913,9 @@ function Pipeline({
         <PipelineOverview leads={leads} />
         <div className="grid gap-4 overflow-x-auto pb-3 xl:grid-cols-5">
           {pipelineColumns.map((column) => {
-            const columnLeads = leads.filter((lead) => lead.status === column.id);
+            const columnLeads = sortPipelineLeadsByUrgency(
+              leads.filter((lead) => lead.status === column.id),
+            );
             return (
               <PipelineColumn
                 key={column.id}
@@ -1868,13 +1942,17 @@ function PipelineOverview({ leads }: { leads: Lead[] }) {
   const replied = leads.filter((lead) => lead.status === "respondeu").length;
   const closed = leads.filter((lead) => lead.status === "fechado").length;
   const closeRate = leads.length ? Math.round((closed / leads.length) * 100) : 0;
+  const openValue = leads
+    .filter((lead) => lead.status !== "fechado")
+    .reduce((total, lead) => total + (lead.estimated_value ?? 0), 0);
 
   return (
-    <div className="grid gap-3 md:grid-cols-4">
+    <div className="grid gap-3 md:grid-cols-5">
       <PipelineStat label="Leads ativos" value={activeDeals.toString()} tone="border-[#8B5CF6]/30" />
       <PipelineStat label="Follow-up hoje" value={pendingFollowups.toString()} tone="border-amber-400/30" />
       <PipelineStat label="Responderam" value={replied.toString()} tone="border-[#25D366]/30" />
       <PipelineStat label="Taxa de fechamento" value={`${closeRate}%`} tone="border-white/10" />
+      <PipelineStat label="Valor aberto" value={formatCurrency(openValue) ?? "R$ 0"} tone="border-[#25D366]/30" />
     </div>
   );
 }
@@ -2019,6 +2097,41 @@ function getColumnHealth(leads: Lead[]) {
   return leads.length ? "Em dia" : "Sem itens";
 }
 
+function getPipelineColumnStats(leads: Lead[]) {
+  const value = leads.reduce((total, lead) => total + (lead.estimated_value ?? 0), 0);
+  const overdue = leads.filter((lead) => isFollowupOverdue(lead)).length;
+  const hot = leads.filter((lead) => (lead.temperature ?? "morno") === "quente").length;
+  const noAction = leads.filter(
+    (lead) => lead.status !== "fechado" && lead.status !== "novo" && !lead.next_followup_at,
+  ).length;
+
+  return { value, overdue, hot, noAction };
+}
+
+function getLeadUrgencyScore(lead: Lead) {
+  let score = 0;
+  if (isFollowupOverdue(lead)) score += 100;
+  else if (isFollowupDue(lead)) score += 70;
+  if ((lead.temperature ?? "morno") === "quente") score += 35;
+  if (lead.status === "proposta") score += 20;
+  if (lead.status !== "fechado" && lead.status !== "novo" && !lead.next_followup_at) score += 25;
+  if (!lead.owner_name) score += 8;
+  return score;
+}
+
+function sortPipelineLeadsByUrgency(leads: Lead[]) {
+  return [...leads].sort((a, b) => {
+    const scoreDiff = getLeadUrgencyScore(b) - getLeadUrgencyScore(a);
+    if (scoreDiff !== 0) return scoreDiff;
+
+    const nextFollowupA = a.next_followup_at ? new Date(a.next_followup_at).getTime() : Number.MAX_SAFE_INTEGER;
+    const nextFollowupB = b.next_followup_at ? new Date(b.next_followup_at).getTime() : Number.MAX_SAFE_INTEGER;
+    if (nextFollowupA !== nextFollowupB) return nextFollowupA - nextFollowupB;
+
+    return new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime();
+  });
+}
+
 function getSourceLabel(source: string) {
   return source?.trim() || "Origem nao informada";
 }
@@ -2085,6 +2198,7 @@ function PipelineColumn({
 }) {
   const { setNodeRef, isOver } = useDroppable({ id });
   const meta = pipelineMeta[id];
+  const stats = getPipelineColumnStats(leads);
 
   return (
     <div
@@ -2104,9 +2218,40 @@ function PipelineColumn({
           </span>
         </div>
         <p className="mt-2 min-h-8 text-xs leading-4 text-zinc-500">{meta.description}</p>
+        <div className="mt-3 grid grid-cols-2 gap-2">
+          <div className="rounded-md border border-white/10 bg-white/[0.035] p-2">
+            <div className="text-[10px] uppercase text-zinc-500">Valor</div>
+            <div className="mt-1 truncate text-sm font-semibold text-zinc-100">
+              {formatCurrency(stats.value) ?? "R$ 0"}
+            </div>
+          </div>
+          <div className="rounded-md border border-white/10 bg-white/[0.035] p-2">
+            <div className="text-[10px] uppercase text-zinc-500">Riscos</div>
+            <div className="mt-1 text-sm font-semibold text-zinc-100">
+              {stats.overdue + stats.noAction}
+            </div>
+          </div>
+        </div>
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          {stats.overdue > 0 && (
+            <span className="rounded-full border border-red-400/25 bg-red-500/10 px-2 py-0.5 text-[11px] text-red-200">
+              {stats.overdue} vencidos
+            </span>
+          )}
+          {stats.hot > 0 && (
+            <span className="rounded-full border border-amber-400/25 bg-amber-500/10 px-2 py-0.5 text-[11px] text-amber-100">
+              {stats.hot} quentes
+            </span>
+          )}
+          {stats.noAction > 0 && (
+            <span className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-0.5 text-[11px] text-zinc-400">
+              {stats.noAction} sem acao
+            </span>
+          )}
+        </div>
         <div className="mt-3 flex items-center justify-between gap-3 text-[11px] text-zinc-500">
           <span>{getColumnHealth(leads)}</span>
-          <span>Arraste para mover</span>
+          <span>Ordenado por urgencia</span>
         </div>
       </div>
       <SortableContext items={leads.map((lead) => lead.id)} strategy={verticalListSortingStrategy}>
@@ -4473,6 +4618,71 @@ function ConfirmDeleteLead({
           </button>
         </div>
       </div>
+    </Modal>
+  );
+}
+
+function CloseLeadModal({
+  lead,
+  onCancel,
+  onConfirm,
+}: {
+  lead: Lead;
+  onCancel: () => void;
+  onConfirm: (reason: string) => void;
+}) {
+  const [reason, setReason] = useState(lead.outcome_reason ?? "");
+
+  return (
+    <Modal onClose={onCancel} title="Fechar lead">
+      <form
+        className="space-y-4"
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (!reason.trim()) return;
+          onConfirm(reason.trim());
+        }}
+      >
+        <div className="rounded-lg border border-amber-400/25 bg-amber-500/10 p-4">
+          <div className="flex items-start gap-3">
+            <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-300" />
+            <div>
+              <p className="font-medium text-amber-100">Informe o motivo antes de fechar.</p>
+              <p className="mt-2 text-sm leading-6 text-amber-100/80">
+                Esse registro ajuda a entender ganho, perda, objeção ou contexto final da oportunidade.
+              </p>
+            </div>
+          </div>
+        </div>
+        <label className="block text-sm text-zinc-300">
+          Motivo de ganho/perda
+          <textarea
+            autoFocus
+            className="mt-2 min-h-28 w-full rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-white outline-none transition focus:border-[#8B5CF6]"
+            onChange={(event) => setReason(event.target.value)}
+            placeholder={`Ex.: ${lead.name} fechou com outro fornecedor, sem budget agora, ou venda concluida.`}
+            required
+            value={reason}
+          />
+        </label>
+        <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+          <button
+            className="h-10 rounded-lg border border-white/10 px-4 text-sm text-zinc-300 transition hover:bg-white/[0.06]"
+            onClick={onCancel}
+            type="button"
+          >
+            Cancelar
+          </button>
+          <button
+            className="flex h-10 items-center justify-center gap-2 rounded-lg bg-[#8B5CF6] px-4 text-sm font-semibold text-white transition hover:bg-[#7C3AED] disabled:opacity-50"
+            disabled={!reason.trim()}
+            type="submit"
+          >
+            <Check className="h-4 w-4" />
+            Fechar lead
+          </button>
+        </div>
+      </form>
     </Modal>
   );
 }
