@@ -28,9 +28,6 @@ async function getAuthenticatedSupabase() {
 export async function createLead(input: LeadInput) {
   const auth = await getAuthenticatedSupabase();
   if ("error" in auth) return { success: false, error: auth.error };
-  if (input.status === "fechado" && !input.outcome_reason?.trim()) {
-    return { success: false, error: "Informe o motivo de ganho/perda para fechar o lead." };
-  }
 
   const { data, error } = await auth.supabase
     .from("leads")
@@ -47,9 +44,6 @@ export async function createLead(input: LeadInput) {
 export async function updateLead(id: string, input: Partial<LeadInput>) {
   const auth = await getAuthenticatedSupabase();
   if ("error" in auth) return { success: false, error: auth.error };
-  if (input.status === "fechado" && !input.outcome_reason?.trim()) {
-    return { success: false, error: "Informe o motivo de ganho/perda para fechar o lead." };
-  }
 
   const { data, error } = await auth.supabase
     .from("leads")

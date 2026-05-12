@@ -18,6 +18,8 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import {
   AlertTriangle,
+  ArrowDown,
+  ArrowUp,
   BarChart3,
   CalendarClock,
   Check,
@@ -123,10 +125,6 @@ type AuditLogInput = {
   summary: string;
   metadata?: Record<string, unknown>;
 };
-type PendingStageChange = {
-  lead: Lead;
-  status: LeadStatus;
-};
 type SavedPipelineFilter = {
   id: string;
   name: string;
@@ -140,7 +138,10 @@ type SavedPipelineFilter = {
 type PipelineStage = {
   id: LeadStatus;
   title: string;
+  kind: "open" | "closed";
 };
+
+const defaultClosedStageIds = new Set<LeadStatus>(["fechado"]);
 
 const emptyLead: LeadInput = {
   name: "",
@@ -206,7 +207,11 @@ function readSavedPipelineFilterPresets(): SavedPipelineFilter[] {
 }
 
 function getDefaultPipelineStages(): PipelineStage[] {
-  return defaultPipelineColumns.map((column) => ({ id: column.id, title: column.title }));
+  return defaultPipelineColumns.map((column) => ({
+    id: column.id,
+    title: column.title,
+    kind: column.id === "fechado" ? "closed" : "open",
+  }));
 }
 
 function normalizePipelineStages(input: unknown): PipelineStage[] {
@@ -218,17 +223,17 @@ function normalizePipelineStages(input: unknown): PipelineStage[] {
       if (!item || typeof item !== "object") return null;
       const stage = item as Partial<PipelineStage>;
       if (!stage.id || !stage.title) return null;
-      return { id: String(stage.id), title: String(stage.title).trim() || String(stage.id) };
+      return {
+        id: String(stage.id),
+        title: String(stage.title).trim() || String(stage.id),
+        kind: (stage.kind === "closed" ? "closed" : "open") as NonNullable<PipelineStage["kind"]>,
+      };
     })
     .filter((stage): stage is PipelineStage => Boolean(stage));
 
   const unique = stages.filter(
     (stage, index, all) => all.findIndex((item) => item.id === stage.id) === index,
   );
-  if (!unique.some((stage) => stage.id === "fechado")) {
-    unique.push({ id: "fechado", title: "Fechado" });
-  }
-
   return unique.length ? unique : defaults;
 }
 
@@ -444,7 +449,6 @@ function Workspace({
   const [editingLead, setEditingLead] = useState<Lead | null>(null);
   const [leadPendingDelete, setLeadPendingDelete] = useState<Lead | null>(null);
   const [templatePendingDelete, setTemplatePendingDelete] = useState<MessageTemplate | null>(null);
-  const [pendingStageChange, setPendingStageChange] = useState<PendingStageChange | null>(null);
   const [pipelineStagesOpen, setPipelineStagesOpen] = useState(false);
   const [pipelineStages, setPipelineStages] = useState<PipelineStage[]>(initialPipelineStages);
   const [selectedPipelineLeadIds, setSelectedPipelineLeadIds] = useState<Set<string>>(() => new Set());
@@ -562,6 +566,15 @@ function Workspace({
 
   const selectedLead = leads.find((lead) => lead.id === selectedLeadId) ?? null;
   const selectedPipelineLeads = filteredLeads.filter((lead) => selectedPipelineLeadIds.has(lead.id));
+  const visiblePipelineStages = useMemo(() => {
+    const stageIds = new Set(pipelineStages.map((stage) => stage.id));
+    const missingStages = leads
+      .map((lead) => lead.status)
+      .filter((status, index, all) => !stageIds.has(status) && all.indexOf(status) === index)
+      .map((status) => ({ id: status, title: status, kind: "open" as const }));
+
+    return [...pipelineStages, ...missingStages];
+  }, [leads, pipelineStages]);
   function showToast(text: string) {
     setToast({ id: newId("toast"), text });
   }
@@ -641,7 +654,7 @@ function Workspace({
 
     setPipelineStages((items) => [
       ...items,
-      { id: createPipelineStageId(trimmed, items), title: trimmed },
+      { id: createPipelineStageId(trimmed, items), title: trimmed, kind: "open" },
     ]);
     showToast("Etapa adicionada");
   }
@@ -656,18 +669,36 @@ function Workspace({
 
   function removePipelineStage(id: LeadStatus) {
     const hasLeads = leads.some((lead) => lead.status === id);
-    if (id === "fechado") {
-      showToast("A etapa Fechado precisa existir para fechamento comercial");
-      return;
-    }
     if (hasLeads) {
       showToast("Mova os leads desta etapa antes de remover");
+      return;
+    }
+    if (pipelineStages.length <= 1) {
+      showToast("Mantenha pelo menos uma etapa no funil");
       return;
     }
 
     setPipelineStages((items) => items.filter((stage) => stage.id !== id));
     if (statusFilter === id) setStatusFilter("all");
     showToast("Etapa removida");
+  }
+
+  function movePipelineStage(id: LeadStatus, direction: -1 | 1) {
+    setPipelineStages((items) => {
+      const index = items.findIndex((stage) => stage.id === id);
+      const target = index + direction;
+      if (index < 0 || target < 0 || target >= items.length) return items;
+
+      const next = [...items];
+      [next[index], next[target]] = [next[target], next[index]];
+      return next;
+    });
+  }
+
+  function updatePipelineStageKind(id: LeadStatus, kind: NonNullable<PipelineStage["kind"]>) {
+    setPipelineStages((items) =>
+      items.map((stage) => (stage.id === id ? { ...stage, kind } : stage)),
+    );
   }
 
   function patchLeadOptimistic(id: string, patch: Partial<Lead>) {
@@ -709,11 +740,6 @@ function Workspace({
 
   async function saveLead(input: LeadInput, id?: string) {
     const timestamp = new Date().toISOString();
-
-    if (input.status === "fechado" && !input.outcome_reason?.trim()) {
-      showToast("Motivo obrigatorio para fechar lead");
-      return;
-    }
 
     if (id) {
       const previous = remoteLeads;
@@ -833,11 +859,6 @@ function Workspace({
     const before = leads.find((lead) => lead.id === id);
     if (!before) return;
 
-    if (status === "fechado" && !before.outcome_reason?.trim()) {
-      setPendingStageChange({ lead: before, status });
-      return;
-    }
-
     void updateLeadStatus(id, status, before.outcome_reason ?? null);
   }
 
@@ -848,14 +869,9 @@ function Workspace({
     const previousInteractions = remoteInteractions;
     const reason = outcomeReason?.trim() ?? before.outcome_reason?.trim() ?? "";
 
-    if (status === "fechado" && !reason) {
-      showToast("Motivo obrigatorio para fechar lead");
-      return;
-    }
-
     patchLeadOptimistic(id, {
       status,
-      ...(status === "fechado" ? { outcome_reason: reason } : {}),
+      ...(reason ? { outcome_reason: reason } : {}),
       updated_at: new Date().toISOString(),
     });
     if (before && before.status !== status) {
@@ -939,10 +955,6 @@ function Workspace({
   async function bulkMoveSelectedLeads(status: LeadStatus) {
     const selected = selectedPipelineLeads.filter((lead) => lead.status !== status);
     if (selected.length === 0) return;
-    if (status === "fechado") {
-      showToast("Feche leads individualmente para informar o motivo");
-      return;
-    }
 
     for (const lead of selected) {
       await updateLeadStatus(lead.id, status, lead.outcome_reason ?? null);
@@ -1442,7 +1454,7 @@ function Workspace({
                     value={statusFilter}
                   >
                     <option value="all">Todas etapas</option>
-                    {pipelineStages.map((column) => (
+                    {visiblePipelineStages.map((column) => (
                       <option key={column.id} value={column.id}>
                         {column.title}
                       </option>
@@ -1536,6 +1548,7 @@ function Workspace({
               <>
                 {view === "dashboard" && (
                   <Dashboard
+                    columns={visiblePipelineStages}
                     interactions={interactions}
                     leads={leads}
                     tasks={tasks}
@@ -1551,7 +1564,7 @@ function Workspace({
                 {view === "pipeline" && (
                   <Pipeline
                     bulkOwnerName={bulkOwnerName}
-                    columns={pipelineStages}
+                    columns={visiblePipelineStages}
                     leads={filteredLeads}
                     onBulkArchive={() => void bulkArchiveSelectedLeads()}
                     onBulkAssignOwner={() => void bulkAssignOwner()}
@@ -1598,12 +1611,14 @@ function Workspace({
                 )}
                 {view === "conversations" && (
                   <Conversations
-                    columns={pipelineStages}
+                    columns={visiblePipelineStages}
                     leads={leads}
                     templates={templates}
                     onLeadCreated={(lead) => {
                       setRemoteLeads((items) =>
-                        items.some((item) => item.id === lead.id) ? items : [lead, ...items],
+                        items.some((item) => item.id === lead.id)
+                          ? items.map((item) => (item.id === lead.id ? lead : item))
+                          : [lead, ...items],
                       );
                     }}
                     onOpenLead={(lead) => {
@@ -1628,7 +1643,7 @@ function Workspace({
 
       {leadFormOpen && (
         <LeadForm
-          columns={pipelineStages}
+          columns={visiblePipelineStages}
           lead={editingLead}
           onClose={() => setLeadFormOpen(false)}
           onSave={async (input) => {
@@ -1642,7 +1657,7 @@ function Workspace({
         <LeadDetails
           interactions={interactions.filter((item) => item.lead_id === selectedLead.id)}
           key={selectedLead.id}
-          columns={pipelineStages}
+          columns={visiblePipelineStages}
           lead={selectedLead}
           onAddInteraction={addInteraction}
           onCompleteTask={completeTask}
@@ -1682,19 +1697,10 @@ function Workspace({
           leads={leads}
           onAddStage={addPipelineStage}
           onClose={() => setPipelineStagesOpen(false)}
+          onMoveStage={movePipelineStage}
           onRemoveStage={removePipelineStage}
           onRenameStage={renamePipelineStage}
-        />
-      )}
-      {pendingStageChange && (
-        <CloseLeadModal
-          lead={pendingStageChange.lead}
-          onCancel={() => setPendingStageChange(null)}
-          onConfirm={(reason) => {
-            const pending = pendingStageChange;
-            setPendingStageChange(null);
-            void updateLeadStatus(pending.lead.id, pending.status, reason);
-          }}
+          onUpdateStageKind={updatePipelineStageKind}
         />
       )}
     </main>
@@ -1702,6 +1708,7 @@ function Workspace({
 }
 
 function Dashboard({
+  columns,
   leads,
   interactions,
   tasks,
@@ -1713,6 +1720,7 @@ function Dashboard({
   onQuickSchedule,
   onViewConversations,
 }: {
+  columns: PipelineStage[];
   leads: Lead[];
   interactions: Interaction[];
   tasks: Task[];
@@ -1734,6 +1742,10 @@ function Dashboard({
     profileName?: string | null;
     error?: string;
   } | null>(null);
+  const dashboardClosedStageIds = useMemo(
+    () => new Set(columns.filter((column) => column.kind === "closed").map((column) => column.id)),
+    [columns],
+  );
 
   useEffect(() => {
     let mounted = true;
@@ -1789,10 +1801,10 @@ function Dashboard({
     () =>
       leads.filter(
         (lead) =>
-          lead.status !== "fechado" &&
+          !isLeadClosed(lead, dashboardClosedStageIds) &&
           (ownerFilter === "all" || lead.owner_name === ownerFilter),
       ),
-    [leads, ownerFilter],
+    [dashboardClosedStageIds, leads, ownerFilter],
   );
   const openTasks = useMemo(
     () =>
@@ -2577,6 +2589,10 @@ function Pipeline({
   onQuickWhatsApp: (lead: Lead) => void;
   onQuickSchedule: (lead: Lead) => void;
 }) {
+  const closedStageIds = useMemo(
+    () => new Set(columns.filter((column) => column.kind === "closed").map((column) => column.id)),
+    [columns],
+  );
   const sensors = useSensors(
     useSensor(PointerSensor),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
@@ -2602,7 +2618,7 @@ function Pipeline({
   return (
     <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
       <div className="space-y-4">
-        <PipelineOverview leads={leads} />
+        <PipelineOverview closedStageIds={closedStageIds} leads={leads} />
         <PipelineBulkActions
           bulkOwnerName={bulkOwnerName}
           columns={columns}
@@ -2614,10 +2630,11 @@ function Pipeline({
           onSchedule={onBulkSchedule}
           selectedCount={selectedCount}
         />
-        <div className="grid gap-4 overflow-x-auto pb-3 xl:grid-cols-5">
+        <div className="flex gap-4 overflow-x-auto pb-3">
           {columns.map((column) => {
             const columnLeads = sortPipelineLeadsByUrgency(
               leads.filter((lead) => lead.status === column.id),
+              closedStageIds,
             );
             return (
               <PipelineColumn
@@ -2629,6 +2646,7 @@ function Pipeline({
                 onQuickSchedule={onQuickSchedule}
                 onQuickWhatsApp={onQuickWhatsApp}
                 columns={columns}
+                closedStageIds={closedStageIds}
                 onStatusChange={onStatusChange}
                 onToggleLeadSelection={onToggleLeadSelection}
                 recentLeadId={recentLeadId}
@@ -2684,13 +2702,11 @@ function PipelineBulkActions({
             }}
           >
             <option value="">Mover etapa</option>
-            {columns
-              .filter((column) => column.id !== "fechado")
-              .map((column) => (
-                <option key={column.id} value={column.id}>
-                  {column.title}
-                </option>
-              ))}
+            {columns.map((column) => (
+              <option key={column.id} value={column.id}>
+                {column.title}
+              </option>
+            ))}
           </select>
           <button
             className="h-10 rounded-lg border border-white/10 px-3 text-sm text-zinc-300 transition hover:bg-white/[0.06] disabled:opacity-50"
@@ -2744,15 +2760,19 @@ function PipelineStagesModal({
   leads,
   onClose,
   onAddStage,
+  onMoveStage,
   onRenameStage,
   onRemoveStage,
+  onUpdateStageKind,
 }: {
   stages: PipelineStage[];
   leads: Lead[];
   onClose: () => void;
   onAddStage: (title: string) => void;
+  onMoveStage: (id: LeadStatus, direction: -1 | 1) => void;
   onRenameStage: (id: LeadStatus, title: string) => void;
   onRemoveStage: (id: LeadStatus) => void;
+  onUpdateStageKind: (id: LeadStatus, kind: NonNullable<PipelineStage["kind"]>) => void;
 }) {
   const [newStageTitle, setNewStageTitle] = useState("");
 
@@ -2766,18 +2786,47 @@ function PipelineStagesModal({
         <div className="space-y-3">
           {stages.map((stage) => {
             const count = leadCount(stage.id);
-            const canRemove = stage.id !== "fechado" && count === 0 && stages.length > 1;
+            const canRemove = count === 0 && stages.length > 1;
+            const stageIndex = stages.findIndex((item) => item.id === stage.id);
 
             return (
               <div
-                className="grid gap-3 rounded-lg border border-white/10 bg-white/[0.035] p-3 sm:grid-cols-[1fr_auto_auto] sm:items-center"
+                className="grid gap-3 rounded-lg border border-white/10 bg-white/[0.035] p-3 xl:grid-cols-[auto_1fr_auto_auto_auto] xl:items-center"
                 key={stage.id}
               >
+                <div className="flex gap-2">
+                  <button
+                    className="flex h-10 w-10 items-center justify-center rounded-lg border border-white/10 text-zinc-300 transition hover:bg-white/[0.06] disabled:opacity-40"
+                    disabled={stageIndex === 0}
+                    onClick={() => onMoveStage(stage.id, -1)}
+                    title="Subir etapa"
+                    type="button"
+                  >
+                    <ArrowUp className="h-4 w-4" />
+                  </button>
+                  <button
+                    className="flex h-10 w-10 items-center justify-center rounded-lg border border-white/10 text-zinc-300 transition hover:bg-white/[0.06] disabled:opacity-40"
+                    disabled={stageIndex === stages.length - 1}
+                    onClick={() => onMoveStage(stage.id, 1)}
+                    title="Descer etapa"
+                    type="button"
+                  >
+                    <ArrowDown className="h-4 w-4" />
+                  </button>
+                </div>
                 <input
                   className="h-10 rounded-lg border border-white/10 bg-black/30 px-3 text-sm text-zinc-100 outline-none transition focus:border-[#8B5CF6]"
                   onChange={(event) => onRenameStage(stage.id, event.target.value)}
                   value={stage.title}
                 />
+                <select
+                  className="h-10 rounded-lg border border-white/10 bg-black/30 px-3 text-sm text-zinc-200 outline-none transition focus:border-[#8B5CF6]"
+                  onChange={(event) => onUpdateStageKind(stage.id, event.target.value as NonNullable<PipelineStage["kind"]>)}
+                  value={stage.kind ?? "open"}
+                >
+                  <option value="open">Em aberto</option>
+                  <option value="closed">Conclusao</option>
+                </select>
                 <span className="rounded-full border border-white/10 px-2 py-1 text-xs text-zinc-500">
                   {count} leads
                 </span>
@@ -2821,14 +2870,14 @@ function PipelineStagesModal({
   );
 }
 
-function PipelineOverview({ leads }: { leads: Lead[] }) {
-  const pendingFollowups = leads.filter((lead) => isFollowupDue(lead)).length;
-  const activeDeals = leads.filter((lead) => lead.status !== "fechado").length;
+function PipelineOverview({ leads, closedStageIds }: { leads: Lead[]; closedStageIds: Set<LeadStatus> }) {
+  const pendingFollowups = leads.filter((lead) => isFollowupDue(lead, closedStageIds)).length;
+  const activeDeals = leads.filter((lead) => !isLeadClosed(lead, closedStageIds)).length;
   const replied = leads.filter((lead) => lead.status === "respondeu").length;
-  const closed = leads.filter((lead) => lead.status === "fechado").length;
+  const closed = leads.filter((lead) => isLeadClosed(lead, closedStageIds)).length;
   const closeRate = leads.length ? Math.round((closed / leads.length) * 100) : 0;
   const openValue = leads
-    .filter((lead) => lead.status !== "fechado")
+    .filter((lead) => !isLeadClosed(lead, closedStageIds))
     .reduce((total, lead) => total + (lead.estimated_value ?? 0), 0);
 
   return (
@@ -2851,16 +2900,20 @@ function PipelineStat({ label, value, tone }: { label: string; value: string; to
   );
 }
 
-function isFollowupDue(lead: Lead) {
-  if (!lead.next_followup_at || lead.status === "fechado") return false;
+function isLeadClosed(lead: Lead, closedStageIds: Set<LeadStatus> = defaultClosedStageIds) {
+  return closedStageIds.has(lead.status);
+}
+
+function isFollowupDue(lead: Lead, closedStageIds: Set<LeadStatus> = defaultClosedStageIds) {
+  if (!lead.next_followup_at || isLeadClosed(lead, closedStageIds)) return false;
   const dueAt = new Date(lead.next_followup_at);
   const todayEnd = new Date();
   todayEnd.setHours(23, 59, 59, 999);
   return dueAt.getTime() <= todayEnd.getTime();
 }
 
-function isFollowupOverdue(lead: Lead) {
-  if (!lead.next_followup_at || lead.status === "fechado") return false;
+function isFollowupOverdue(lead: Lead, closedStageIds: Set<LeadStatus> = defaultClosedStageIds) {
+  if (!lead.next_followup_at || isLeadClosed(lead, closedStageIds)) return false;
   return new Date(lead.next_followup_at).getTime() < startOfDay(new Date()).getTime();
 }
 
@@ -2894,7 +2947,8 @@ function isLeadCreatedToday(lead: Lead) {
   return startOfDay(new Date(lead.created_at)).getTime() === startOfDay(new Date()).getTime();
 }
 
-function getFollowupLabel(lead: Lead) {
+function getFollowupLabel(lead: Lead, closedStageIds: Set<LeadStatus> = defaultClosedStageIds) {
+  if (isLeadClosed(lead, closedStageIds)) return { text: "Concluido", tone: "text-zinc-500" };
   if (!lead.next_followup_at) return { text: "Sem follow-up", tone: "text-zinc-500" };
 
   const dueAt = new Date(lead.next_followup_at);
@@ -2976,37 +3030,37 @@ function getLeadInitials(lead: Lead) {
     .toUpperCase();
 }
 
-function getColumnHealth(leads: Lead[]) {
-  const due = leads.filter((lead) => isFollowupDue(lead)).length;
+function getColumnHealth(leads: Lead[], closedStageIds: Set<LeadStatus> = defaultClosedStageIds) {
+  const due = leads.filter((lead) => isFollowupDue(lead, closedStageIds)).length;
   if (due > 0) return `${due} com follow-up`;
   return leads.length ? "Em dia" : "Sem itens";
 }
 
-function getPipelineColumnStats(leads: Lead[]) {
+function getPipelineColumnStats(leads: Lead[], closedStageIds: Set<LeadStatus> = defaultClosedStageIds) {
   const value = leads.reduce((total, lead) => total + (lead.estimated_value ?? 0), 0);
-  const overdue = leads.filter((lead) => isFollowupOverdue(lead)).length;
+  const overdue = leads.filter((lead) => isFollowupOverdue(lead, closedStageIds)).length;
   const hot = leads.filter((lead) => (lead.temperature ?? "morno") === "quente").length;
   const noAction = leads.filter(
-    (lead) => lead.status !== "fechado" && lead.status !== "novo" && !lead.next_followup_at,
+    (lead) => !isLeadClosed(lead, closedStageIds) && lead.status !== "novo" && !lead.next_followup_at,
   ).length;
 
   return { value, overdue, hot, noAction };
 }
 
-function getLeadUrgencyScore(lead: Lead) {
+function getLeadUrgencyScore(lead: Lead, closedStageIds: Set<LeadStatus> = defaultClosedStageIds) {
   let score = 0;
-  if (isFollowupOverdue(lead)) score += 100;
-  else if (isFollowupDue(lead)) score += 70;
+  if (isFollowupOverdue(lead, closedStageIds)) score += 100;
+  else if (isFollowupDue(lead, closedStageIds)) score += 70;
   if ((lead.temperature ?? "morno") === "quente") score += 35;
   if (lead.status === "proposta") score += 20;
-  if (lead.status !== "fechado" && lead.status !== "novo" && !lead.next_followup_at) score += 25;
+  if (!isLeadClosed(lead, closedStageIds) && lead.status !== "novo" && !lead.next_followup_at) score += 25;
   if (!lead.owner_name) score += 8;
   return score;
 }
 
-function sortPipelineLeadsByUrgency(leads: Lead[]) {
+function sortPipelineLeadsByUrgency(leads: Lead[], closedStageIds: Set<LeadStatus> = defaultClosedStageIds) {
   return [...leads].sort((a, b) => {
-    const scoreDiff = getLeadUrgencyScore(b) - getLeadUrgencyScore(a);
+    const scoreDiff = getLeadUrgencyScore(b, closedStageIds) - getLeadUrgencyScore(a, closedStageIds);
     if (scoreDiff !== 0) return scoreDiff;
 
     const nextFollowupA = a.next_followup_at ? new Date(a.next_followup_at).getTime() : Number.MAX_SAFE_INTEGER;
@@ -3051,8 +3105,8 @@ function getTemperatureLabel(temperature?: Lead["temperature"] | null) {
   return { text: "Morno", tone: "border-amber-400/25 bg-amber-500/10 text-amber-100" };
 }
 
-function getSlaLabel(lead: Lead) {
-  if (!lead.last_contact_at || !lead.sla_hours || lead.status === "fechado") return null;
+function getSlaLabel(lead: Lead, closedStageIds: Set<LeadStatus> = defaultClosedStageIds) {
+  if (!lead.last_contact_at || !lead.sla_hours || isLeadClosed(lead, closedStageIds)) return null;
 
   const expiresAt = new Date(lead.last_contact_at).getTime() + lead.sla_hours * 60 * 60 * 1000;
   const remainingHours = Math.ceil((expiresAt - Date.now()) / 3600000);
@@ -3067,6 +3121,7 @@ function PipelineColumn({
   title,
   leads,
   columns,
+  closedStageIds,
   recentLeadId,
   selectedLeadIds,
   onLeadClick,
@@ -3080,6 +3135,7 @@ function PipelineColumn({
   title: string;
   leads: Lead[];
   columns: PipelineStage[];
+  closedStageIds: Set<LeadStatus>;
   recentLeadId: string | null;
   selectedLeadIds: Set<string>;
   onLeadClick: (lead: Lead) => void;
@@ -3091,7 +3147,7 @@ function PipelineColumn({
 }) {
   const { setNodeRef, isOver } = useDroppable({ id });
   const meta = getPipelineMeta(id, title);
-  const stats = getPipelineColumnStats(leads);
+  const stats = getPipelineColumnStats(leads, closedStageIds);
 
   return (
     <div
@@ -3143,7 +3199,7 @@ function PipelineColumn({
           )}
         </div>
         <div className="mt-3 flex items-center justify-between gap-3 text-[11px] text-zinc-500">
-          <span>{getColumnHealth(leads)}</span>
+          <span>{getColumnHealth(leads, closedStageIds)}</span>
           <span>Ordenado por urgencia</span>
         </div>
       </div>
@@ -3159,6 +3215,7 @@ function PipelineColumn({
               onQuickSchedule={() => onQuickSchedule(lead)}
               onQuickWhatsApp={() => onQuickWhatsApp(lead)}
               columns={columns}
+              closedStageIds={closedStageIds}
               onStatusChange={(status) => onStatusChange(lead.id, status)}
               onToggleSelection={() => onToggleLeadSelection(lead.id)}
               selected={selectedLeadIds.has(lead.id)}
@@ -3178,6 +3235,7 @@ function PipelineColumn({
 function SortableLeadCard({
   lead,
   columns,
+  closedStageIds,
   highlighted,
   selected,
   onClick,
@@ -3189,6 +3247,7 @@ function SortableLeadCard({
 }: {
   lead: Lead;
   columns: PipelineStage[];
+  closedStageIds: Set<LeadStatus>;
   highlighted: boolean;
   selected: boolean;
   onClick: () => void;
@@ -3212,6 +3271,7 @@ function SortableLeadCard({
       <LeadCard
         dragging={isDragging}
         columns={columns}
+        closedStageIds={closedStageIds}
         highlighted={highlighted}
         lead={lead}
         onClick={onClick}
@@ -3230,6 +3290,7 @@ function SortableLeadCard({
 function LeadCard({
   lead,
   columns,
+  closedStageIds,
   onClick,
   onDelete,
   selected = false,
@@ -3243,6 +3304,7 @@ function LeadCard({
 }: {
   lead: Lead;
   columns?: PipelineStage[];
+  closedStageIds?: Set<LeadStatus>;
   onClick: () => void;
   onDelete?: () => void;
   selected?: boolean;
@@ -3256,7 +3318,10 @@ function LeadCard({
 }) {
   const temperature = getTemperatureLabel(lead.temperature);
   const value = formatCurrency(lead.estimated_value);
-  const sla = getSlaLabel(lead);
+  const sla = getSlaLabel(lead, closedStageIds);
+  const followup = getFollowupLabel(lead, closedStageIds);
+  const isOverdue = followup.text === "Follow-up atrasado";
+  const isClosed = isLeadClosed(lead, closedStageIds);
 
   function quick(event: MouseEvent<HTMLButtonElement>, action?: () => void) {
     event.preventDefault();
@@ -3267,7 +3332,11 @@ function LeadCard({
   return (
     <div
       className={`group relative w-full rounded-lg border bg-[#121119] p-3 text-left shadow-lg shadow-black/10 transition hover:border-[#8B5CF6]/60 ${
-        highlighted ? "border-[#8B5CF6] shadow-[#8B5CF6]/30" : "border-white/10"
+        highlighted
+          ? "border-[#8B5CF6] shadow-[#8B5CF6]/30"
+          : isOverdue
+            ? "border-red-400/35"
+            : "border-white/10"
       } ${dragging ? "opacity-60" : ""}`}
       onClick={onClick}
       onKeyDown={(event) => {
@@ -3276,7 +3345,20 @@ function LeadCard({
       role="button"
       tabIndex={0}
     >
-      <div className="flex items-start gap-3">
+      <div className="absolute inset-x-0 top-0 h-1 rounded-t-lg bg-white/10">
+        <div
+          className={`h-full rounded-t-lg ${
+            isClosed
+              ? "bg-zinc-400"
+              : isOverdue
+                ? "bg-red-400"
+                : (lead.temperature ?? "morno") === "quente"
+                  ? "bg-amber-300"
+                  : "bg-[#8B5CF6]"
+          }`}
+        />
+      </div>
+      <div className="flex items-start gap-3 pt-1">
         {onToggleSelection && (
           <input
             aria-label={`Selecionar ${lead.name}`}
@@ -3294,6 +3376,7 @@ function LeadCard({
         <div className="min-w-0 flex-1">
           <div className="truncate font-medium text-white">{lead.name}</div>
           <div className="mt-1 truncate text-sm text-zinc-400">{lead.company || "Sem empresa"}</div>
+          <div className="mt-1 truncate text-xs text-zinc-500">{lead.owner_name || "Sem responsavel"}</div>
         </div>
       </div>
 
@@ -3316,7 +3399,7 @@ function LeadCard({
         </div>
       )}
 
-      <div className="mt-4 flex flex-wrap gap-2">
+      <div className="mt-3 flex flex-wrap gap-2">
         <span className={`rounded-full border px-2 py-1 text-[11px] ${temperature.tone}`}>
           {temperature.text}
         </span>
@@ -3328,23 +3411,20 @@ function LeadCard({
         <span className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-1 text-[11px] text-zinc-400">
           {getSourceLabel(lead.source)}
         </span>
-        <span className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-1 text-[11px] text-zinc-400">
-          {formatPhoneCompact(lead.phone)}
-        </span>
       </div>
 
-      <div className="mt-4 grid gap-2 text-xs">
-        <div className={`flex items-center justify-between gap-3 ${getFollowupLabel(lead).tone}`}>
+      <div className="mt-3 grid gap-2 text-xs">
+        <div className={`flex items-center justify-between gap-3 ${followup.tone}`}>
           <span className="flex items-center gap-1.5">
             <Clock3 className="h-3.5 w-3.5" />
-            {getFollowupLabel(lead).text}
+            {followup.text}
           </span>
         </div>
         <div className="flex items-center justify-between gap-3 text-zinc-500">
-          <span>{getLastContactLabel(lead)}</span>
+          <span>{formatPhoneCompact(lead.phone)}</span>
           {sla && <span className={sla.tone}>{sla.text}</span>}
         </div>
-        {lead.owner_name && <div className="text-zinc-500">Resp. {lead.owner_name}</div>}
+        <div className="text-zinc-500">{getLastContactLabel(lead)}</div>
       </div>
       {showQuickActions && (
         <div className="mt-4 grid grid-cols-4 gap-2 opacity-100 transition sm:opacity-0 sm:group-hover:opacity-100">
@@ -4393,7 +4473,7 @@ function ConversationLeadModal({
   const [name, setName] = useState(existingLead?.name ?? initialName);
   const [company, setCompany] = useState(existingLead?.company ?? "");
   const [source, setSource] = useState(existingLead?.source ?? "WhatsApp");
-  const [status, setStatus] = useState<LeadStatus>(existingLead?.status ?? "respondeu");
+  const [status, setStatus] = useState<LeadStatus>(existingLead?.status ?? columns[0]?.id ?? "novo");
   const [nextFollowupAt, setNextFollowupAt] = useState("");
 
   return (
@@ -5709,6 +5789,8 @@ function ConfirmDeleteTemplate({
   );
 }
 
+// Kept as a reusable confirmation modal for future close-stage workflows.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function CloseLeadModal({
   lead,
   onCancel,

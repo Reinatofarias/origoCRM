@@ -226,7 +226,7 @@ export async function saveWhatsAppConversationAsLead(input: {
   if (!phone) return { success: false, error: "Numero de telefone invalido" };
 
   const fallbackName = input.name?.trim() || phone;
-  const status = input.status ?? "respondeu";
+  const status = input.status ?? "novo";
   const now = new Date().toISOString();
   const { data: existing } = await auth.supabase
     .from("leads")

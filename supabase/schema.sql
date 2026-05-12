@@ -7,7 +7,7 @@ create table if not exists public.leads (
   phone text not null,
   company text not null default '',
   source text not null default '',
-  status text not null default 'novo' check (status in ('novo', 'contatado', 'respondeu', 'proposta', 'fechado')),
+  status text not null default 'novo',
   estimated_value numeric(12,2),
   owner_name text not null default '',
   temperature text not null default 'morno' check (temperature in ('frio', 'morno', 'quente')),
@@ -29,21 +29,6 @@ alter table public.leads add column if not exists owner_name text not null defau
 alter table public.leads add column if not exists temperature text not null default 'morno';
 alter table public.leads add column if not exists outcome_reason text not null default '';
 alter table public.leads add column if not exists sla_hours integer not null default 24;
-
-do $$
-begin
-  if not exists (
-    select 1
-    from pg_constraint
-    where conname = 'leads_closed_outcome_reason_check'
-      and conrelid = 'public.leads'::regclass
-  ) then
-    alter table public.leads
-      add constraint leads_closed_outcome_reason_check
-      check (status <> 'fechado' or length(trim(coalesce(outcome_reason, ''))) > 0)
-      not valid;
-  end if;
-end $$;
 
 create table if not exists public.message_templates (
   id uuid primary key default gen_random_uuid(),

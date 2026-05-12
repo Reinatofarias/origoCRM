@@ -31,13 +31,9 @@ export async function moveLeadStage(id: string, status: LeadStatus, outcomeReaso
 
   const reason = outcomeReason?.trim() ?? "";
 
-  if (status === "fechado" && !reason) {
-    return { success: false, error: "Informe o motivo de ganho/perda para fechar o lead." } satisfies ActionResult;
-  }
-
   const updatePayload = {
     status,
-    ...(status === "fechado" ? { outcome_reason: reason } : {}),
+    ...(reason ? { outcome_reason: reason } : {}),
   };
 
   const { error } = await auth.supabase
