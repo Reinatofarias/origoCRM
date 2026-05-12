@@ -50,6 +50,7 @@ import { recordAuditLog as recordAuditLogAction } from "@/actions/audit";
 import {
   archiveLead as archiveLeadAction,
   createLead as createLeadAction,
+  unarchiveLead as unarchiveLeadAction,
   updateLead as updateLeadAction,
 } from "@/actions/leads";
 import { moveLeadStage } from "@/actions/pipeline";
@@ -126,6 +127,16 @@ type PendingStageChange = {
   lead: Lead;
   status: LeadStatus;
 };
+type SavedPipelineFilter = {
+  id: string;
+  name: string;
+  filters: {
+    query?: string;
+    statusFilter: LeadStatus | "all";
+    temperatureFilter: Lead["temperature"] | "all";
+    dateFilter: "all" | "today" | "overdue";
+  };
+};
 
 const emptyLead: LeadInput = {
   name: "",
@@ -174,6 +185,19 @@ function readSavedPipelineFilters() {
       temperatureFilter: "all" as Lead["temperature"] | "all",
       dateFilter: "all" as "all" | "today" | "overdue",
     };
+  }
+}
+
+function readSavedPipelineFilterPresets(): SavedPipelineFilter[] {
+  if (typeof window === "undefined") return [];
+
+  try {
+    const raw = window.localStorage.getItem("origocrm:pipeline-filter-presets");
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? (parsed as SavedPipelineFilter[]) : [];
+  } catch {
+    return [];
   }
 }
 
@@ -346,6 +370,7 @@ function Workspace({
   const pathname = usePathname();
   const view = pathViews[pathname] ?? initialView;
   const savedFilters = useMemo(() => readSavedPipelineFilters(), []);
+  const initialFilterPresets = useMemo(() => readSavedPipelineFilterPresets(), []);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<LeadStatus | "all">(savedFilters.statusFilter);
@@ -356,9 +381,13 @@ function Workspace({
   const [editingLead, setEditingLead] = useState<Lead | null>(null);
   const [leadPendingDelete, setLeadPendingDelete] = useState<Lead | null>(null);
   const [pendingStageChange, setPendingStageChange] = useState<PendingStageChange | null>(null);
+  const [selectedPipelineLeadIds, setSelectedPipelineLeadIds] = useState<Set<string>>(() => new Set());
+  const [bulkOwnerName, setBulkOwnerName] = useState("");
+  const [savedFilterPresets, setSavedFilterPresets] = useState<SavedPipelineFilter[]>(initialFilterPresets);
   const [toast, setToast] = useState<Toast | null>(null);
   const [recentLeadId, setRecentLeadId] = useState<string | null>(null);
   const [remoteLeads, setRemoteLeads] = useState<Lead[]>([]);
+  const [remoteArchivedLeads, setRemoteArchivedLeads] = useState<Lead[]>([]);
   const [remoteTemplates, setRemoteTemplates] = useState<MessageTemplate[]>([]);
   const [remoteInteractions, setRemoteInteractions] = useState<Interaction[]>([]);
   const [remoteTasks, setRemoteTasks] = useState<Task[]>([]);
@@ -366,6 +395,7 @@ function Workspace({
   const [remoteWhatsAppLogs, setRemoteWhatsAppLogs] = useState<WhatsAppLog[]>([]);
   const [remoteAuditLogs, setRemoteAuditLogs] = useState<AuditLog[]>([]);
   const leads = remoteLeads;
+  const archivedLeads = remoteArchivedLeads;
   const templates = remoteTemplates;
   const interactions = remoteInteractions;
   const tasks = remoteTasks;
@@ -413,7 +443,9 @@ function Workspace({
         });
       }
 
-      setRemoteLeads(((leadResult.data as Lead[] | null) ?? []).filter((lead) => !lead.archived_at));
+      const loadedLeads = (leadResult.data as Lead[] | null) ?? [];
+      setRemoteLeads(loadedLeads.filter((lead) => !lead.archived_at));
+      setRemoteArchivedLeads(loadedLeads.filter((lead) => Boolean(lead.archived_at)));
       setRemoteTemplates((templateResult.data as MessageTemplate[] | null) ?? []);
       setRemoteInteractions((interactionResult.data as Interaction[] | null) ?? []);
       setRemoteTasks((taskResult.data as Task[] | null) ?? []);
@@ -439,6 +471,10 @@ function Workspace({
     );
   }, [dateFilter, statusFilter, temperatureFilter]);
 
+  useEffect(() => {
+    window.localStorage.setItem("origocrm:pipeline-filter-presets", JSON.stringify(savedFilterPresets));
+  }, [savedFilterPresets]);
+
   const filteredLeads = useMemo(() => {
     const search = query.trim().toLowerCase();
     return leads.filter((lead) =>
@@ -455,6 +491,7 @@ function Workspace({
   }, [dateFilter, leads, query, statusFilter, temperatureFilter]);
 
   const selectedLead = leads.find((lead) => lead.id === selectedLeadId) ?? null;
+  const selectedPipelineLeads = filteredLeads.filter((lead) => selectedPipelineLeadIds.has(lead.id));
   function showToast(text: string) {
     setToast({ id: newId("toast"), text });
   }
@@ -503,6 +540,29 @@ function Workspace({
   function navigateView(nextView: View) {
     const nextPath = viewPaths[nextView];
     if (pathname !== nextPath) router.push(nextPath);
+  }
+
+  function saveCurrentFilterPreset() {
+    const name = window.prompt("Nome para este filtro:");
+    if (!name?.trim()) return;
+
+    const preset: SavedPipelineFilter = {
+      id: newId("filter"),
+      name: name.trim(),
+      filters: { query, statusFilter, temperatureFilter, dateFilter },
+    };
+    setSavedFilterPresets((items) => [preset, ...items.filter((item) => item.name !== preset.name)].slice(0, 12));
+    showToast("Filtro salvo");
+  }
+
+  function applyFilterPreset(id: string) {
+    const preset = savedFilterPresets.find((item) => item.id === id);
+    if (!preset) return;
+    setQuery(preset.filters.query ?? "");
+    setStatusFilter(preset.filters.statusFilter);
+    setTemperatureFilter(preset.filters.temperatureFilter);
+    setDateFilter(preset.filters.dateFilter);
+    showToast(`Filtro aplicado: ${preset.name}`);
   }
 
   function patchLeadOptimistic(id: string, patch: Partial<Lead>) {
@@ -591,16 +651,25 @@ function Workspace({
 
   async function archiveLead(lead: Lead) {
     const previousLeads = remoteLeads;
+    const previousArchivedLeads = remoteArchivedLeads;
+    const archivedAt = new Date().toISOString();
 
     setSelectedLeadId((current) => (current === lead.id ? null : current));
     setLeadPendingDelete(null);
     setRemoteLeads((items) => items.filter((item) => item.id !== lead.id));
+    setRemoteArchivedLeads((items) => [{ ...lead, archived_at: archivedAt }, ...items]);
+    setSelectedPipelineLeadIds((current) => {
+      const next = new Set(current);
+      next.delete(lead.id);
+      return next;
+    });
     showToast("Lead arquivado");
 
     const result = await archiveLeadAction(lead.id);
 
     if (!result.success) {
       setRemoteLeads(previousLeads);
+      setRemoteArchivedLeads(previousArchivedLeads);
       showToast(result.error ?? "Erro ao arquivar lead");
       return;
     }
@@ -610,6 +679,37 @@ function Workspace({
       entity_id: lead.id,
       action: "lead.archived",
       summary: `Lead arquivado: ${lead.name}`,
+      metadata: { phone: lead.phone, company: lead.company, status: lead.status },
+    });
+  }
+
+  async function unarchiveLead(lead: Lead) {
+    const previousLeads = remoteLeads;
+    const previousArchivedLeads = remoteArchivedLeads;
+
+    setRemoteArchivedLeads((items) => items.filter((item) => item.id !== lead.id));
+    setRemoteLeads((items) => [{ ...lead, archived_at: null, updated_at: new Date().toISOString() }, ...items]);
+    showToast("Lead desarquivado");
+
+    const result = await unarchiveLeadAction(lead.id);
+
+    if (!result.success) {
+      setRemoteLeads(previousLeads);
+      setRemoteArchivedLeads(previousArchivedLeads);
+      showToast(result.error ?? "Erro ao desarquivar lead");
+      return;
+    }
+
+    if (result.data) {
+      const restoredLead = result.data as Lead;
+      setRemoteLeads((items) => items.map((item) => (item.id === restoredLead.id ? restoredLead : item)));
+    }
+
+    await recordAuditLog({
+      entity_type: "lead",
+      entity_id: lead.id,
+      action: "lead.unarchived",
+      summary: `Lead desarquivado: ${lead.name}`,
       metadata: { phone: lead.phone, company: lead.company, status: lead.status },
     });
   }
@@ -664,6 +764,85 @@ function Workspace({
       summary: `Status alterado para ${status}`,
       metadata: { previous_status: before?.status, next_status: status },
     });
+  }
+
+  function togglePipelineLeadSelection(id: string) {
+    setSelectedPipelineLeadIds((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  async function bulkArchiveSelectedLeads() {
+    const selected = selectedPipelineLeads;
+    if (selected.length === 0) return;
+
+    for (const lead of selected) {
+      await archiveLead(lead);
+    }
+    setSelectedPipelineLeadIds(new Set());
+  }
+
+  async function bulkAssignOwner() {
+    const ownerName = bulkOwnerName.trim();
+    const selected = selectedPipelineLeads;
+    if (!ownerName || selected.length === 0) return;
+
+    const previousLeads = remoteLeads;
+    const now = new Date().toISOString();
+    const selectedIds = new Set(selected.map((lead) => lead.id));
+
+    setRemoteLeads((items) =>
+      items.map((lead) =>
+        selectedIds.has(lead.id) ? { ...lead, owner_name: ownerName, updated_at: now } : lead,
+      ),
+    );
+
+    const results = await Promise.all(selected.map((lead) => updateLeadAction(lead.id, { owner_name: ownerName })));
+    const failed = results.find((result) => !result.success);
+
+    if (failed) {
+      setRemoteLeads(previousLeads);
+      showToast(failed.error ?? "Erro ao atribuir responsavel");
+      return;
+    }
+
+    await recordAuditLog({
+      entity_type: "lead",
+      entity_id: null,
+      action: "lead.bulk_owner_assigned",
+      summary: `Responsavel atribuido a ${selected.length} leads`,
+      metadata: { lead_ids: Array.from(selectedIds), owner_name: ownerName },
+    });
+    setBulkOwnerName("");
+    setSelectedPipelineLeadIds(new Set());
+    showToast("Responsavel atribuido");
+  }
+
+  async function bulkMoveSelectedLeads(status: LeadStatus) {
+    const selected = selectedPipelineLeads.filter((lead) => lead.status !== status);
+    if (selected.length === 0) return;
+    if (status === "fechado") {
+      showToast("Feche leads individualmente para informar o motivo");
+      return;
+    }
+
+    for (const lead of selected) {
+      await updateLeadStatus(lead.id, status, lead.outcome_reason ?? null);
+    }
+    setSelectedPipelineLeadIds(new Set());
+  }
+
+  async function bulkScheduleSelectedLeads(days: number) {
+    const selected = selectedPipelineLeads;
+    if (selected.length === 0) return;
+
+    for (const lead of selected) {
+      await scheduleFollowup(lead, addDays(days));
+    }
+    setSelectedPipelineLeadIds(new Set());
   }
 
   async function scheduleFollowup(lead: Lead, nextFollowupAt: string) {
@@ -1152,6 +1331,33 @@ function Workspace({
                     <option value="today">Criados hoje</option>
                     <option value="overdue">Follow-up atrasado</option>
                   </select>
+                  {view === "pipeline" && (
+                    <>
+                      <select
+                        className="h-11 rounded-lg border border-white/10 bg-white/[0.04] px-3 text-sm text-zinc-300 outline-none transition focus:border-[#8B5CF6]"
+                        defaultValue=""
+                        onChange={(event) => {
+                          if (!event.target.value) return;
+                          applyFilterPreset(event.target.value);
+                          event.target.value = "";
+                        }}
+                      >
+                        <option value="">Filtros salvos</option>
+                        {savedFilterPresets.map((preset) => (
+                          <option key={preset.id} value={preset.id}>
+                            {preset.name}
+                          </option>
+                        ))}
+                      </select>
+                      <button
+                        className="h-11 rounded-lg border border-[#8B5CF6]/30 px-4 text-sm text-[#DDD6FE] transition hover:bg-[#8B5CF6]/10"
+                        onClick={saveCurrentFilterPreset}
+                        type="button"
+                      >
+                        Salvar filtro
+                      </button>
+                    </>
+                  )}
                   <button
                     className="h-11 rounded-lg border border-white/10 px-4 text-sm text-zinc-300 transition hover:bg-white/[0.06]"
                     onClick={exportFilteredLeads}
@@ -1199,13 +1405,22 @@ function Workspace({
                 )}
                 {view === "pipeline" && (
                   <Pipeline
+                    bulkOwnerName={bulkOwnerName}
                     leads={filteredLeads}
+                    onBulkArchive={() => void bulkArchiveSelectedLeads()}
+                    onBulkAssignOwner={() => void bulkAssignOwner()}
+                    onBulkMove={(status) => void bulkMoveSelectedLeads(status)}
+                    onBulkSchedule={(days) => void bulkScheduleSelectedLeads(days)}
+                    onBulkOwnerNameChange={setBulkOwnerName}
+                    onClearSelection={() => setSelectedPipelineLeadIds(new Set())}
                     onLeadClick={(lead) => setSelectedLeadId(lead.id)}
                     onLeadDelete={(lead) => setLeadPendingDelete(lead)}
                     onQuickSchedule={(lead) => scheduleFollowup(lead, addDays(1))}
                     onQuickWhatsApp={(lead) => setSelectedLeadId(lead.id)}
                     onStatusChange={requestLeadStatusChange}
                     recentLeadId={recentLeadId}
+                    selectedLeadIds={selectedPipelineLeadIds}
+                    onToggleLeadSelection={togglePipelineLeadSelection}
                   />
                 )}
                 {view === "tasks" && (
@@ -1245,7 +1460,13 @@ function Workspace({
                   />
                 )}
                 {view === "whatsapp" && <WhatsAppConnection />}
-                {view === "settings" && <SettingsView auditLogs={auditLogs} />}
+                {view === "settings" && (
+                  <SettingsView
+                    archivedLeads={archivedLeads}
+                    auditLogs={auditLogs}
+                    onUnarchiveLead={(lead) => void unarchiveLead(lead)}
+                  />
+                )}
               </>
             )}
           </div>
@@ -1873,17 +2094,35 @@ const pipelineMeta: Record<
 function Pipeline({
   leads,
   recentLeadId,
+  selectedLeadIds,
+  bulkOwnerName,
   onLeadClick,
   onLeadDelete,
   onStatusChange,
+  onToggleLeadSelection,
+  onClearSelection,
+  onBulkMove,
+  onBulkSchedule,
+  onBulkArchive,
+  onBulkOwnerNameChange,
+  onBulkAssignOwner,
   onQuickWhatsApp,
   onQuickSchedule,
 }: {
   leads: Lead[];
   recentLeadId: string | null;
+  selectedLeadIds: Set<string>;
+  bulkOwnerName: string;
   onLeadClick: (lead: Lead) => void;
   onLeadDelete: (lead: Lead) => void;
   onStatusChange: (id: string, status: LeadStatus) => void;
+  onToggleLeadSelection: (id: string) => void;
+  onClearSelection: () => void;
+  onBulkMove: (status: LeadStatus) => void;
+  onBulkSchedule: (days: number) => void;
+  onBulkArchive: () => void;
+  onBulkOwnerNameChange: (value: string) => void;
+  onBulkAssignOwner: () => void;
   onQuickWhatsApp: (lead: Lead) => void;
   onQuickSchedule: (lead: Lead) => void;
 }) {
@@ -1907,10 +2146,22 @@ function Pipeline({
     if (nextStatus && nextStatus !== activeLead.status) onStatusChange(activeLead.id, nextStatus);
   }
 
+  const selectedCount = leads.filter((lead) => selectedLeadIds.has(lead.id)).length;
+
   return (
     <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
       <div className="space-y-4">
         <PipelineOverview leads={leads} />
+        <PipelineBulkActions
+          bulkOwnerName={bulkOwnerName}
+          onArchive={onBulkArchive}
+          onAssignOwner={onBulkAssignOwner}
+          onClear={onClearSelection}
+          onMove={onBulkMove}
+          onOwnerNameChange={onBulkOwnerNameChange}
+          onSchedule={onBulkSchedule}
+          selectedCount={selectedCount}
+        />
         <div className="grid gap-4 overflow-x-auto pb-3 xl:grid-cols-5">
           {pipelineColumns.map((column) => {
             const columnLeads = sortPipelineLeadsByUrgency(
@@ -1925,7 +2176,10 @@ function Pipeline({
                 onLeadDelete={onLeadDelete}
                 onQuickSchedule={onQuickSchedule}
                 onQuickWhatsApp={onQuickWhatsApp}
+                onStatusChange={onStatusChange}
+                onToggleLeadSelection={onToggleLeadSelection}
                 recentLeadId={recentLeadId}
+                selectedLeadIds={selectedLeadIds}
                 title={column.title}
               />
             );
@@ -1933,6 +2187,100 @@ function Pipeline({
         </div>
       </div>
     </DndContext>
+  );
+}
+
+function PipelineBulkActions({
+  selectedCount,
+  bulkOwnerName,
+  onOwnerNameChange,
+  onAssignOwner,
+  onMove,
+  onSchedule,
+  onArchive,
+  onClear,
+}: {
+  selectedCount: number;
+  bulkOwnerName: string;
+  onOwnerNameChange: (value: string) => void;
+  onAssignOwner: () => void;
+  onMove: (status: LeadStatus) => void;
+  onSchedule: (days: number) => void;
+  onArchive: () => void;
+  onClear: () => void;
+}) {
+  const disabled = selectedCount === 0;
+
+  return (
+    <section className="rounded-lg border border-white/10 bg-white/[0.035] p-3">
+      <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+        <div className="text-sm text-zinc-400">
+          <span className="font-medium text-zinc-100">{selectedCount}</span> selecionados
+        </div>
+        <div className="flex flex-col gap-2 md:flex-row md:flex-wrap md:items-center md:justify-end">
+          <select
+            className="h-10 rounded-lg border border-white/10 bg-black/30 px-3 text-sm text-zinc-200 outline-none transition focus:border-[#8B5CF6] disabled:opacity-50"
+            defaultValue=""
+            disabled={disabled}
+            onChange={(event) => {
+              if (!event.target.value) return;
+              onMove(event.target.value as LeadStatus);
+              event.target.value = "";
+            }}
+          >
+            <option value="">Mover etapa</option>
+            {pipelineColumns
+              .filter((column) => column.id !== "fechado")
+              .map((column) => (
+                <option key={column.id} value={column.id}>
+                  {column.title}
+                </option>
+              ))}
+          </select>
+          <button
+            className="h-10 rounded-lg border border-white/10 px-3 text-sm text-zinc-300 transition hover:bg-white/[0.06] disabled:opacity-50"
+            disabled={disabled}
+            onClick={() => onSchedule(1)}
+            type="button"
+          >
+            Follow-up amanha
+          </button>
+          <div className="flex min-w-0 gap-2">
+            <input
+              className="h-10 min-w-0 rounded-lg border border-white/10 bg-black/30 px-3 text-sm text-zinc-200 outline-none transition placeholder:text-zinc-600 focus:border-[#8B5CF6] disabled:opacity-50"
+              disabled={disabled}
+              onChange={(event) => onOwnerNameChange(event.target.value)}
+              placeholder="Responsavel"
+              value={bulkOwnerName}
+            />
+            <button
+              className="h-10 rounded-lg border border-white/10 px-3 text-sm text-zinc-300 transition hover:bg-white/[0.06] disabled:opacity-50"
+              disabled={disabled || !bulkOwnerName.trim()}
+              onClick={onAssignOwner}
+              type="button"
+            >
+              Atribuir
+            </button>
+          </div>
+          <button
+            className="h-10 rounded-lg border border-red-400/20 bg-red-500/10 px-3 text-sm text-red-300 transition hover:bg-red-500/20 disabled:opacity-50"
+            disabled={disabled}
+            onClick={onArchive}
+            type="button"
+          >
+            Arquivar
+          </button>
+          <button
+            className="h-10 rounded-lg border border-white/10 px-3 text-sm text-zinc-500 transition hover:bg-white/[0.06] disabled:opacity-50"
+            disabled={disabled}
+            onClick={onClear}
+            type="button"
+          >
+            Limpar
+          </button>
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -2182,19 +2530,25 @@ function PipelineColumn({
   title,
   leads,
   recentLeadId,
+  selectedLeadIds,
   onLeadClick,
   onLeadDelete,
   onQuickWhatsApp,
   onQuickSchedule,
+  onStatusChange,
+  onToggleLeadSelection,
 }: {
   id: LeadStatus;
   title: string;
   leads: Lead[];
   recentLeadId: string | null;
+  selectedLeadIds: Set<string>;
   onLeadClick: (lead: Lead) => void;
   onLeadDelete: (lead: Lead) => void;
   onQuickWhatsApp: (lead: Lead) => void;
   onQuickSchedule: (lead: Lead) => void;
+  onStatusChange: (id: string, status: LeadStatus) => void;
+  onToggleLeadSelection: (id: string) => void;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id });
   const meta = pipelineMeta[id];
@@ -2265,6 +2619,9 @@ function PipelineColumn({
               onDelete={() => onLeadDelete(lead)}
               onQuickSchedule={() => onQuickSchedule(lead)}
               onQuickWhatsApp={() => onQuickWhatsApp(lead)}
+              onStatusChange={(status) => onStatusChange(lead.id, status)}
+              onToggleSelection={() => onToggleLeadSelection(lead.id)}
+              selected={selectedLeadIds.has(lead.id)}
             />
           ))}
           {leads.length === 0 && (
@@ -2281,17 +2638,23 @@ function PipelineColumn({
 function SortableLeadCard({
   lead,
   highlighted,
+  selected,
   onClick,
   onDelete,
   onQuickWhatsApp,
   onQuickSchedule,
+  onStatusChange,
+  onToggleSelection,
 }: {
   lead: Lead;
   highlighted: boolean;
+  selected: boolean;
   onClick: () => void;
   onDelete: () => void;
   onQuickWhatsApp: () => void;
   onQuickSchedule: () => void;
+  onStatusChange: (status: LeadStatus) => void;
+  onToggleSelection: () => void;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: lead.id,
@@ -2312,6 +2675,9 @@ function SortableLeadCard({
         onDelete={onDelete}
         onQuickSchedule={onQuickSchedule}
         onQuickWhatsApp={onQuickWhatsApp}
+        onStatusChange={onStatusChange}
+        onToggleSelection={onToggleSelection}
+        selected={selected}
         showQuickActions
       />
     </div>
@@ -2322,18 +2688,24 @@ function LeadCard({
   lead,
   onClick,
   onDelete,
+  selected = false,
   dragging = false,
   highlighted = false,
   showQuickActions = false,
+  onStatusChange,
+  onToggleSelection,
   onQuickWhatsApp,
   onQuickSchedule,
 }: {
   lead: Lead;
   onClick: () => void;
   onDelete?: () => void;
+  selected?: boolean;
   dragging?: boolean;
   highlighted?: boolean;
   showQuickActions?: boolean;
+  onStatusChange?: (status: LeadStatus) => void;
+  onToggleSelection?: () => void;
   onQuickWhatsApp?: () => void;
   onQuickSchedule?: () => void;
 }) {
@@ -2360,6 +2732,17 @@ function LeadCard({
       tabIndex={0}
     >
       <div className="flex items-start gap-3">
+        {onToggleSelection && (
+          <input
+            aria-label={`Selecionar ${lead.name}`}
+            checked={selected}
+            className="mt-3 h-4 w-4 shrink-0 accent-[#8B5CF6]"
+            onChange={onToggleSelection}
+            onClick={(event) => event.stopPropagation()}
+            onPointerDown={(event) => event.stopPropagation()}
+            type="checkbox"
+          />
+        )}
         <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white/10 text-xs font-semibold text-zinc-200">
           {getLeadInitials(lead) || <UserRound className="h-4 w-4" />}
         </div>
@@ -2368,6 +2751,25 @@ function LeadCard({
           <div className="mt-1 truncate text-sm text-zinc-400">{lead.company || "Sem empresa"}</div>
         </div>
       </div>
+
+      {onStatusChange && (
+        <div className="mt-3">
+          <select
+            aria-label={`Alterar etapa de ${lead.name}`}
+            className="h-9 w-full rounded-md border border-white/10 bg-black/30 px-2 text-xs text-zinc-300 outline-none transition focus:border-[#8B5CF6]"
+            onChange={(event) => onStatusChange(event.target.value as LeadStatus)}
+            onClick={(event) => event.stopPropagation()}
+            onPointerDown={(event) => event.stopPropagation()}
+            value={lead.status}
+          >
+            {pipelineColumns.map((column) => (
+              <option key={column.id} value={column.id}>
+                {column.title}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
 
       <div className="mt-4 flex flex-wrap gap-2">
         <span className={`rounded-full border px-2 py-1 text-[11px] ${temperature.tone}`}>
@@ -3706,7 +4108,15 @@ function migrationChecksInitialState(configured: boolean): MigrationCheck[] {
   ];
 }
 
-function SettingsView({ auditLogs }: { auditLogs: AuditLog[] }) {
+function SettingsView({
+  auditLogs,
+  archivedLeads,
+  onUnarchiveLead,
+}: {
+  auditLogs: AuditLog[];
+  archivedLeads: Lead[];
+  onUnarchiveLead: (lead: Lead) => void;
+}) {
   const supabase = useMemo(() => createSupabaseClient(), []);
   const [checks, setChecks] = useState<MigrationCheck[]>(() => migrationChecksInitialState(Boolean(supabase)));
 
@@ -3849,6 +4259,47 @@ function SettingsView({ auditLogs }: { auditLogs: AuditLog[] }) {
                 </div>
               </div>
             ))
+          )}
+        </div>
+      </section>
+
+      <section className="rounded-xl border border-white/10 bg-white/[0.035] p-5 xl:col-span-2">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h2 className="text-lg font-semibold">Leads arquivados</h2>
+            <p className="mt-1 text-sm text-zinc-500">Recupere oportunidades arquivadas sem recriar cadastro.</p>
+          </div>
+          <span className="rounded-full border border-white/10 px-2 py-1 text-xs text-zinc-500">
+            {archivedLeads.length}
+          </span>
+        </div>
+        <div className="mt-4 overflow-hidden rounded-lg border border-white/10">
+          {archivedLeads.length === 0 ? (
+            <div className="p-4 text-sm text-zinc-500">Nenhum lead arquivado.</div>
+          ) : (
+            <div className="divide-y divide-white/10">
+              {archivedLeads.slice(0, 20).map((lead) => (
+                <div
+                  className="grid gap-3 bg-black/20 p-3 text-sm md:grid-cols-[1fr_auto] md:items-center"
+                  key={lead.id}
+                >
+                  <div className="min-w-0">
+                    <div className="font-medium text-zinc-100">{lead.name}</div>
+                    <div className="mt-1 truncate text-xs text-zinc-500">
+                      {lead.company || "Sem empresa"} - {lead.phone} - {lead.status}
+                    </div>
+                  </div>
+                  <button
+                    className="flex h-9 items-center justify-center gap-2 rounded-lg border border-[#25D366]/25 bg-[#25D366]/10 px-3 text-xs text-[#9AF0B8] transition hover:bg-[#25D366]/20"
+                    onClick={() => onUnarchiveLead(lead)}
+                    type="button"
+                  >
+                    <RotateCcw className="h-4 w-4" />
+                    Desarquivar
+                  </button>
+                </div>
+              ))}
+            </div>
           )}
         </div>
       </section>

@@ -121,3 +121,21 @@ export async function archiveLead(id: string) {
   revalidatePath("/");
   return { success: true } satisfies ActionResult;
 }
+
+export async function unarchiveLead(id: string) {
+  const auth = await getAuthenticatedSupabase();
+  if ("error" in auth) return { success: false, error: auth.error };
+
+  const { data, error } = await auth.supabase
+    .from("leads")
+    .update({ archived_at: null })
+    .eq("id", id)
+    .eq("user_id", auth.user.id)
+    .select()
+    .single();
+
+  if (error) return { success: false, error: error.message };
+
+  revalidatePath("/");
+  return { success: true, data } satisfies ActionResult;
+}
