@@ -2547,7 +2547,7 @@ const pipelineMeta: Record<string, { accent: string; description: string; empty:
 function getPipelineMeta(id: LeadStatus, title: string) {
   return pipelineMeta[id] ?? {
     accent: "bg-zinc-400",
-    description: "Etapa personalizada do funil",
+    description: "Etapa personalizada",
     empty: `Nenhum lead em ${title.toLowerCase()}`,
   };
 }
@@ -2630,7 +2630,7 @@ function Pipeline({
           onSchedule={onBulkSchedule}
           selectedCount={selectedCount}
         />
-        <div className="flex gap-4 overflow-x-auto pb-3">
+        <div className="flex items-start gap-3 overflow-x-auto pb-4">
           {columns.map((column) => {
             const columnLeads = sortPipelineLeadsByUrgency(
               leads.filter((lead) => lead.status === column.id),
@@ -3148,63 +3148,56 @@ function PipelineColumn({
   const { setNodeRef, isOver } = useDroppable({ id });
   const meta = getPipelineMeta(id, title);
   const stats = getPipelineColumnStats(leads, closedStageIds);
+  const riskCount = stats.overdue + stats.noAction;
 
   return (
     <div
-      className={`min-h-[560px] min-w-72 rounded-lg border p-3 transition ${
+      className={`w-[300px] shrink-0 overflow-hidden rounded-lg border transition ${
         isOver ? "border-[#8B5CF6] bg-[#8B5CF6]/10" : "border-white/10 bg-white/[0.025]"
       }`}
       ref={setNodeRef}
     >
-      <div className="mb-3 rounded-lg border border-white/10 bg-black/20 p-3">
+      <div className="border-b border-white/10 px-3 py-3">
         <div className="flex items-center justify-between gap-3">
           <div className="flex min-w-0 items-center gap-2">
-            <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${meta.accent}`} />
+            <span className={`h-2 w-2 shrink-0 rounded-full ${meta.accent}`} />
             <h2 className="truncate text-sm font-semibold text-zinc-100">{title}</h2>
           </div>
-          <span className="rounded-full bg-white/[0.06] px-2 py-1 text-xs text-zinc-300">
+          <span className="shrink-0 rounded-full bg-white/[0.06] px-2 py-1 text-xs text-zinc-300">
             {leads.length}
           </span>
         </div>
-        <p className="mt-2 min-h-8 text-xs leading-4 text-zinc-500">{meta.description}</p>
-        <div className="mt-3 grid grid-cols-2 gap-2">
-          <div className="rounded-md border border-white/10 bg-white/[0.035] p-2">
-            <div className="text-[10px] uppercase text-zinc-500">Valor</div>
-            <div className="mt-1 truncate text-sm font-semibold text-zinc-100">
-              {formatCurrency(stats.value) ?? "R$ 0"}
-            </div>
-          </div>
-          <div className="rounded-md border border-white/10 bg-white/[0.035] p-2">
-            <div className="text-[10px] uppercase text-zinc-500">Riscos</div>
-            <div className="mt-1 text-sm font-semibold text-zinc-100">
-              {stats.overdue + stats.noAction}
-            </div>
-          </div>
+        <div className="mt-2 flex items-center justify-between gap-3 text-[11px] text-zinc-500">
+          <span className="truncate">{meta.description}</span>
+          <span className="shrink-0">{getColumnHealth(leads, closedStageIds)}</span>
         </div>
-        <div className="mt-2 flex flex-wrap gap-1.5">
+        <div className="mt-3 flex flex-wrap items-center gap-1.5 text-[11px]">
+          <span className="rounded-full border border-white/10 bg-black/25 px-2 py-1 text-zinc-300">
+            {formatCurrency(stats.value) ?? "R$ 0"}
+          </span>
+          <span
+            className={`rounded-full border px-2 py-1 ${
+              riskCount > 0
+                ? "border-red-400/25 bg-red-500/10 text-red-200"
+                : "border-white/10 bg-black/25 text-zinc-500"
+            }`}
+          >
+            {riskCount > 0 ? `${riskCount} riscos` : "Sem risco"}
+          </span>
           {stats.overdue > 0 && (
-            <span className="rounded-full border border-red-400/25 bg-red-500/10 px-2 py-0.5 text-[11px] text-red-200">
+            <span className="rounded-full border border-red-400/25 bg-red-500/10 px-2 py-1 text-red-200">
               {stats.overdue} vencidos
             </span>
           )}
           {stats.hot > 0 && (
-            <span className="rounded-full border border-amber-400/25 bg-amber-500/10 px-2 py-0.5 text-[11px] text-amber-100">
+            <span className="rounded-full border border-amber-400/25 bg-amber-500/10 px-2 py-1 text-amber-100">
               {stats.hot} quentes
             </span>
           )}
-          {stats.noAction > 0 && (
-            <span className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-0.5 text-[11px] text-zinc-400">
-              {stats.noAction} sem acao
-            </span>
-          )}
-        </div>
-        <div className="mt-3 flex items-center justify-between gap-3 text-[11px] text-zinc-500">
-          <span>{getColumnHealth(leads, closedStageIds)}</span>
-          <span>Ordenado por urgencia</span>
         </div>
       </div>
       <SortableContext items={leads.map((lead) => lead.id)} strategy={verticalListSortingStrategy}>
-        <div className="space-y-3">
+        <div className="min-h-[320px] space-y-3 p-3">
           {leads.map((lead) => (
             <SortableLeadCard
               key={lead.id}
@@ -3222,7 +3215,7 @@ function PipelineColumn({
             />
           ))}
           {leads.length === 0 && (
-            <div className="flex min-h-40 items-center justify-center rounded-lg border border-dashed border-white/10 bg-black/20 p-4 text-center text-sm text-zinc-500">
+            <div className="flex min-h-32 items-center justify-center rounded-md border border-dashed border-white/10 bg-black/10 p-4 text-center text-sm text-zinc-500">
               {meta.empty}
             </div>
           )}
@@ -3345,7 +3338,7 @@ function LeadCard({
       role="button"
       tabIndex={0}
     >
-      <div className="absolute inset-x-0 top-0 h-1 rounded-t-lg bg-white/10">
+      <div className="absolute inset-x-0 top-0 h-0.5 rounded-t-lg bg-white/10">
         <div
           className={`h-full rounded-t-lg ${
             isClosed
@@ -3363,28 +3356,34 @@ function LeadCard({
           <input
             aria-label={`Selecionar ${lead.name}`}
             checked={selected}
-            className="mt-3 h-4 w-4 shrink-0 accent-[#8B5CF6]"
+            className="mt-2.5 h-4 w-4 shrink-0 accent-[#8B5CF6]"
             onChange={onToggleSelection}
             onClick={(event) => event.stopPropagation()}
             onPointerDown={(event) => event.stopPropagation()}
             type="checkbox"
           />
         )}
-        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white/10 text-xs font-semibold text-zinc-200">
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white/10 text-xs font-semibold text-zinc-200">
           {getLeadInitials(lead) || <UserRound className="h-4 w-4" />}
         </div>
         <div className="min-w-0 flex-1">
           <div className="truncate font-medium text-white">{lead.name}</div>
-          <div className="mt-1 truncate text-sm text-zinc-400">{lead.company || "Sem empresa"}</div>
-          <div className="mt-1 truncate text-xs text-zinc-500">{lead.owner_name || "Sem responsavel"}</div>
+          <div className="mt-1 truncate text-xs text-zinc-500">
+            {lead.company || "Sem empresa"} / {lead.owner_name || "Sem responsavel"}
+          </div>
         </div>
       </div>
 
       {onStatusChange && (
-        <div className="mt-3">
+        <div
+          className="mt-3 flex items-center gap-2 rounded-md border border-white/10 bg-black/25 px-2 py-1.5"
+          onClick={(event) => event.stopPropagation()}
+          onPointerDown={(event) => event.stopPropagation()}
+        >
+          <span className="shrink-0 text-[10px] uppercase text-zinc-500">Etapa</span>
           <select
             aria-label={`Alterar etapa de ${lead.name}`}
-            className="h-9 w-full rounded-md border border-white/10 bg-black/30 px-2 text-xs text-zinc-300 outline-none transition focus:border-[#8B5CF6]"
+            className="min-w-0 flex-1 bg-transparent text-xs text-zinc-300 outline-none"
             onChange={(event) => onStatusChange(event.target.value as LeadStatus)}
             onClick={(event) => event.stopPropagation()}
             onPointerDown={(event) => event.stopPropagation()}
@@ -3413,7 +3412,7 @@ function LeadCard({
         </span>
       </div>
 
-      <div className="mt-3 grid gap-2 text-xs">
+      <div className="mt-3 grid gap-1.5 text-xs">
         <div className={`flex items-center justify-between gap-3 ${followup.tone}`}>
           <span className="flex items-center gap-1.5">
             <Clock3 className="h-3.5 w-3.5" />
