@@ -46,7 +46,18 @@ import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
 import { FormEvent, KeyboardEvent, MouseEvent, useCallback, useEffect, useMemo, useState } from "react";
 
-import { deleteLead as deleteLeadAction } from "@/actions/leads";
+import { recordAuditLog as recordAuditLogAction } from "@/actions/audit";
+import {
+  archiveLead as archiveLeadAction,
+  createLead as createLeadAction,
+  updateLead as updateLeadAction,
+} from "@/actions/leads";
+import { moveLeadStage } from "@/actions/pipeline";
+import {
+  completeTask as completeTaskAction,
+  createTask as createTaskAction,
+  rescheduleTask as rescheduleTaskAction,
+} from "@/actions/tasks";
 import {
   saveWhatsAppConversationAsLead,
   sendWhatsAppConversationMessage,
@@ -359,7 +370,7 @@ function Workspace({
         });
       }
 
-      setRemoteLeads((leadResult.data as Lead[] | null) ?? []);
+      setRemoteLeads(((leadResult.data as Lead[] | null) ?? []).filter((lead) => !lead.archived_at));
       setRemoteTemplates((templateResult.data as MessageTemplate[] | null) ?? []);
       setRemoteInteractions((interactionResult.data as Interaction[] | null) ?? []);
       setRemoteTasks((taskResult.data as Task[] | null) ?? []);
@@ -468,20 +479,15 @@ function Workspace({
 
     setRemoteAuditLogs((items) => [auditLog, ...items].slice(0, 80));
 
-    if (!supabase) return;
-
-    const { error } = await supabase.from("audit_logs").insert({
-      id: auditLog.id,
-      user_id: user.id,
+    const result = await recordAuditLogAction({
       entity_type: auditLog.entity_type,
       entity_id: auditLog.entity_id,
       action: auditLog.action,
       summary: auditLog.summary,
       metadata: auditLog.metadata,
-      created_at: auditLog.created_at,
     });
 
-    if (error) {
+    if (!result.success) {
       setRemoteAuditLogs((items) => items.filter((item) => item.id !== auditLog.id));
     }
   }
@@ -489,18 +495,18 @@ function Workspace({
   async function saveLead(input: LeadInput, id?: string) {
     const timestamp = new Date().toISOString();
 
-    if (!supabase) {
-      showToast("Supabase nao configurado");
+    if (input.status === "fechado" && !input.outcome_reason?.trim()) {
+      showToast("Motivo obrigatorio para fechar lead");
       return;
     }
 
     if (id) {
       const previous = remoteLeads;
       patchLeadOptimistic(id, { ...input, updated_at: timestamp });
-      const { error } = await supabase.from("leads").update(input).eq("id", id);
-      if (error) {
+      const result = await updateLeadAction(id, input);
+      if (!result.success) {
         setRemoteLeads(previous);
-        showToast("Erro ao atualizar lead");
+        showToast(result.error ?? "Erro ao atualizar lead");
         return;
       }
       await recordAuditLog({
@@ -513,19 +519,15 @@ function Workspace({
       return;
     }
 
-    const { data, error } = await supabase
-      .from("leads")
-      .insert({ ...input, user_id: user.id })
-      .select()
-      .single();
+    const result = await createLeadAction(input);
 
-    if (error) {
-      showToast("Erro ao criar lead");
+    if (!result.success) {
+      showToast(result.error ?? "Erro ao criar lead");
       return;
     }
 
-    if (data) {
-      const createdLead = data as Lead;
+    if (result.data) {
+      const createdLead = result.data as Lead;
       setRemoteLeads((items) => [createdLead, ...items]);
       await recordAuditLog({
         entity_type: "lead",
@@ -537,53 +539,70 @@ function Workspace({
     }
   }
 
-  async function deleteLead(lead: Lead) {
+  async function archiveLead(lead: Lead) {
     const previousLeads = remoteLeads;
-    const previousInteractions = remoteInteractions;
 
     setSelectedLeadId((current) => (current === lead.id ? null : current));
     setLeadPendingDelete(null);
     setRemoteLeads((items) => items.filter((item) => item.id !== lead.id));
-    setRemoteInteractions((items) => items.filter((item) => item.lead_id !== lead.id));
-    showToast("Lead removido");
+    showToast("Lead arquivado");
 
-    const result = await deleteLeadAction(lead.id);
+    const result = await archiveLeadAction(lead.id);
 
     if (!result.success) {
       setRemoteLeads(previousLeads);
-      setRemoteInteractions(previousInteractions);
-      showToast(result.error ?? "Erro ao excluir lead");
+      showToast(result.error ?? "Erro ao arquivar lead");
       return;
     }
 
     await recordAuditLog({
       entity_type: "lead",
       entity_id: lead.id,
-      action: "lead.deleted",
-      summary: `Lead excluido: ${lead.name}`,
+      action: "lead.archived",
+      summary: `Lead arquivado: ${lead.name}`,
       metadata: { phone: lead.phone, company: lead.company, status: lead.status },
     });
   }
 
   async function updateLeadStatus(id: string, status: LeadStatus) {
     const before = leads.find((lead) => lead.id === id);
-    patchLeadOptimistic(id, { status, updated_at: new Date().toISOString() });
+    const previousInteractions = remoteInteractions;
+    const outcomeReason =
+      status === "fechado" && !before?.outcome_reason?.trim()
+        ? window.prompt("Informe o motivo de ganho/perda para fechar o lead:")
+        : before?.outcome_reason;
+
+    if (status === "fechado" && !outcomeReason?.trim()) {
+      showToast("Motivo obrigatorio para fechar lead");
+      return;
+    }
+
+    patchLeadOptimistic(id, {
+      status,
+      ...(status === "fechado" ? { outcome_reason: outcomeReason?.trim() ?? "" } : {}),
+      updated_at: new Date().toISOString(),
+    });
     if (before && before.status !== status) {
       const interaction = makeInteraction(id, `Status alterado para ${status}`, "status_changed");
       addInteractionOptimistic(interaction);
-      if (supabase) await supabase.from("interactions").insert({ ...interaction, user_id: user.id });
     }
-    if (supabase) {
-      const { error } = await supabase.from("leads").update({ status }).eq("id", id);
-      if (error) showToast("Erro ao atualizar status");
-      else await recordAuditLog({
-        entity_type: "lead",
-        entity_id: id,
-        action: "lead.status_changed",
-        summary: `Status alterado para ${status}`,
-        metadata: { previous_status: before?.status, next_status: status },
-      });
+
+    const result = await moveLeadStage(id, status, outcomeReason);
+
+    if (!result.success) {
+      if (before) patchLeadOptimistic(id, before);
+      setRemoteInteractions(previousInteractions);
+      showToast(result.error ?? "Erro ao atualizar status");
+      return;
     }
+
+    await recordAuditLog({
+      entity_type: "lead",
+      entity_id: id,
+      action: "lead.status_changed",
+      summary: `Status alterado para ${status}`,
+      metadata: { previous_status: before?.status, next_status: status },
+    });
   }
 
   async function scheduleFollowup(lead: Lead, nextFollowupAt: string) {
@@ -622,35 +641,23 @@ function Workspace({
     showToast("Follow-up agendado");
 
     if (supabase) {
-      const saveTask = async () => {
-        const { error: cancelTaskError } = await supabase
-          .from("tasks")
-          .update({ status: "canceled", updated_at: now })
-          .eq("lead_id", lead.id)
-          .eq("type", "followup")
-          .eq("status", "open");
-
-        if (cancelTaskError) return { error: cancelTaskError };
-
-        return supabase.from("tasks").insert({
-          id: task.id,
-          lead_id: lead.id,
-          user_id: user.id,
-          type: task.type,
-          title: task.title,
-          notes: task.notes,
-          due_at: task.due_at,
-          status: task.status,
-        });
-      };
-      const [{ error: leadError }, { error: interactionError }, { error: taskError }] = await Promise.all([
-        supabase.from("leads").update({ next_followup_at: nextFollowupAt }).eq("id", lead.id),
+      const [taskResult, { error: interactionError }] = await Promise.all([
+        createTaskAction(
+          {
+            id: task.id,
+            lead_id: lead.id,
+            type: task.type,
+            title: task.title,
+            notes: task.notes,
+            due_at: task.due_at,
+          },
+          { cancelOpenFollowups: true },
+        ),
         supabase.from("interactions").insert({ ...interaction, user_id: user.id }),
-        saveTask(),
       ]);
-      if (leadError || interactionError) showToast("Erro ao salvar follow-up");
-      if (taskError) showToast("Follow-up salvo; aplique a migracao de tarefas no Supabase");
-      if (!leadError && !interactionError) {
+      if (interactionError) showToast("Erro ao salvar follow-up");
+      if (!taskResult.success) showToast("Follow-up salvo; aplique a migracao de tarefas no Supabase");
+      if (taskResult.success && !interactionError) {
         await recordAuditLog({
           entity_type: "task",
           entity_id: task.id,
@@ -704,38 +711,22 @@ function Workspace({
     showToast("Tarefa criada");
 
     if (supabase) {
-      const saveTask = async () => {
-        if (task.type === "followup") {
-          const { error: cancelTaskError } = await supabase
-            .from("tasks")
-            .update({ status: "canceled", updated_at: now })
-            .eq("lead_id", lead.id)
-            .eq("type", "followup")
-            .eq("status", "open");
-
-          if (cancelTaskError) return { error: cancelTaskError };
-        }
-
-        return supabase.from("tasks").insert({
-          id: task.id,
-          lead_id: lead.id,
-          user_id: user.id,
-          type: task.type,
-          title: task.title,
-          notes: task.notes,
-          due_at: task.due_at,
-          status: task.status,
-        });
-      };
-      const [{ error: taskError }, { error: leadError }, { error: interactionError }] = await Promise.all([
-        saveTask(),
-        task.type === "followup"
-          ? supabase.from("leads").update({ next_followup_at: task.due_at }).eq("id", lead.id)
-          : Promise.resolve({ error: null }),
+      const [taskResult, { error: interactionError }] = await Promise.all([
+        createTaskAction(
+          {
+            id: task.id,
+            lead_id: lead.id,
+            type: task.type,
+            title: task.title,
+            notes: task.notes,
+            due_at: task.due_at,
+          },
+          { cancelOpenFollowups: task.type === "followup" },
+        ),
         supabase.from("interactions").insert({ ...interaction, user_id: user.id }),
       ]);
 
-      if (taskError || leadError || interactionError) {
+      if (!taskResult.success || interactionError) {
         setRemoteTasks(previousTasks);
         setRemoteLeads(previousLeads);
         setRemoteInteractions(previousInteractions);
@@ -779,18 +770,12 @@ function Workspace({
     showToast("Follow-up concluido");
 
     if (supabase) {
-      const [{ error: taskError }, { error: leadError }, { error: interactionError }] = await Promise.all([
-        supabase
-          .from("tasks")
-          .update({ status: "completed", completed_at: now, updated_at: now })
-          .eq("id", task.id),
-        shouldClearFollowup
-          ? supabase.from("leads").update({ next_followup_at: null }).eq("id", lead.id)
-          : Promise.resolve({ error: null }),
+      const [taskResult, { error: interactionError }] = await Promise.all([
+        completeTaskAction(task.id, { leadId: lead.id, clearLeadFollowup: shouldClearFollowup }),
         supabase.from("interactions").insert({ ...interaction, user_id: user.id }),
       ]);
 
-      if (taskError || leadError || interactionError) {
+      if (!taskResult.success || interactionError) {
         setRemoteTasks(previousTasks);
         setRemoteLeads(previousLeads);
         setRemoteInteractions(previousInteractions);
@@ -832,18 +817,16 @@ function Workspace({
     showToast("Tarefa reagendada");
 
     if (supabase) {
-      const [{ error: taskError }, { error: leadError }, { error: interactionError }] = await Promise.all([
-        supabase
-          .from("tasks")
-          .update({ due_at: dueAt, status: "open", completed_at: null, updated_at: now })
-          .eq("id", task.id),
-        task.type === "followup"
-          ? supabase.from("leads").update({ next_followup_at: dueAt }).eq("id", lead.id)
-          : Promise.resolve({ error: null }),
+      const [taskResult, { error: interactionError }] = await Promise.all([
+        rescheduleTaskAction(task.id, {
+          leadId: lead.id,
+          dueAt,
+          updateLeadFollowup: task.type === "followup",
+        }),
         supabase.from("interactions").insert({ ...interaction, user_id: user.id }),
       ]);
 
-      if (taskError || leadError || interactionError) {
+      if (!taskResult.success || interactionError) {
         setRemoteTasks(previousTasks);
         setRemoteLeads(previousLeads);
         showToast("Erro ao reagendar tarefa");
@@ -1246,7 +1229,7 @@ function Workspace({
         <ConfirmDeleteLead
           lead={leadPendingDelete}
           onCancel={() => setLeadPendingDelete(null)}
-          onConfirm={() => void deleteLead(leadPendingDelete)}
+          onConfirm={() => void archiveLead(leadPendingDelete)}
         />
       )}
     </main>
@@ -2301,7 +2284,7 @@ function LeadCard({
             <button
               className="flex h-8 items-center justify-center rounded-md border border-red-400/20 bg-red-500/10 text-red-300 transition hover:bg-red-500/20"
               onClick={(event) => quick(event, onDelete)}
-              title="Excluir lead"
+              title="Arquivar lead"
               type="button"
             >
               <Trash2 className="h-4 w-4" />
@@ -2350,7 +2333,7 @@ function LeadList({
           <button
             className="flex h-10 items-center justify-center rounded-lg border border-red-400/20 bg-red-500/10 text-red-300 transition hover:bg-red-500/20"
             onClick={() => onDelete(lead)}
-            title="Excluir lead"
+            title="Arquivar lead"
             type="button"
           >
             <Trash2 className="h-4 w-4" />
@@ -3594,7 +3577,7 @@ function SettingsView({ auditLogs }: { auditLogs: AuditLog[] }) {
       const [commercial, tasksResult, auditResult] = await Promise.all([
         client
           .from("leads")
-          .select("id,estimated_value,owner_name,temperature,outcome_reason,sla_hours")
+          .select("id,estimated_value,owner_name,temperature,outcome_reason,sla_hours,archived_at")
           .limit(1),
         client
           .from("tasks")
@@ -3613,8 +3596,8 @@ function SettingsView({ auditLogs }: { auditLogs: AuditLog[] }) {
           label: "Campos comerciais",
           status: commercial.error ? "missing" : "ok",
           detail: commercial.error
-            ? "Aplique supabase/commercial_pipeline_migration.sql"
-            : "Campos comerciais disponiveis em leads",
+            ? "Aplique commercial_pipeline_migration.sql e lead_archiving_contracts_migration.sql"
+            : "Campos comerciais, arquivamento e contratos basicos disponiveis em leads",
         },
         {
           label: "Tabela de tarefas",
@@ -4257,7 +4240,7 @@ function LeadDetails({
           type="button"
         >
           <Trash2 className="h-4 w-4" />
-          Excluir lead
+          Arquivar lead
         </button>
       </div>
     </Modal>
@@ -4458,16 +4441,16 @@ function ConfirmDeleteLead({
   onConfirm: () => void;
 }) {
   return (
-    <Modal onClose={onCancel} title="Excluir lead">
+    <Modal onClose={onCancel} title="Arquivar lead">
       <div className="space-y-4">
         <div className="rounded-lg border border-red-400/25 bg-red-500/10 p-4">
           <div className="flex items-start gap-3">
             <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-red-300" />
             <div>
-              <p className="font-medium text-red-100">Esta acao nao pode ser desfeita.</p>
+              <p className="font-medium text-red-100">Este lead sairá da operação ativa.</p>
               <p className="mt-2 text-sm leading-6 text-red-100/80">
-                O lead {lead.name} e suas interacoes serao apagados. O historico do WhatsApp sera
-                preservado, mas ficara desvinculado deste lead.
+                O lead {lead.name} sera arquivado, mantendo interacoes, tarefas e historico de
+                WhatsApp preservados para auditoria.
               </p>
             </div>
           </div>
@@ -4486,7 +4469,7 @@ function ConfirmDeleteLead({
             type="button"
           >
             <Trash2 className="h-4 w-4" />
-            Excluir definitivamente
+            Arquivar lead
           </button>
         </div>
       </div>

@@ -15,18 +15,35 @@ create table if not exists public.leads (
   sla_hours integer not null default 24,
   last_contact_at timestamptz,
   next_followup_at timestamptz,
+  archived_at timestamptz,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
 
 alter table public.leads add column if not exists last_contact_at timestamptz;
 alter table public.leads add column if not exists next_followup_at timestamptz;
+alter table public.leads add column if not exists archived_at timestamptz;
 alter table public.leads add column if not exists updated_at timestamptz not null default now();
 alter table public.leads add column if not exists estimated_value numeric(12,2);
 alter table public.leads add column if not exists owner_name text not null default '';
 alter table public.leads add column if not exists temperature text not null default 'morno';
 alter table public.leads add column if not exists outcome_reason text not null default '';
 alter table public.leads add column if not exists sla_hours integer not null default 24;
+
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'leads_closed_outcome_reason_check'
+      and conrelid = 'public.leads'::regclass
+  ) then
+    alter table public.leads
+      add constraint leads_closed_outcome_reason_check
+      check (status <> 'fechado' or length(trim(coalesce(outcome_reason, ''))) > 0)
+      not valid;
+  end if;
+end $$;
 
 create table if not exists public.message_templates (
   id uuid primary key default gen_random_uuid(),
@@ -129,6 +146,7 @@ alter table public.whatsapp_messages add column if not exists contact_avatar_url
 create index if not exists leads_user_id_status_idx on public.leads(user_id, status);
 create index if not exists leads_user_id_next_followup_idx on public.leads(user_id, next_followup_at);
 create index if not exists leads_user_id_phone_idx on public.leads(user_id, phone);
+create index if not exists leads_user_id_archived_at_idx on public.leads(user_id, archived_at);
 create index if not exists interactions_user_id_lead_id_idx on public.interactions(user_id, lead_id);
 create index if not exists tasks_user_id_status_due_at_idx on public.tasks(user_id, status, due_at);
 create index if not exists tasks_user_id_lead_id_idx on public.tasks(user_id, lead_id);

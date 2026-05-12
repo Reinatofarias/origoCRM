@@ -28,6 +28,9 @@ async function getAuthenticatedSupabase() {
 export async function createLead(input: LeadInput) {
   const auth = await getAuthenticatedSupabase();
   if ("error" in auth) return { success: false, error: auth.error };
+  if (input.status === "fechado" && !input.outcome_reason?.trim()) {
+    return { success: false, error: "Informe o motivo de ganho/perda para fechar o lead." };
+  }
 
   const { data, error } = await auth.supabase
     .from("leads")
@@ -44,6 +47,9 @@ export async function createLead(input: LeadInput) {
 export async function updateLead(id: string, input: Partial<LeadInput>) {
   const auth = await getAuthenticatedSupabase();
   if ("error" in auth) return { success: false, error: auth.error };
+  if (input.status === "fechado" && !input.outcome_reason?.trim()) {
+    return { success: false, error: "Informe o motivo de ganho/perda para fechar o lead." };
+  }
 
   const { data, error } = await auth.supabase
     .from("leads")
@@ -91,6 +97,22 @@ export async function deleteLead(id: string) {
   const { error } = await auth.supabase
     .from("leads")
     .delete()
+    .eq("id", id)
+    .eq("user_id", auth.user.id);
+
+  if (error) return { success: false, error: error.message };
+
+  revalidatePath("/");
+  return { success: true } satisfies ActionResult;
+}
+
+export async function archiveLead(id: string) {
+  const auth = await getAuthenticatedSupabase();
+  if ("error" in auth) return { success: false, error: auth.error };
+
+  const { error } = await auth.supabase
+    .from("leads")
+    .update({ archived_at: new Date().toISOString() })
     .eq("id", id)
     .eq("user_id", auth.user.id);
 

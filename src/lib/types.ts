@@ -20,6 +20,7 @@ export type Lead = {
   sla_hours?: number | null;
   last_contact_at?: string | null;
   next_followup_at?: string | null;
+  archived_at?: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -66,6 +67,23 @@ export type AuditLog = {
   summary: string;
   metadata: Record<string, unknown>;
   created_at: string;
+};
+
+export type AuditLogInput = {
+  entity_type: AuditLog["entity_type"];
+  entity_id?: string | null;
+  action: string;
+  summary: string;
+  metadata?: Record<string, unknown>;
+};
+
+export type TaskInput = {
+  id?: string;
+  lead_id: string;
+  type: Task["type"];
+  title: string;
+  notes?: string | null;
+  due_at: string;
 };
 
 export type LeadInput = {
