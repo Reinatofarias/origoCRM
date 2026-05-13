@@ -6252,6 +6252,8 @@ function LeadForm({
   );
 }
 
+type LeadDetailsTab = "summary" | "commercial" | "tasks" | "contact" | "history";
+
 function LeadDetails({
   columns,
   lead,
@@ -6286,6 +6288,7 @@ function LeadDetails({
   onDelete: (lead: Lead) => void;
 }) {
   const automaticTemplate = pickTemplate(templates, lead);
+  const [activeTab, setActiveTab] = useState<LeadDetailsTab>("summary");
   const [selectedTemplateId, setSelectedTemplateId] = useState(automaticTemplate?.id ?? "");
   const [message, setMessage] = useState(automaticTemplate ? renderTemplate(automaticTemplate.body, lead) : "");
   const [followupAt, setFollowupAt] = useState(() => toDateTimeLocal(lead.next_followup_at ?? addDays(1)));
@@ -6303,6 +6306,19 @@ function LeadDetails({
   const openTasks = tasks
     .filter((task) => task.status === "open")
     .sort((a, b) => new Date(a.due_at).getTime() - new Date(b.due_at).getTime());
+  const currentStage = columns.find((column) => column.id === lead.status)?.title ?? lead.status;
+  const temperatureLabel = getTemperatureLabel(lead.temperature);
+  const nextTask = openTasks[0] ?? null;
+  const lastInteraction = [...interactions].sort(
+    (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+  )[0];
+  const leadTabs: { id: LeadDetailsTab; label: string; count?: number }[] = [
+    { id: "summary", label: "Resumo" },
+    { id: "commercial", label: "Comercial" },
+    { id: "tasks", label: "Tarefas", count: openTasks.length },
+    { id: "contact", label: "Contato" },
+    { id: "history", label: "Historico", count: interactions.length + whatsappMessages.length },
+  ];
 
   function updateCommercialField<K extends keyof LeadInput>(key: K, value: LeadInput[K]) {
     setCommercialForm((current) => ({ ...current, [key]: value }));
@@ -6321,6 +6337,149 @@ function LeadDetails({
   return (
     <Modal onClose={onClose} title={lead.name} wide>
       <div className="space-y-5">
+        <div className="rounded-lg border border-white/10 bg-white/[0.025] p-3">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="rounded-full border border-white/10 px-2 py-0.5 text-xs text-zinc-300">
+                  {currentStage}
+                </span>
+                <span className={`rounded-full border px-2 py-0.5 text-xs ${temperatureLabel.tone}`}>
+                  {temperatureLabel.text}
+                </span>
+                <span className="rounded-full border border-white/10 px-2 py-0.5 text-xs text-zinc-400">
+                  {lead.owner_name || "Sem responsavel"}
+                </span>
+              </div>
+              <div className="mt-2 truncate text-sm text-zinc-500">
+                {lead.company || "Sem empresa"} - {lead.phone}
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:w-[520px]">
+              <LeadMetric label="Tarefas" value={String(openTasks.length)} />
+              <LeadMetric label="WhatsApp" value={String(whatsappMessages.length)} />
+              <LeadMetric label="Valor" value={formatCurrency(lead.estimated_value) ?? "R$ 0"} />
+              <LeadMetric
+                label="Proximo"
+                value={lead.next_followup_at ? new Date(lead.next_followup_at).toLocaleDateString("pt-BR") : "Sem data"}
+              />
+            </div>
+          </div>
+          <div className="mt-4 flex gap-2 overflow-x-auto pb-1">
+            {leadTabs.map((tab) => (
+              <button
+                className={`flex h-9 shrink-0 items-center gap-2 rounded-lg border px-3 text-sm transition ${
+                  activeTab === tab.id
+                    ? "border-[#8B5CF6]/70 bg-[#8B5CF6]/20 text-white"
+                    : "border-white/10 bg-black/20 text-zinc-400 hover:bg-white/[0.06] hover:text-zinc-100"
+                }`}
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                type="button"
+              >
+                {tab.label}
+                {typeof tab.count === "number" && (
+                  <span className="rounded-full bg-white/10 px-1.5 py-0.5 text-[11px] text-zinc-300">{tab.count}</span>
+                )}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {activeTab === "summary" && (
+          <div className="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
+            <section className="rounded-lg border border-white/10 bg-white/[0.035] p-4">
+              <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <h3 className="font-semibold text-zinc-100">Resumo operacional</h3>
+                  <p className="mt-1 text-sm text-zinc-500">Proxima melhor acao e contexto essencial do lead.</p>
+                </div>
+                <button
+                  className="mt-2 flex h-9 items-center justify-center gap-2 rounded-lg border border-[#8B5CF6]/40 bg-[#8B5CF6]/15 px-3 text-xs font-medium text-[#DDD6FE] transition hover:bg-[#8B5CF6]/25 sm:mt-0"
+                  onClick={() => setActiveTab("contact")}
+                  type="button"
+                >
+                  <MessageCircle className="h-4 w-4" />
+                  Contatar
+                </button>
+              </div>
+              <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                <LeadSummaryItem label="Empresa" value={lead.company || "Sem empresa"} />
+                <LeadSummaryItem label="Origem" value={lead.source || "Nao informada"} />
+                <LeadSummaryItem label="Responsavel" value={lead.owner_name || "Nao definido"} />
+                <LeadSummaryItem label="Valor estimado" value={formatCurrency(lead.estimated_value) ?? "Nao informado"} />
+                <LeadSummaryItem
+                  label="Proximo contato"
+                  value={lead.next_followup_at ? new Date(lead.next_followup_at).toLocaleString("pt-BR") : "Nao agendado"}
+                />
+                <LeadSummaryItem
+                  label="Ultimo contato"
+                  value={lead.last_contact_at ? new Date(lead.last_contact_at).toLocaleString("pt-BR") : "Sem contato"}
+                />
+              </div>
+              {lead.outcome_reason && (
+                <div className="mt-4 rounded-lg border border-white/10 bg-black/20 p-3">
+                  <div className="text-xs uppercase text-zinc-500">Motivo de ganho/perda</div>
+                  <div className="mt-2 text-sm leading-6 text-zinc-300">{lead.outcome_reason}</div>
+                </div>
+              )}
+            </section>
+
+            <aside className="space-y-4">
+              <div className="rounded-lg border border-white/10 bg-white/[0.025] p-4">
+                <div className="text-sm font-semibold text-zinc-100">Proxima acao</div>
+                {nextTask ? (
+                  <div className="mt-3 rounded-lg border border-white/10 bg-black/20 p-3">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="rounded-full border border-white/10 px-2 py-0.5 text-[11px] text-zinc-400">
+                        {taskTypeLabel(nextTask.type)}
+                      </span>
+                      <span className="text-sm font-medium text-zinc-100">{nextTask.title}</span>
+                    </div>
+                    <div className={`mt-2 text-xs ${getDueAtLabel(nextTask.due_at).tone}`}>
+                      {getDueAtLabel(nextTask.due_at).text}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="mt-3 rounded-lg border border-dashed border-white/10 p-4 text-sm text-zinc-500">
+                    Nenhuma tarefa aberta. Crie uma tarefa para manter o lead em cadencia.
+                  </div>
+                )}
+                <button
+                  className="mt-3 h-9 w-full rounded-lg border border-white/10 text-sm text-zinc-300 transition hover:bg-white/[0.06]"
+                  onClick={() => setActiveTab("tasks")}
+                  type="button"
+                >
+                  Ver tarefas
+                </button>
+              </div>
+
+              <div className="rounded-lg border border-white/10 bg-white/[0.025] p-4">
+                <div className="text-sm font-semibold text-zinc-100">Ultimo registro</div>
+                {lastInteraction ? (
+                  <div className="mt-3 text-sm leading-6 text-zinc-400">
+                    <div className="text-zinc-100">{timelineTitle(lastInteraction)}</div>
+                    <div className="line-clamp-3">{lastInteraction.message ?? lastInteraction.note}</div>
+                    <div className="mt-2 text-xs text-zinc-500">{new Date(lastInteraction.created_at).toLocaleString("pt-BR")}</div>
+                  </div>
+                ) : (
+                  <div className="mt-3 text-sm text-zinc-500">Nenhuma interacao registrada.</div>
+                )}
+              </div>
+
+              <button
+                className="flex h-11 w-full items-center justify-center gap-2 rounded-lg border border-red-400/25 bg-red-500/10 text-sm font-medium text-red-200 transition hover:bg-red-500/20"
+                onClick={() => onDelete(lead)}
+                type="button"
+              >
+                <Trash2 className="h-4 w-4" />
+                Excluir lead
+              </button>
+            </aside>
+          </div>
+        )}
+
+        {activeTab === "commercial" && (
         <section className="rounded-lg border border-white/10 bg-white/[0.035] p-4">
           <form
             className="space-y-4"
@@ -6406,7 +6565,9 @@ function LeadDetails({
             </label>
           </form>
         </section>
+        )}
 
+        {activeTab === "tasks" && (
         <section className="grid gap-5 xl:grid-cols-[1fr_1fr]">
           <div className="rounded-lg border border-white/10 bg-white/[0.025] p-4">
             <div className="flex items-center justify-between gap-3">
@@ -6513,50 +6674,10 @@ function LeadDetails({
             </button>
           </form>
         </section>
+        )}
 
-        <div className="rounded-lg border border-white/10 bg-white/[0.035] p-4">
-          <div className="grid gap-3 sm:grid-cols-4">
-            <div>
-              <div className="text-sm text-zinc-500">Empresa</div>
-              <div className="mt-1">{lead.company || "Sem empresa"}</div>
-            </div>
-            <div>
-              <div className="text-sm text-zinc-500">Valor</div>
-              <div className="mt-1">{formatCurrency(lead.estimated_value) ?? "Nao informado"}</div>
-            </div>
-            <div>
-              <div className="text-sm text-zinc-500">Temperatura</div>
-              <select
-                className="mt-1 h-9 w-full rounded-lg border border-white/10 bg-[#14131B] px-2 text-sm capitalize text-zinc-100 outline-none transition focus:border-[#8B5CF6]"
-                onChange={(event) =>
-                  onUpdateTemperature(lead, event.target.value as NonNullable<Lead["temperature"]>)
-                }
-                value={lead.temperature ?? "morno"}
-              >
-                <option value="frio">Frio</option>
-                <option value="morno">Morno</option>
-                <option value="quente">Quente</option>
-              </select>
-            </div>
-            <div>
-              <div className="text-sm text-zinc-500">Responsavel</div>
-              <div className="mt-1">{lead.owner_name || "Nao definido"}</div>
-            </div>
-          </div>
-          <div className="mt-3 text-sm text-zinc-500">Proximo contato atual</div>
-          <div className="mt-1">
-            {lead.next_followup_at
-              ? new Date(lead.next_followup_at).toLocaleDateString("pt-BR")
-              : "Nao agendado"}
-          </div>
-          {lead.outcome_reason && (
-            <>
-              <div className="mt-3 text-sm text-zinc-500">Motivo de ganho/perda</div>
-              <div className="mt-1 text-sm text-zinc-300">{lead.outcome_reason}</div>
-            </>
-          )}
-        </div>
-
+        {activeTab === "contact" && (
+        <section className="space-y-5">
         <div>
           <label className="mb-2 block text-sm text-zinc-300">
             Mensagem pronta
@@ -6642,7 +6763,11 @@ function LeadDetails({
           Enviar mensagem agora
           <ExternalLink className="h-4 w-4" />
         </button>
+        </section>
+        )}
 
+        {activeTab === "history" && (
+        <section className="space-y-5">
         <form
           className="rounded-lg border border-white/10 bg-white/[0.025] p-4"
           onSubmit={(event) => {
@@ -6697,17 +6822,28 @@ function LeadDetails({
         </form>
 
         <LeadHistory interactions={interactions} whatsappMessages={whatsappMessages} />
-
-        <button
-          className="flex h-11 w-full items-center justify-center gap-2 rounded-lg border border-red-400/25 bg-red-500/10 text-sm font-medium text-red-200 transition hover:bg-red-500/20"
-          onClick={() => onDelete(lead)}
-          type="button"
-        >
-          <Trash2 className="h-4 w-4" />
-          Excluir lead
-        </button>
+        </section>
+        )}
       </div>
     </Modal>
+  );
+}
+
+function LeadMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="min-w-0 rounded-lg border border-white/10 bg-black/20 px-3 py-2">
+      <div className="truncate text-[11px] uppercase text-zinc-500">{label}</div>
+      <div className="mt-1 truncate text-sm font-semibold text-zinc-100">{value}</div>
+    </div>
+  );
+}
+
+function LeadSummaryItem({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-lg border border-white/10 bg-black/20 p-3">
+      <div className="text-xs uppercase text-zinc-500">{label}</div>
+      <div className="mt-2 break-words text-sm font-medium text-zinc-100">{value}</div>
+    </div>
   );
 }
 
