@@ -1787,6 +1787,7 @@ function Workspace({
                     onDeleteTask={deleteTask}
                     onOpenLead={(lead) => setSelectedLeadId(lead.id)}
                     onRescheduleTask={rescheduleTask}
+                    onScheduleLeadFollowup={scheduleFollowup}
                     onUpdateTask={updateTask}
                     tasks={tasks}
                   />
@@ -2947,6 +2948,7 @@ function TasksView({
   onCompleteTask,
   onCreateTask,
   onRescheduleTask,
+  onScheduleLeadFollowup,
   onUpdateTask,
   onDeleteTask,
 }: {
@@ -2956,6 +2958,7 @@ function TasksView({
   onCompleteTask: (task: Task, lead: Lead | null) => void;
   onCreateTask: (lead: Lead | null, input: TaskInput) => void;
   onRescheduleTask: (task: Task, lead: Lead | null, dueAt: string) => void;
+  onScheduleLeadFollowup: (lead: Lead, dueAt: string) => void;
   onUpdateTask: (task: Task, lead: Lead | null, input: TaskInput) => void;
   onDeleteTask: (task: Task, lead: Lead | null) => void;
 }) {
@@ -2985,6 +2988,19 @@ function TasksView({
       return true;
     })
     .sort((a, b) => new Date(a.task.due_at).getTime() - new Date(b.task.due_at).getTime());
+  const agendaRows = leads
+    .filter((lead) => {
+      if (!lead.next_followup_at || isLeadClosed(lead)) return false;
+      if (owner !== "all" && lead.owner_name !== owner) return false;
+      const dueAt = new Date(lead.next_followup_at);
+      if (Number.isNaN(dueAt.getTime())) return false;
+      if (scope === "completed") return false;
+      if (scope === "overdue") return dueAt.getTime() < startOfDay(new Date()).getTime();
+      if (scope === "today") return startOfDay(dueAt).getTime() === startOfDay(new Date()).getTime();
+      if (scope === "upcoming") return dueAt.getTime() > endOfDay(new Date()).getTime();
+      return true;
+    })
+    .sort((a, b) => new Date(a.next_followup_at ?? "").getTime() - new Date(b.next_followup_at ?? "").getTime());
   const selectedRows = taskRows.filter(({ task }) => selectedIds.has(task.id));
   const counts = {
     open: scopedTasks.filter((task) => task.status === "open").length,
@@ -2995,6 +3011,7 @@ function TasksView({
   };
   const operationalCount = scopedTasks.filter((task) => !isCommercialTask(task)).length;
   const commercialCount = scopedTasks.filter(isCommercialTask).length;
+  const agendaCount = agendaRows.length;
 
   function toggleTask(id: string) {
     setSelectedIds((current) => {
@@ -3180,6 +3197,90 @@ function TasksView({
                       >
                         <Trash2 className="h-3.5 w-3.5" />
                         Excluir
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </section>
+
+      <section className="rounded-lg border border-white/10 bg-white/[0.03] p-4">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <h2 className="text-lg font-semibold">Agenda comercial</h2>
+            <p className="mt-1 text-sm text-zinc-500">
+              Follow-ups salvos nos leads do CRM. Use esta fila para acompanhar os agendamentos ainda nao convertidos em tarefa.
+            </p>
+          </div>
+          <span className="w-fit rounded-full border border-white/10 px-3 py-1 text-xs text-zinc-400">
+            {agendaCount} agendamento(s)
+          </span>
+        </div>
+
+        <div className="mt-4 overflow-hidden rounded-lg border border-white/10">
+          {agendaRows.length === 0 ? (
+            <div className="p-6 text-sm text-zinc-500">Nenhum agendamento encontrado para este filtro.</div>
+          ) : (
+            <div className="max-h-[28rem] divide-y divide-white/10 overflow-y-auto">
+              {agendaRows.map((lead) => {
+                const due = getDueAtLabel(lead.next_followup_at ?? "");
+
+                return (
+                  <div className="grid gap-3 bg-black/20 p-4 lg:grid-cols-[1.4fr_1fr_auto] lg:items-center" key={lead.id}>
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="rounded-full border border-[#25D366]/25 bg-[#25D366]/10 px-2 py-0.5 text-[11px] text-[#9AF0B8]">
+                          Agenda CRM
+                        </span>
+                        <span className={`rounded-full border px-2 py-0.5 text-[11px] ${getTemperatureLabel(lead.temperature).tone}`}>
+                          {getTemperatureLabel(lead.temperature).text}
+                        </span>
+                        <span className="font-medium text-zinc-100">{lead.name}</span>
+                      </div>
+                      <button
+                        className="mt-1 text-left text-sm text-zinc-500 transition hover:text-zinc-200"
+                        onClick={() => onOpenLead(lead)}
+                        type="button"
+                      >
+                        {lead.company || "Sem empresa"} - {lead.phone}
+                      </button>
+                    </div>
+                    <div>
+                      <div className={`text-sm ${due.tone}`}>{due.text}</div>
+                      <div className="mt-1 text-xs text-zinc-500">{lead.owner_name || "Sem responsavel"}</div>
+                    </div>
+                    <div className="flex flex-wrap gap-2 lg:justify-end">
+                      <button
+                        className="h-9 rounded-lg border border-white/10 px-3 text-xs text-zinc-300 transition hover:bg-white/[0.06]"
+                        onClick={() => onOpenLead(lead)}
+                        type="button"
+                      >
+                        Abrir
+                      </button>
+                      <button
+                        className="h-9 rounded-lg border border-[#8B5CF6]/25 bg-[#8B5CF6]/10 px-3 text-xs text-[#DDD6FE] transition hover:bg-[#8B5CF6]/20"
+                        onClick={() => onScheduleLeadFollowup(lead, addDays(1))}
+                        type="button"
+                      >
+                        Reagendar
+                      </button>
+                      <button
+                        className="h-9 rounded-lg border border-[#25D366]/25 bg-[#25D366]/10 px-3 text-xs text-[#9AF0B8] transition hover:bg-[#25D366]/20"
+                        onClick={() =>
+                          onCreateTask(lead, {
+                            lead_id: lead.id,
+                            type: "followup",
+                            title: `Follow-up com ${lead.name}`,
+                            notes: "Criado a partir da agenda comercial",
+                            due_at: lead.next_followup_at ?? addDays(1),
+                          })
+                        }
+                        type="button"
+                      >
+                        Criar tarefa
                       </button>
                     </div>
                   </div>
