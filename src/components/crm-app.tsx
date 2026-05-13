@@ -110,6 +110,13 @@ type DashboardAgendaItem = {
   title: string;
   task?: Task;
 };
+type DashboardActivityDay = {
+  key: string;
+  label: string;
+  created: number;
+  replies: number;
+  contacts: number;
+};
 type InteractionInput = {
   note: string;
   type: NonNullable<Interaction["type"]>;
@@ -1883,6 +1890,10 @@ function Dashboard({
       ),
     [dashboardClosedStageIds, leads, ownerFilter],
   );
+  const scopedLeads = useMemo(
+    () => leads.filter((lead) => ownerFilter === "all" || lead.owner_name === ownerFilter),
+    [leads, ownerFilter],
+  );
   const openTasks = useMemo(
     () =>
       tasks.filter((task) => {
@@ -2005,6 +2016,36 @@ function Dashboard({
     ...noOwner.slice(0, 2).map((lead) => ({ lead, reason: "Sem responsavel" })),
     ...noNextContact.slice(0, 2).map((lead) => ({ lead, reason: "Sem proximo contato" })),
   ].filter((item, index, items) => items.findIndex((candidate) => candidate.lead.id === item.lead.id) === index);
+  const stagePerformance = columns.map((column) => {
+    const stageLeads = scopedLeads.filter((lead) => lead.status === column.id);
+    return {
+      id: column.id,
+      title: column.title,
+      count: stageLeads.length,
+      value: stageLeads.reduce((total, lead) => total + (lead.estimated_value ?? 0), 0),
+      hot: stageLeads.filter((lead) => (lead.temperature ?? "morno") === "quente").length,
+    };
+  });
+  const maxStageCount = Math.max(1, ...stagePerformance.map((stage) => stage.count));
+  const activityDays = buildDashboardActivityDays({
+    interactions,
+    leads: scopedLeads,
+    now: dashboardNow,
+    whatsappMessages,
+  });
+  const maxActivityTotal = Math.max(1, ...activityDays.map((day) => day.created + day.replies + day.contacts));
+  const funnelStages = stagePerformance.slice(0, 5);
+  const maxFunnelCount = Math.max(1, ...funnelStages.map((stage) => stage.count));
+  const whatsappOperationalStats = [
+    { label: "Nao lidas", value: conversationsWithPendingReplies.length, tone: "bg-[#25D366]" },
+    { label: "Sem lead", value: unlinkedConversations.length, tone: "bg-amber-400" },
+    { label: "Respondidas", value: groupedMessages.length - conversationsWithPendingReplies.length, tone: "bg-[#8B5CF6]" },
+    { label: "Falhas", value: failedMessages.length, tone: "bg-red-400" },
+  ];
+  const totalWhatsappOperational = Math.max(
+    1,
+    whatsappOperationalStats.reduce((total, item) => total + item.value, 0),
+  );
 
   return (
     <div className="space-y-5">
@@ -2048,8 +2089,58 @@ function Dashboard({
         <DashboardPriorityCard description="Sem proximo passo" label="Quentes sem acao" value={hotLeadsWithoutAction.length} tone="warning" />
       </div>
 
+      <div className="grid gap-5 xl:grid-cols-[1.15fr_0.85fr]">
+        <section className="self-start rounded-lg border border-white/10 bg-white/[0.03] p-5">
+          <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <h2 className="text-lg font-semibold">Performance visual</h2>
+              <p className="mt-1 text-sm text-zinc-500">Etapas, atividade recente e conversao do funil.</p>
+            </div>
+            <span className="rounded-full border border-white/10 px-3 py-1 text-xs text-zinc-400">
+              Atividade 7 dias
+            </span>
+          </div>
+          <div className="mt-5 grid gap-5 xl:grid-cols-[1fr_0.9fr]">
+            <DashboardStageChart stages={stagePerformance} maxCount={maxStageCount} />
+            <DashboardActivityChart days={activityDays} maxTotal={maxActivityTotal} />
+          </div>
+        </section>
+
+        <section className="self-start rounded-lg border border-white/10 bg-white/[0.03] p-5">
+          <h2 className="text-lg font-semibold">Funil e WhatsApp</h2>
+          <p className="mt-1 text-sm text-zinc-500">Visao rapida da distribuicao operacional.</p>
+          <DashboardFunnelChart stages={funnelStages} maxCount={maxFunnelCount} />
+          <div className="mt-5 rounded-lg border border-white/10 bg-black/20 p-4">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <div className="text-sm font-medium text-zinc-100">WhatsApp operacional</div>
+                <div className="mt-1 text-xs text-zinc-500">{groupedMessages.length} conversas rastreadas</div>
+              </div>
+              <button className="text-xs text-[#9AF0B8] transition hover:text-[#25D366]" onClick={onViewConversations} type="button">
+                Abrir inbox
+              </button>
+            </div>
+            <div className="mt-4 flex h-3 overflow-hidden rounded-full bg-white/10">
+              {whatsappOperationalStats.map((item) => (
+                <div
+                  className={item.tone}
+                  key={item.label}
+                  style={{ width: `${Math.max(3, (item.value / totalWhatsappOperational) * 100)}%` }}
+                  title={`${item.label}: ${item.value}`}
+                />
+              ))}
+            </div>
+            <div className="mt-4 grid grid-cols-2 gap-2">
+              {whatsappOperationalStats.map((item) => (
+                <DashboardMiniLegend key={item.label} label={item.label} tone={item.tone} value={item.value} />
+              ))}
+            </div>
+          </div>
+        </section>
+      </div>
+
       <div className="grid gap-5 xl:grid-cols-[1.35fr_0.85fr]">
-        <section className="rounded-lg border border-white/10 bg-white/[0.03] p-5">
+        <section className="self-start rounded-lg border border-white/10 bg-white/[0.03] p-5">
           <div className="flex items-center justify-between gap-3">
             <div>
               <h2 className="text-lg font-semibold">Agenda de hoje</h2>
@@ -2059,11 +2150,11 @@ function Dashboard({
               {todayAgenda.length}
             </span>
           </div>
-          <div className="mt-4 space-y-3">
+          <div className="mt-4 max-h-[28rem] space-y-3 overflow-y-auto pr-1">
             {todayAgenda.length === 0 && (
               <DashboardEmpty text="Nenhum follow-up vencido ou agendado para hoje." />
             )}
-            {todayAgenda.slice(0, 6).map((item) => {
+            {todayAgenda.map((item) => {
               const task = item.task;
 
               return (
@@ -2080,6 +2171,11 @@ function Dashboard({
               );
             })}
           </div>
+          {todayAgenda.length > 6 && (
+            <div className="mt-3 rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-xs text-zinc-500">
+              Mais {todayAgenda.length - 6} item(ns) na agenda. Use a rolagem interna para revisar sem perder o contexto do dashboard.
+            </div>
+          )}
         </section>
 
         <DashboardWhatsAppHealth
@@ -2137,6 +2233,45 @@ function Dashboard({
   );
 }
 
+function buildDashboardActivityDays({
+  interactions,
+  leads,
+  now,
+  whatsappMessages,
+}: {
+  interactions: Interaction[];
+  leads: Lead[];
+  now: number;
+  whatsappMessages: WhatsAppMessage[];
+}): DashboardActivityDay[] {
+  const today = startOfDay(new Date(now));
+
+  return Array.from({ length: 7 }, (_, index) => {
+    const day = new Date(today);
+    day.setDate(today.getDate() - (6 - index));
+    const nextDay = new Date(day);
+    nextDay.setDate(day.getDate() + 1);
+    const start = day.getTime();
+    const end = nextDay.getTime();
+    const inRange = (value: string) => {
+      const time = new Date(value).getTime();
+      return time >= start && time < end;
+    };
+
+    return {
+      key: day.toISOString().slice(0, 10),
+      label: day.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" }),
+      created: leads.filter((lead) => inRange(lead.created_at)).length,
+      replies: whatsappMessages.filter((message) => message.direction === "inbound" && inRange(message.created_at)).length,
+      contacts: interactions.filter(
+        (interaction) =>
+          interaction.type === "whatsapp_sent" &&
+          inRange(interaction.created_at),
+      ).length,
+    };
+  });
+}
+
 function DashboardPriorityCard({
   label,
   value,
@@ -2175,6 +2310,144 @@ function DashboardCompactMetric({ label, value }: { label: string; value: string
     <div className="rounded-lg border border-white/10 bg-black/20 p-3">
       <div className="text-xs text-zinc-500">{label}</div>
       <div className="mt-1 text-xl font-semibold text-zinc-100">{value}</div>
+    </div>
+  );
+}
+
+function DashboardStageChart({
+  stages,
+  maxCount,
+}: {
+  stages: Array<{ id: LeadStatus; title: string; count: number; value: number; hot: number }>;
+  maxCount: number;
+}) {
+  return (
+    <div className="rounded-lg border border-white/10 bg-black/20 p-4">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <div className="text-sm font-medium text-zinc-100">Leads por etapa</div>
+          <div className="mt-1 text-xs text-zinc-500">Volume, valor aberto e temperatura.</div>
+        </div>
+      </div>
+      <div className="mt-4 space-y-3">
+        {stages.map((stage) => (
+          <div key={stage.id}>
+            <div className="mb-1 flex items-center justify-between gap-3 text-xs">
+              <span className="truncate text-zinc-300">{stage.title}</span>
+              <span className="shrink-0 text-zinc-500">
+                {stage.count} - {formatCurrency(stage.value) ?? "R$ 0"}
+              </span>
+            </div>
+            <div className="h-2 overflow-hidden rounded-full bg-white/10">
+              <div
+                className="h-full rounded-full bg-[#8B5CF6]"
+                style={{ width: `${Math.max(stage.count ? 8 : 0, (stage.count / maxCount) * 100)}%` }}
+              />
+            </div>
+            {stage.hot > 0 && <div className="mt-1 text-[11px] text-amber-200">{stage.hot} quente(s)</div>}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function DashboardActivityChart({
+  days,
+  maxTotal,
+}: {
+  days: DashboardActivityDay[];
+  maxTotal: number;
+}) {
+  return (
+    <div className="rounded-lg border border-white/10 bg-black/20 p-4">
+      <div className="text-sm font-medium text-zinc-100">Atividade dos ultimos 7 dias</div>
+      <div className="mt-1 text-xs text-zinc-500">Leads criados, respostas e contatos feitos.</div>
+      <div className="mt-5 grid h-36 grid-cols-7 items-end gap-2">
+        {days.map((day) => {
+          const total = day.created + day.replies + day.contacts;
+
+          return (
+            <div className="flex h-full flex-col items-center justify-end gap-2" key={day.key}>
+              <div className="flex h-28 items-end gap-0.5">
+                <div
+                  className="w-2 rounded-t bg-sky-400"
+                  style={{ height: `${day.created ? Math.max(6, (day.created / maxTotal) * 112) : 2}px` }}
+                  title={`Leads criados: ${day.created}`}
+                />
+                <div
+                  className="w-2 rounded-t bg-[#25D366]"
+                  style={{ height: `${day.replies ? Math.max(6, (day.replies / maxTotal) * 112) : 2}px` }}
+                  title={`Respostas: ${day.replies}`}
+                />
+                <div
+                  className="w-2 rounded-t bg-[#8B5CF6]"
+                  style={{ height: `${day.contacts ? Math.max(6, (day.contacts / maxTotal) * 112) : 2}px` }}
+                  title={`Contatos: ${day.contacts}`}
+                />
+              </div>
+              <div className="text-[11px] text-zinc-500">{day.label}</div>
+              <span className="sr-only">{total} atividades</span>
+            </div>
+          );
+        })}
+      </div>
+      <div className="mt-3 flex flex-wrap gap-3 text-[11px] text-zinc-500">
+        <DashboardMiniLegend label="Leads" tone="bg-sky-400" value={days.reduce((total, day) => total + day.created, 0)} />
+        <DashboardMiniLegend label="Respostas" tone="bg-[#25D366]" value={days.reduce((total, day) => total + day.replies, 0)} />
+        <DashboardMiniLegend label="Contatos" tone="bg-[#8B5CF6]" value={days.reduce((total, day) => total + day.contacts, 0)} />
+      </div>
+    </div>
+  );
+}
+
+function DashboardFunnelChart({
+  stages,
+  maxCount,
+}: {
+  stages: Array<{ id: LeadStatus; title: string; count: number; value: number; hot: number }>;
+  maxCount: number;
+}) {
+  return (
+    <div className="mt-4 space-y-3">
+      {stages.map((stage, index) => (
+        <div className="rounded-lg border border-white/10 bg-black/20 p-3" key={stage.id}>
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex min-w-0 items-center gap-2">
+              <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-white/10 text-xs text-zinc-400">
+                {index + 1}
+              </span>
+              <span className="truncate text-sm font-medium text-zinc-100">{stage.title}</span>
+            </div>
+            <span className="text-sm font-semibold text-zinc-100">{stage.count}</span>
+          </div>
+          <div className="mt-3 h-2 overflow-hidden rounded-full bg-white/10">
+            <div
+              className="h-full rounded-full bg-[#25D366]"
+              style={{ width: `${Math.max(stage.count ? 10 : 0, (stage.count / maxCount) * 100)}%` }}
+            />
+          </div>
+        </div>
+      ))}
+      {stages.length === 0 && <DashboardEmpty text="Nenhuma etapa configurada." />}
+    </div>
+  );
+}
+
+function DashboardMiniLegend({
+  label,
+  tone,
+  value,
+}: {
+  label: string;
+  tone: string;
+  value: number;
+}) {
+  return (
+    <div className="flex items-center gap-2 text-xs text-zinc-500">
+      <span className={`h-2.5 w-2.5 rounded-full ${tone}`} />
+      <span>{label}</span>
+      <span className="font-medium text-zinc-300">{value}</span>
     </div>
   );
 }
