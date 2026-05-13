@@ -66,7 +66,9 @@ import { moveLeadStage } from "@/actions/pipeline";
 import {
   completeTask as completeTaskAction,
   createTask as createTaskAction,
+  deleteTask as deleteTaskAction,
   rescheduleTask as rescheduleTaskAction,
+  updateTask as updateTaskAction,
 } from "@/actions/tasks";
 import {
   saveWhatsAppConversationAsLead,
@@ -105,7 +107,7 @@ import {
 type AuthUser = { id: string; email?: string };
 type Toast = { id: string; text: string };
 type DashboardAgendaItem = {
-  lead: Lead;
+  lead: Lead | null;
   dueAt: string;
   title: string;
   task?: Task;
@@ -129,6 +131,7 @@ type TaskInput = {
   notes?: string | null;
   due_at: string;
 };
+type TaskRepeat = "none" | "weekly" | "monthly" | "daily";
 type TaskScope = "open" | "overdue" | "today" | "upcoming" | "completed";
 type MigrationCheck = {
   label: string;
@@ -1194,6 +1197,8 @@ function Workspace({
 
   async function completeTask(task: Task, lead: Lead | null) {
     const now = new Date().toISOString();
+    const repeat = getTaskRepeat(task);
+    const nextRecurringDueAt = getNextRecurringDueAt(task.due_at, repeat);
     const previousTasks = remoteTasks;
     const previousLeads = remoteLeads;
     const previousInteractions = remoteInteractions;
@@ -1220,7 +1225,7 @@ function Workspace({
     showToast("Tarefa concluida");
 
     if (supabase) {
-      const taskResult = await completeTaskAction(task.id, { leadId: lead?.id ?? null, clearLeadFollowup: shouldClearFollowup });
+      const taskResult = await completeTaskAction(task.id, { leadId: task.lead_id ?? lead?.id ?? null, clearLeadFollowup: shouldClearFollowup });
       const interactionError = interaction
         ? (await supabase.from("interactions").insert({ ...interaction, user_id: user.id })).error
         : null;
@@ -1238,7 +1243,17 @@ function Workspace({
         entity_id: task.id,
         action: "task.completed",
         summary: `Tarefa concluida: ${task.title}`,
-        metadata: { lead_id: lead?.id ?? null, type: task.type, completed_at: now },
+        metadata: { lead_id: task.lead_id ?? lead?.id ?? null, type: task.type, completed_at: now },
+      });
+    }
+
+    if (nextRecurringDueAt) {
+      await createTask(lead, {
+        lead_id: lead?.id ?? null,
+        type: task.type,
+        title: task.title,
+        notes: task.notes ?? null,
+        due_at: nextRecurringDueAt,
       });
     }
   }
@@ -1271,7 +1286,7 @@ function Workspace({
 
     if (supabase) {
       const taskResult = await rescheduleTaskAction(task.id, {
-        leadId: lead?.id ?? null,
+        leadId: task.lead_id ?? lead?.id ?? null,
         dueAt,
         updateLeadFollowup: task.type === "followup" && Boolean(lead),
       });
@@ -1292,7 +1307,96 @@ function Workspace({
         entity_id: task.id,
         action: "task.rescheduled",
         summary: `Tarefa reagendada: ${task.title}`,
-        metadata: { lead_id: lead?.id ?? null, type: task.type, due_at: dueAt },
+        metadata: { lead_id: task.lead_id ?? lead?.id ?? null, type: task.type, due_at: dueAt },
+      });
+    }
+  }
+
+  async function updateTask(task: Task, lead: Lead | null, input: TaskInput) {
+    const now = new Date().toISOString();
+    const nextLead = input.lead_id ? remoteLeads.find((item) => item.id === input.lead_id) ?? lead : null;
+    const previousTasks = remoteTasks;
+    const previousLeads = remoteLeads;
+    const previousInteractions = remoteInteractions;
+    const interaction = nextLead
+      ? makeInteraction(
+          nextLead.id,
+          `Tarefa atualizada: ${input.title.trim()}`,
+          input.type === "followup" ? "followup_created" : "note",
+        )
+      : null;
+
+    setRemoteTasks((items) =>
+      items.map((item) =>
+        item.id === task.id
+          ? {
+              ...item,
+              lead_id: input.lead_id ?? null,
+              type: input.type,
+              title: input.title.trim(),
+              notes: input.notes?.trim() || null,
+              due_at: input.due_at,
+              updated_at: now,
+            }
+          : item,
+      ),
+    );
+    if (input.type === "followup" && nextLead) {
+      patchLeadOptimistic(nextLead.id, { next_followup_at: input.due_at, updated_at: now });
+    }
+    if (interaction) addInteractionOptimistic(interaction);
+    showToast("Tarefa atualizada");
+
+    if (supabase) {
+      const taskResult = await updateTaskAction(task.id, {
+        lead_id: input.lead_id ?? null,
+        type: input.type,
+        title: input.title.trim(),
+        notes: input.notes?.trim() || null,
+        due_at: input.due_at,
+      });
+      const interactionError = interaction
+        ? (await supabase.from("interactions").insert({ ...interaction, user_id: user.id })).error
+        : null;
+
+      if (!taskResult.success || interactionError) {
+        setRemoteTasks(previousTasks);
+        setRemoteLeads(previousLeads);
+        setRemoteInteractions(previousInteractions);
+        showToast("Erro ao atualizar tarefa");
+        return;
+      }
+
+      await recordAuditLog({
+        entity_type: "task",
+        entity_id: task.id,
+        action: "task.updated",
+        summary: `Tarefa atualizada: ${input.title.trim()}`,
+        metadata: { lead_id: input.lead_id ?? null, type: input.type, due_at: input.due_at },
+      });
+    }
+  }
+
+  async function deleteTask(task: Task, lead: Lead | null) {
+    const previousTasks = remoteTasks;
+    setRemoteTasks((items) => items.filter((item) => item.id !== task.id));
+    showToast("Tarefa excluida");
+
+    if (supabase) {
+      const taskResult = await deleteTaskAction(task.id, { leadId: task.lead_id ?? lead?.id ?? null });
+
+      if (!taskResult.success) {
+        setRemoteTasks(previousTasks);
+        showToast("Erro ao excluir tarefa");
+        return;
+      }
+
+      await recordAuditLog({
+        entity_type: "task",
+        entity_id: task.id,
+        action: "task.deleted",
+        summary: `Tarefa excluida: ${task.title}`,
+        metadata: { lead_id: task.lead_id ?? lead?.id ?? null, type: task.type },
       });
     }
   }
@@ -1680,8 +1784,10 @@ function Workspace({
                     leads={leads}
                     onCompleteTask={completeTask}
                     onCreateTask={createTask}
+                    onDeleteTask={deleteTask}
                     onOpenLead={(lead) => setSelectedLeadId(lead.id)}
                     onRescheduleTask={rescheduleTask}
+                    onUpdateTask={updateTask}
                     tasks={tasks}
                   />
                 )}
@@ -1822,7 +1928,7 @@ function Dashboard({
   tasks: Task[];
   whatsappMessages: WhatsAppMessage[];
   whatsappLogs: WhatsAppLog[];
-  onCompleteTask: (task: Task, lead: Lead) => void;
+  onCompleteTask: (task: Task, lead: Lead | null) => void;
   onOpen: (lead: Lead) => void;
   onQuickWhatsApp: (lead: Lead) => void;
   onQuickSchedule: (lead: Lead) => void;
@@ -1910,7 +2016,7 @@ function Dashboard({
     () =>
       tasks.filter((task) => {
         if (task.status !== "open") return false;
-        if (!task.lead_id) return false;
+        if (!task.lead_id) return ownerFilter === "all";
         const lead = leadById.get(task.lead_id);
         return Boolean(lead) && (ownerFilter === "all" || lead?.owner_name === ownerFilter);
       }),
@@ -1926,11 +2032,11 @@ function Dashboard({
           dueAt: task.due_at,
           title: task.title,
         }))
-        .filter((item): item is DashboardAgendaItem & { task: Task } => Boolean(item.lead)),
+        .filter((item): item is DashboardAgendaItem & { task: Task } => Boolean(item.task)),
     [leadById, openTasks],
   );
   const taskAgendaLeadIds = useMemo(
-    () => new Set(taskAgenda.map((item) => item.lead.id)),
+    () => new Set(taskAgenda.map((item) => item.lead?.id).filter((id): id is string => Boolean(id))),
     [taskAgenda],
   );
   const legacyAgenda: DashboardAgendaItem[] = useMemo(
@@ -2059,6 +2165,28 @@ function Dashboard({
     1,
     whatsappOperationalStats.reduce((total, item) => total + item.value, 0),
   );
+  const scopedTasks = useMemo(
+    () =>
+      tasks.filter((task) => {
+        if (!task.lead_id) return ownerFilter === "all";
+        const lead = leadById.get(task.lead_id);
+        return Boolean(lead) && (ownerFilter === "all" || lead?.owner_name === ownerFilter);
+      }),
+    [leadById, ownerFilter, tasks],
+  );
+  const taskPerformanceStats = {
+    open: scopedTasks.filter((task) => task.status === "open").length,
+    completed: scopedTasks.filter((task) => task.status === "completed").length,
+    overdue: scopedTasks.filter((task) => task.status === "open" && isTaskOverdue(task)).length,
+    commercial: scopedTasks.filter(isCommercialTask).length,
+    operational: scopedTasks.filter((task) => !isCommercialTask(task)).length,
+  };
+  const totalTaskPerformance = Math.max(
+    1,
+    Math.max(0, taskPerformanceStats.open - taskPerformanceStats.overdue) +
+      taskPerformanceStats.overdue +
+      taskPerformanceStats.completed,
+  );
 
   return (
     <div className="space-y-5">
@@ -2157,28 +2285,42 @@ function Dashboard({
           <div className="flex items-center justify-between gap-3">
             <div>
               <h2 className="text-lg font-semibold">Tarefas de hoje</h2>
-              <p className="mt-1 text-sm text-zinc-500">Atrasadas primeiro, depois proximas tarefas comerciais do dia.</p>
+              <p className="mt-1 text-sm text-zinc-500">Operacionais e comerciais em uma fila de execucao.</p>
             </div>
             <span className="rounded-full border border-white/10 px-2 py-1 text-xs text-zinc-400">
               {todayAgenda.length}
             </span>
           </div>
+          <DashboardTaskChart stats={taskPerformanceStats} total={totalTaskPerformance} />
           <div className="mt-4 max-h-[28rem] space-y-3 overflow-y-auto pr-1">
             {todayAgenda.length === 0 && (
-              <DashboardEmpty text="Nenhum follow-up vencido ou agendado para hoje." />
+              <DashboardEmpty text="Nenhuma tarefa operacional ou comercial vencida/agendada para hoje." />
             )}
             {todayAgenda.map((item) => {
               const task = item.task;
 
+              if (!item.lead) {
+                return (
+                  <DashboardOperationalTaskRow
+                    dueAt={item.dueAt}
+                    key={task?.id ?? item.dueAt}
+                    onCompleteTask={task ? () => onCompleteTask(task, null) : undefined}
+                    task={task}
+                    title={item.title}
+                  />
+                );
+              }
+              const lead = item.lead;
+
               return (
                 <DashboardLeadRow
                   dueAt={item.dueAt}
-                  key={task?.id ?? `${item.lead.id}-${item.dueAt}`}
-                  lead={item.lead}
-                  onCompleteTask={task ? () => onCompleteTask(task, item.lead) : undefined}
-                  onOpen={() => onOpen(item.lead)}
-                  onQuickSchedule={() => onQuickSchedule(item.lead)}
-                  onQuickWhatsApp={() => onQuickWhatsApp(item.lead)}
+                  key={task?.id ?? `${lead.id}-${item.dueAt}`}
+                  lead={lead}
+                  onCompleteTask={task ? () => onCompleteTask(task, lead) : undefined}
+                  onOpen={() => onOpen(lead)}
+                  onQuickSchedule={() => onQuickSchedule(lead)}
+                  onQuickWhatsApp={() => onQuickWhatsApp(lead)}
                   title={item.title}
                 />
               );
@@ -2323,6 +2465,66 @@ function DashboardCompactMetric({ label, value }: { label: string; value: string
     <div className="rounded-lg border border-white/10 bg-black/20 p-3">
       <div className="text-xs text-zinc-500">{label}</div>
       <div className="mt-1 text-xl font-semibold text-zinc-100">{value}</div>
+    </div>
+  );
+}
+
+function DashboardTaskChart({
+  stats,
+  total,
+}: {
+  stats: { open: number; completed: number; overdue: number; commercial: number; operational: number };
+  total: number;
+}) {
+  const active = Math.max(0, stats.open - stats.overdue);
+  const segments = [
+    { label: "Em execucao", value: active, tone: "bg-[#8B5CF6]" },
+    { label: "Atrasadas", value: stats.overdue, tone: "bg-red-400" },
+    { label: "Concluidas", value: stats.completed, tone: "bg-[#25D366]" },
+  ];
+  const typeTotal = Math.max(1, stats.commercial + stats.operational);
+
+  return (
+    <div className="mt-4 rounded-lg border border-white/10 bg-black/20 p-4">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <div className="text-sm font-medium text-zinc-100">Execucao de tarefas</div>
+          <div className="mt-1 text-xs text-zinc-500">Status atual e origem da demanda.</div>
+        </div>
+        <div className="text-right text-xs text-zinc-500">
+          <div>{stats.commercial} comerciais</div>
+          <div>{stats.operational} operacionais</div>
+        </div>
+      </div>
+      <div className="mt-4 flex h-3 overflow-hidden rounded-full bg-white/10">
+        {segments.map((segment) => (
+          <div
+            className={segment.tone}
+            key={segment.label}
+            style={{ width: `${segment.value === 0 ? 0 : Math.max(4, (segment.value / total) * 100)}%` }}
+            title={`${segment.label}: ${segment.value}`}
+          />
+        ))}
+      </div>
+      <div className="mt-4 grid grid-cols-3 gap-2">
+        {segments.map((segment) => (
+          <DashboardMiniLegend key={segment.label} label={segment.label} tone={segment.tone} value={segment.value} />
+        ))}
+      </div>
+      <div className="mt-4 grid grid-cols-2 gap-2">
+        <div className="rounded-lg border border-[#25D366]/20 bg-[#25D366]/10 p-3">
+          <div className="text-xs text-[#9AF0B8]">Comerciais</div>
+          <div className="mt-2 h-2 overflow-hidden rounded-full bg-black/30">
+            <div className="h-full bg-[#25D366]" style={{ width: `${(stats.commercial / typeTotal) * 100}%` }} />
+          </div>
+        </div>
+        <div className="rounded-lg border border-[#8B5CF6]/20 bg-[#8B5CF6]/10 p-3">
+          <div className="text-xs text-[#DDD6FE]">Operacionais</div>
+          <div className="mt-2 h-2 overflow-hidden rounded-full bg-black/30">
+            <div className="h-full bg-[#8B5CF6]" style={{ width: `${(stats.operational / typeTotal) * 100}%` }} />
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
@@ -2646,6 +2848,59 @@ function DashboardLeadRow({
   );
 }
 
+function DashboardOperationalTaskRow({
+  task,
+  dueAt,
+  title,
+  onCompleteTask,
+}: {
+  task?: Task;
+  dueAt: string;
+  title: string;
+  onCompleteTask?: () => void;
+}) {
+  const due = getDueAtLabel(dueAt);
+  const repeat = task ? getTaskRepeat(task) : "none";
+  const visibleNotes = stripTaskMetadata(task?.notes);
+
+  return (
+    <div className="rounded-lg border border-[#8B5CF6]/20 bg-[#8B5CF6]/[0.06] p-4">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="rounded-full border border-[#8B5CF6]/25 bg-[#8B5CF6]/10 px-2 py-0.5 text-[11px] text-[#DDD6FE]">
+              Operacional
+            </span>
+            {task && (
+              <span className="rounded-full border border-white/10 px-2 py-0.5 text-[11px] text-zinc-400">
+                {taskTypeLabel(task.type)}
+              </span>
+            )}
+            {repeat !== "none" && (
+              <span className="rounded-full border border-amber-400/25 bg-amber-500/10 px-2 py-0.5 text-[11px] text-amber-200">
+                Repete {taskRepeatLabel(repeat).toLowerCase()}
+              </span>
+            )}
+          </div>
+          <div className="mt-2 font-medium text-white">{title}</div>
+          <div className={`mt-2 text-xs ${due.tone}`}>{due.text}</div>
+          {visibleNotes && <div className="mt-2 line-clamp-2 text-xs text-zinc-500">{visibleNotes}</div>}
+        </div>
+        {onCompleteTask && (
+          <button
+            className="flex h-9 items-center justify-center gap-2 rounded-lg border border-[#25D366]/25 bg-[#25D366]/10 px-3 text-xs text-[#9AF0B8] transition hover:bg-[#25D366]/20"
+            onClick={onCompleteTask}
+            type="button"
+          >
+            <CheckCheck className="h-4 w-4" />
+            Concluir
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function DashboardRiskLeadRow({
   lead,
   reason,
@@ -2692,6 +2947,8 @@ function TasksView({
   onCompleteTask,
   onCreateTask,
   onRescheduleTask,
+  onUpdateTask,
+  onDeleteTask,
 }: {
   tasks: Task[];
   leads: Lead[];
@@ -2699,19 +2956,23 @@ function TasksView({
   onCompleteTask: (task: Task, lead: Lead | null) => void;
   onCreateTask: (lead: Lead | null, input: TaskInput) => void;
   onRescheduleTask: (task: Task, lead: Lead | null, dueAt: string) => void;
+  onUpdateTask: (task: Task, lead: Lead | null, input: TaskInput) => void;
+  onDeleteTask: (task: Task, lead: Lead | null) => void;
 }) {
   const [scope, setScope] = useState<TaskScope>("open");
   const [owner, setOwner] = useState("all");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
-  const [taskLeadId, setTaskLeadId] = useState("");
-  const [taskType, setTaskType] = useState<Task["type"]>("other");
-  const [taskTitle, setTaskTitle] = useState("");
-  const [taskNotes, setTaskNotes] = useState("");
-  const [taskDueAt, setTaskDueAt] = useState(() => toDateTimeLocal(new Date().toISOString()));
+  const [taskEditor, setTaskEditor] = useState<{ task?: Task; lead?: Lead | null } | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<{ task: Task; lead: Lead | null } | null>(null);
   const owners = Array.from(
     new Set(leads.map((lead) => lead.owner_name?.trim()).filter((item): item is string => Boolean(item))),
   ).sort((a, b) => a.localeCompare(b));
   const sortedLeads = [...leads].sort((a, b) => a.name.localeCompare(b.name));
+  const scopedTasks = tasks.filter((task) => {
+    if (owner === "all") return true;
+    const lead = task.lead_id ? leads.find((item) => item.id === task.lead_id) : null;
+    return lead?.owner_name === owner;
+  });
   const taskRows = tasks
     .map((task) => ({ task, lead: leads.find((lead) => lead.id === task.lead_id) ?? null }))
     .filter(({ task, lead }) => {
@@ -2726,12 +2987,14 @@ function TasksView({
     .sort((a, b) => new Date(a.task.due_at).getTime() - new Date(b.task.due_at).getTime());
   const selectedRows = taskRows.filter(({ task }) => selectedIds.has(task.id));
   const counts = {
-    open: tasks.filter((task) => task.status === "open").length,
-    overdue: tasks.filter((task) => task.status === "open" && isTaskOverdue(task)).length,
-    today: tasks.filter((task) => task.status === "open" && isTaskDueOnDate(task, new Date())).length,
-    upcoming: tasks.filter((task) => task.status === "open" && new Date(task.due_at).getTime() > endOfDay(new Date()).getTime()).length,
-    completed: tasks.filter((task) => task.status === "completed").length,
+    open: scopedTasks.filter((task) => task.status === "open").length,
+    overdue: scopedTasks.filter((task) => task.status === "open" && isTaskOverdue(task)).length,
+    today: scopedTasks.filter((task) => task.status === "open" && isTaskDueOnDate(task, new Date())).length,
+    upcoming: scopedTasks.filter((task) => task.status === "open" && new Date(task.due_at).getTime() > endOfDay(new Date()).getTime()).length,
+    completed: scopedTasks.filter((task) => task.status === "completed").length,
   };
+  const operationalCount = scopedTasks.filter((task) => !isCommercialTask(task)).length;
+  const commercialCount = scopedTasks.filter(isCommercialTask).length;
 
   function toggleTask(id: string) {
     setSelectedIds((current) => {
@@ -2749,24 +3012,11 @@ function TasksView({
     setSelectedIds(new Set());
   }
 
-  function submitTask(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const title = taskTitle.trim();
-    if (!title) return;
-
-    const lead = taskLeadId ? leads.find((item) => item.id === taskLeadId) ?? null : null;
-    onCreateTask(lead, {
-      lead_id: lead?.id ?? null,
-      type: taskType,
-      title,
-      notes: taskNotes.trim() || null,
-      due_at: fromDateTimeLocal(taskDueAt),
-    });
-    setTaskTitle("");
-    setTaskNotes("");
-    setTaskType("other");
-    setTaskLeadId("");
-    setTaskDueAt(toDateTimeLocal(new Date().toISOString()));
+  function saveTask(input: TaskInput) {
+    const lead = input.lead_id ? leads.find((item) => item.id === input.lead_id) ?? null : null;
+    if (taskEditor?.task) onUpdateTask(taskEditor.task, taskEditor.lead ?? null, input);
+    else onCreateTask(lead, input);
+    setTaskEditor(null);
   }
 
   return (
@@ -2795,78 +3045,13 @@ function TasksView({
         ))}
       </div>
 
-      <form
-        className="rounded-lg border border-white/10 bg-white/[0.03] p-4"
-        onSubmit={submitTask}
-      >
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-          <div>
-            <h2 className="text-lg font-semibold">Nova tarefa</h2>
-            <p className="mt-1 text-sm text-zinc-500">Crie tarefas operacionais do dia ou vincule a um lead do CRM.</p>
-          </div>
-          <button className="flex h-10 items-center justify-center gap-2 rounded-lg bg-[#8B5CF6] px-4 text-sm font-medium transition hover:bg-[#7C3AED]">
-            <Plus className="h-4 w-4" />
-            Adicionar tarefa
-          </button>
-        </div>
-        <div className="mt-4 grid gap-3 lg:grid-cols-[1.1fr_0.8fr_0.8fr_0.8fr]">
-          <Input label="Titulo" onChange={setTaskTitle} required value={taskTitle} />
-          <label className="block text-sm text-zinc-300">
-            Tipo
-            <select
-              className="mt-2 h-11 w-full rounded-lg border border-white/10 bg-black/30 px-3 text-sm text-zinc-100 outline-none transition focus:border-[#8B5CF6]"
-              onChange={(event) => setTaskType(event.target.value as Task["type"])}
-              value={taskType}
-            >
-              <option value="other">Operacional</option>
-              <option value="followup">Follow-up</option>
-              <option value="whatsapp">WhatsApp</option>
-              <option value="call">Ligacao</option>
-              <option value="email">Email</option>
-              <option value="meeting">Reuniao</option>
-            </select>
-          </label>
-          <label className="block text-sm text-zinc-300">
-            Lead vinculado
-            <select
-              className="mt-2 h-11 w-full rounded-lg border border-white/10 bg-black/30 px-3 text-sm text-zinc-100 outline-none transition focus:border-[#8B5CF6]"
-              onChange={(event) => setTaskLeadId(event.target.value)}
-              value={taskLeadId}
-            >
-              <option value="">Sem lead</option>
-              {sortedLeads.map((lead) => (
-                <option key={lead.id} value={lead.id}>
-                  {lead.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="block text-sm text-zinc-300">
-            Quando
-            <input
-              className="mt-2 h-11 w-full rounded-lg border border-white/10 bg-black/30 px-3 text-sm text-zinc-100 outline-none transition focus:border-[#8B5CF6]"
-              onChange={(event) => setTaskDueAt(event.target.value)}
-              type="datetime-local"
-              value={taskDueAt}
-            />
-          </label>
-        </div>
-        <label className="mt-3 block text-sm text-zinc-300">
-          Observacao
-          <textarea
-            className="mt-2 min-h-20 w-full rounded-lg border border-white/10 bg-black/30 p-3 text-sm outline-none transition focus:border-[#8B5CF6]"
-            onChange={(event) => setTaskNotes(event.target.value)}
-            placeholder="Detalhe o que precisa ser feito, contexto ou criterio de conclusao"
-            value={taskNotes}
-          />
-        </label>
-      </form>
-
       <section className="rounded-lg border border-white/10 bg-white/[0.03] p-4">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div>
-            <h2 className="text-lg font-semibold">Controle de tarefas</h2>
-            <p className="mt-1 text-sm text-zinc-500">Conclua tarefas operacionais, abra leads ou reagende proximas acoes.</p>
+            <h2 className="text-lg font-semibold">Tarefas</h2>
+            <p className="mt-1 text-sm text-zinc-500">
+              {commercialCount} comerciais e {operationalCount} operacionais. Conclua, edite, exclua ou reagende proximas acoes.
+            </p>
           </div>
           <div className="flex flex-col gap-2 sm:flex-row">
             <select
@@ -2888,6 +3073,14 @@ function TasksView({
               <RotateCcw className="h-4 w-4" />
               Reagendar selecionadas
             </button>
+            <button
+              className="flex h-10 items-center justify-center gap-2 rounded-lg bg-[#8B5CF6] px-4 text-sm font-medium transition hover:bg-[#7C3AED]"
+              onClick={() => setTaskEditor({ lead: null })}
+              type="button"
+            >
+              <Plus className="h-4 w-4" />
+              Criar nova tarefa
+            </button>
           </div>
         </div>
 
@@ -2895,9 +3088,11 @@ function TasksView({
           {taskRows.length === 0 ? (
             <div className="p-6 text-sm text-zinc-500">Nenhuma tarefa encontrada para este filtro.</div>
           ) : (
-            <div className="divide-y divide-white/10">
+            <div className="max-h-[34rem] divide-y divide-white/10 overflow-y-auto">
               {taskRows.map(({ task, lead }) => {
                 const due = getDueAtLabel(task.due_at);
+                const repeat = getTaskRepeat(task);
+                const visibleNotes = stripTaskMetadata(task.notes);
                 return (
                   <div className="grid gap-3 bg-black/20 p-4 lg:grid-cols-[auto_1.4fr_1fr_auto] lg:items-center" key={task.id}>
                     <input
@@ -2911,6 +3106,18 @@ function TasksView({
                         <span className="rounded-full border border-white/10 px-2 py-0.5 text-[11px] text-zinc-400">
                           {taskTypeLabel(task.type)}
                         </span>
+                        <span className={`rounded-full border px-2 py-0.5 text-[11px] ${
+                          isCommercialTask(task)
+                            ? "border-[#25D366]/25 bg-[#25D366]/10 text-[#9AF0B8]"
+                            : "border-[#8B5CF6]/25 bg-[#8B5CF6]/10 text-[#DDD6FE]"
+                        }`}>
+                          {isCommercialTask(task) ? "Comercial" : "Operacional"}
+                        </span>
+                        {repeat !== "none" && (
+                          <span className="rounded-full border border-amber-400/25 bg-amber-500/10 px-2 py-0.5 text-[11px] text-amber-200">
+                            Repete {taskRepeatLabel(repeat).toLowerCase()}
+                          </span>
+                        )}
                         <span className="font-medium text-zinc-100">{task.title}</span>
                       </div>
                       {lead ? (
@@ -2924,6 +3131,7 @@ function TasksView({
                       ) : (
                         <div className="mt-1 text-sm text-zinc-500">Tarefa operacional sem lead vinculado</div>
                       )}
+                      {visibleNotes && <div className="mt-2 line-clamp-2 text-xs leading-5 text-zinc-500">{visibleNotes}</div>}
                     </div>
                     <div>
                       <div className={`text-sm ${due.tone}`}>{due.text}</div>
@@ -2957,6 +3165,22 @@ function TasksView({
                           </button>
                         </>
                       )}
+                      <button
+                        className="flex h-9 items-center gap-1 rounded-lg border border-white/10 px-3 text-xs text-zinc-300 transition hover:bg-white/[0.06]"
+                        onClick={() => setTaskEditor({ task, lead })}
+                        type="button"
+                      >
+                        <Edit3 className="h-3.5 w-3.5" />
+                        Editar
+                      </button>
+                      <button
+                        className="flex h-9 items-center gap-1 rounded-lg border border-red-400/20 bg-red-500/10 px-3 text-xs text-red-200 transition hover:bg-red-500/20"
+                        onClick={() => setDeleteTarget({ task, lead })}
+                        type="button"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                        Excluir
+                      </button>
                     </div>
                   </div>
                 );
@@ -2965,7 +3189,142 @@ function TasksView({
           )}
         </div>
       </section>
+      {taskEditor && (
+        <TaskEditorModal
+          leads={sortedLeads}
+          onClose={() => setTaskEditor(null)}
+          onSave={saveTask}
+          task={taskEditor.task}
+        />
+      )}
+      {deleteTarget && (
+        <ConfirmDeleteTask
+          task={deleteTarget.task}
+          onCancel={() => setDeleteTarget(null)}
+          onConfirm={() => {
+            onDeleteTask(deleteTarget.task, deleteTarget.lead);
+            setDeleteTarget(null);
+          }}
+        />
+      )}
     </div>
+  );
+}
+
+function TaskEditorModal({
+  leads,
+  task,
+  onClose,
+  onSave,
+}: {
+  leads: Lead[];
+  task?: Task;
+  onClose: () => void;
+  onSave: (input: TaskInput) => void;
+}) {
+  const [leadId, setLeadId] = useState(task?.lead_id ?? "");
+  const [type, setType] = useState<Task["type"]>(task?.type ?? "other");
+  const [title, setTitle] = useState(task?.title ?? "");
+  const [notes, setNotes] = useState(stripTaskMetadata(task?.notes));
+  const [dueAt, setDueAt] = useState(toDateTimeLocal(task?.due_at ?? new Date().toISOString()));
+  const [repeat, setRepeat] = useState<TaskRepeat>(task ? getTaskRepeat(task) : "none");
+
+  return (
+    <Modal onClose={onClose} title={task ? "Editar tarefa" : "Criar nova tarefa"}>
+      <form
+        className="space-y-4"
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (!title.trim()) return;
+          onSave({
+            lead_id: leadId || null,
+            type,
+            title: title.trim(),
+            notes: buildTaskNotes(notes, repeat),
+            due_at: fromDateTimeLocal(dueAt),
+          });
+        }}
+      >
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Input label="Titulo" onChange={setTitle} required value={title} />
+          <label className="block text-sm text-zinc-300">
+            Tipo
+            <select
+              className="mt-2 h-11 w-full rounded-lg border border-white/10 bg-black/30 px-3 text-sm text-zinc-100 outline-none transition focus:border-[#8B5CF6]"
+              onChange={(event) => setType(event.target.value as Task["type"])}
+              value={type}
+            >
+              <option value="other">Operacional</option>
+              <option value="followup">Follow-up</option>
+              <option value="whatsapp">WhatsApp</option>
+              <option value="call">Ligacao</option>
+              <option value="email">Email</option>
+              <option value="meeting">Reuniao</option>
+            </select>
+          </label>
+          <label className="block text-sm text-zinc-300">
+            Lead vinculado
+            <select
+              className="mt-2 h-11 w-full rounded-lg border border-white/10 bg-black/30 px-3 text-sm text-zinc-100 outline-none transition focus:border-[#8B5CF6]"
+              onChange={(event) => setLeadId(event.target.value)}
+              value={leadId}
+            >
+              <option value="">Sem lead</option>
+              {leads.map((lead) => (
+                <option key={lead.id} value={lead.id}>
+                  {lead.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="block text-sm text-zinc-300">
+            Quando
+            <input
+              className="mt-2 h-11 w-full rounded-lg border border-white/10 bg-black/30 px-3 text-sm text-zinc-100 outline-none transition focus:border-[#8B5CF6]"
+              onChange={(event) => setDueAt(event.target.value)}
+              required
+              type="datetime-local"
+              value={dueAt}
+            />
+          </label>
+          <label className="block text-sm text-zinc-300 sm:col-span-2">
+            Repetir
+            <select
+              className="mt-2 h-11 w-full rounded-lg border border-white/10 bg-black/30 px-3 text-sm text-zinc-100 outline-none transition focus:border-[#8B5CF6]"
+              onChange={(event) => setRepeat(event.target.value as TaskRepeat)}
+              value={repeat}
+            >
+              <option value="none">Nao repetir</option>
+              <option value="daily">Diariamente</option>
+              <option value="weekly">Semanalmente</option>
+              <option value="monthly">Mensalmente</option>
+            </select>
+          </label>
+        </div>
+        <label className="block text-sm text-zinc-300">
+          Observacao
+          <textarea
+            className="mt-2 min-h-28 w-full rounded-lg border border-white/10 bg-black/30 p-3 text-sm outline-none transition focus:border-[#8B5CF6]"
+            onChange={(event) => setNotes(event.target.value)}
+            placeholder="Detalhe o que precisa ser feito, contexto ou criterio de conclusao"
+            value={notes}
+          />
+        </label>
+        <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+          <button
+            className="h-10 rounded-lg border border-white/10 px-4 text-sm text-zinc-300 transition hover:bg-white/[0.06]"
+            onClick={onClose}
+            type="button"
+          >
+            Cancelar
+          </button>
+          <button className="flex h-10 items-center justify-center gap-2 rounded-lg bg-[#8B5CF6] px-4 text-sm font-semibold text-white transition hover:bg-[#7C3AED]">
+            <Save className="h-4 w-4" />
+            Salvar tarefa
+          </button>
+        </div>
+      </form>
+    </Modal>
   );
 }
 
@@ -3455,6 +3814,45 @@ function taskTypeLabel(type: Task["type"]) {
   if (type === "whatsapp") return "WhatsApp";
   if (type === "meeting") return "Reuniao";
   return "Outro";
+}
+
+function taskRepeatLabel(repeat: TaskRepeat) {
+  if (repeat === "daily") return "Diaria";
+  if (repeat === "weekly") return "Semanal";
+  if (repeat === "monthly") return "Mensal";
+  return "Nao repetir";
+}
+
+function getTaskRepeat(task: Pick<Task, "notes">): TaskRepeat {
+  const match = task.notes?.match(/\[\[repeat:(none|daily|weekly|monthly)\]\]/);
+  return (match?.[1] as TaskRepeat | undefined) ?? "none";
+}
+
+function stripTaskMetadata(notes?: string | null) {
+  return (notes ?? "").replace(/\s*\[\[repeat:(none|daily|weekly|monthly)\]\]\s*/g, "").trim();
+}
+
+function buildTaskNotes(notes: string, repeat: TaskRepeat) {
+  const cleanNotes = stripTaskMetadata(notes);
+  if (repeat === "none") return cleanNotes || null;
+  return `${cleanNotes}${cleanNotes ? "\n" : ""}[[repeat:${repeat}]]`;
+}
+
+function getNextRecurringDueAt(value: string, repeat: TaskRepeat) {
+  if (repeat === "none") return null;
+
+  const dueAt = new Date(value);
+  if (Number.isNaN(dueAt.getTime())) return null;
+
+  if (repeat === "daily") dueAt.setDate(dueAt.getDate() + 1);
+  if (repeat === "weekly") dueAt.setDate(dueAt.getDate() + 7);
+  if (repeat === "monthly") dueAt.setMonth(dueAt.getMonth() + 1);
+
+  return dueAt.toISOString();
+}
+
+function isCommercialTask(task: Task) {
+  return Boolean(task.lead_id);
 }
 
 function getLastContactLabel(lead: Lead) {
@@ -6839,6 +7237,8 @@ function LeadDetails({
               )}
               {openTasks.map((task) => {
                 const due = getDueAtLabel(task.due_at);
+                const repeat = getTaskRepeat(task);
+                const visibleNotes = stripTaskMetadata(task.notes);
                 return (
                   <div className="rounded-lg border border-white/10 bg-black/20 p-3" key={task.id}>
                     <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -6847,10 +7247,15 @@ function LeadDetails({
                           <span className="rounded-full border border-white/10 px-2 py-0.5 text-[11px] text-zinc-400">
                             {taskTypeLabel(task.type)}
                           </span>
+                          {repeat !== "none" && (
+                            <span className="rounded-full border border-amber-400/25 bg-amber-500/10 px-2 py-0.5 text-[11px] text-amber-200">
+                              Repete {taskRepeatLabel(repeat).toLowerCase()}
+                            </span>
+                          )}
                           <span className="text-sm font-medium text-zinc-100">{task.title}</span>
                         </div>
                         <div className={`mt-2 text-xs ${due.tone}`}>{due.text}</div>
-                        {task.notes && <p className="mt-2 text-xs leading-5 text-zinc-500">{task.notes}</p>}
+                        {visibleNotes && <p className="mt-2 text-xs leading-5 text-zinc-500">{visibleNotes}</p>}
                       </div>
                       <button
                         className="h-9 rounded-lg border border-[#25D366]/25 bg-[#25D366]/10 px-3 text-xs text-[#9AF0B8] transition hover:bg-[#25D366]/20"
@@ -7369,6 +7774,51 @@ function ConfirmDeleteTemplate({
           >
             <Trash2 className="h-4 w-4" />
             Excluir mensagem
+          </button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+function ConfirmDeleteTask({
+  task,
+  onCancel,
+  onConfirm,
+}: {
+  task: Task;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <Modal onClose={onCancel} title="Excluir tarefa">
+      <div className="space-y-4">
+        <div className="rounded-lg border border-red-400/25 bg-red-500/10 p-4">
+          <div className="flex items-start gap-3">
+            <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-red-300" />
+            <div>
+              <p className="font-medium text-red-100">Esta tarefa sera removida.</p>
+              <p className="mt-2 text-sm leading-6 text-red-100/80">
+                {task.title} deixara de aparecer no Dashboard, em Tarefas e no lead vinculado.
+              </p>
+            </div>
+          </div>
+        </div>
+        <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+          <button
+            className="h-10 rounded-lg border border-white/10 px-4 text-sm text-zinc-300 transition hover:bg-white/[0.06]"
+            onClick={onCancel}
+            type="button"
+          >
+            Cancelar
+          </button>
+          <button
+            className="flex h-10 items-center justify-center gap-2 rounded-lg bg-red-500 px-4 text-sm font-semibold text-white transition hover:bg-red-400"
+            onClick={onConfirm}
+            type="button"
+          >
+            <Trash2 className="h-4 w-4" />
+            Excluir tarefa
           </button>
         </div>
       </div>

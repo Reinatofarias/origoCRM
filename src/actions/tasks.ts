@@ -115,6 +115,39 @@ export async function completeTask(taskId: string, input: { leadId?: string | nu
   return { success: true } satisfies ActionResult;
 }
 
+export async function updateTask(taskId: string, input: TaskInput) {
+  const auth = await getAuthenticatedSupabase();
+  if ("error" in auth) return { success: false, error: auth.error } satisfies ActionResult;
+
+  const query = auth.supabase
+    .from("tasks")
+    .update({
+      lead_id: input.lead_id ?? null,
+      type: input.type,
+      title: input.title,
+      notes: input.notes ?? null,
+      due_at: input.due_at,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", taskId)
+    .eq("user_id", auth.user.id);
+
+  const { error } = await query;
+
+  if (error) return { success: false, error: error.message } satisfies ActionResult;
+
+  if (input.type === "followup" && input.lead_id) {
+    await auth.supabase
+      .from("leads")
+      .update({ next_followup_at: input.due_at })
+      .eq("id", input.lead_id)
+      .eq("user_id", auth.user.id);
+  }
+
+  revalidatePath("/");
+  return { success: true } satisfies ActionResult;
+}
+
 export async function rescheduleTask(taskId: string, input: { leadId?: string | null; dueAt: string; updateLeadFollowup?: boolean }) {
   const auth = await getAuthenticatedSupabase();
   if ("error" in auth) return { success: false, error: auth.error } satisfies ActionResult;
@@ -139,6 +172,27 @@ export async function rescheduleTask(taskId: string, input: { leadId?: string | 
       .eq("id", input.leadId)
       .eq("user_id", auth.user.id);
   }
+
+  revalidatePath("/");
+  return { success: true } satisfies ActionResult;
+}
+
+export async function deleteTask(taskId: string, input: { leadId?: string | null }) {
+  const auth = await getAuthenticatedSupabase();
+  if ("error" in auth) return { success: false, error: auth.error } satisfies ActionResult;
+
+  const query = auth.supabase
+    .from("tasks")
+    .delete()
+    .eq("id", taskId)
+    .eq("user_id", auth.user.id);
+
+  if (input.leadId) query.eq("lead_id", input.leadId);
+  else query.is("lead_id", null);
+
+  const { error } = await query;
+
+  if (error) return { success: false, error: error.message } satisfies ActionResult;
 
   revalidatePath("/");
   return { success: true } satisfies ActionResult;
