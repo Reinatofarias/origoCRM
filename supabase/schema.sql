@@ -91,7 +91,7 @@ create table if not exists public.whatsapp_conversations (
   remote_jid text,
   contact_name text,
   contact_avatar_url text,
-  status text not null default 'open' check (status in ('open', 'unread', 'waiting', 'responded', 'converted', 'archived')),
+  status text not null default 'open' check (status in ('open', 'unread', 'waiting', 'responded', 'converted', 'resolved', 'archived')),
   unread_count integer not null default 0,
   last_message text not null default '',
   last_message_direction text check (last_message_direction in ('inbound', 'outbound')),

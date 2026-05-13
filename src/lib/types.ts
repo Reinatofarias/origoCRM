@@ -268,7 +268,7 @@ export type WhatsAppConversation = {
   remote_jid?: string | null;
   contact_name?: string | null;
   contact_avatar_url?: string | null;
-  status: "open" | "unread" | "waiting" | "responded" | "converted" | "archived";
+  status: "open" | "unread" | "waiting" | "responded" | "converted" | "resolved" | "archived";
   unread_count: number;
   last_message: string;
   last_message_direction?: "inbound" | "outbound" | null;

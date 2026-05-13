@@ -205,7 +205,7 @@ export async function upsertWhatsAppConversation(input: {
   contactAvatarUrl?: string | null;
   lastMessage?: string | null;
   direction?: "inbound" | "outbound" | null;
-  status?: "open" | "unread" | "waiting" | "responded" | "converted" | "archived";
+  status?: "open" | "unread" | "waiting" | "responded" | "converted" | "resolved" | "archived";
 }) {
   const supabase = createSupabaseServiceRoleClient();
   if (!supabase) return;
@@ -376,13 +376,22 @@ function normalizeIncomingWebhookMessage(message: unknown) {
 function extractIncomingMessageContent(messageBody: Record<string, unknown> | null) {
   const extendedTextMessage = asRecord(messageBody?.extendedTextMessage);
   const imageMessage = asRecord(messageBody?.imageMessage);
+  const audioMessage = asRecord(messageBody?.audioMessage);
   const documentMessage = asRecord(messageBody?.documentMessage);
+  const videoMessage = asRecord(messageBody?.videoMessage);
+  const stickerMessage = asRecord(messageBody?.stickerMessage);
 
   return (
     getString(messageBody, "conversation") ??
     getString(extendedTextMessage, "text") ??
     getString(imageMessage, "caption") ??
+    (imageMessage ? "Imagem recebida" : null) ??
+    (audioMessage ? "Audio recebido" : null) ??
+    getString(videoMessage, "caption") ??
+    (videoMessage ? "Video recebido" : null) ??
     getString(documentMessage, "fileName") ??
+    (documentMessage ? "Documento recebido" : null) ??
+    (stickerMessage ? "Sticker recebido" : null) ??
     ""
   );
 }

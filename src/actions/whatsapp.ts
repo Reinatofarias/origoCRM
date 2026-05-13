@@ -18,6 +18,7 @@ import type {
   EvolutionWebhookEvent,
   Lead,
   LeadStatus,
+  WhatsAppConversation,
   WhatsAppMessage,
 } from "@/lib/types";
 import { normalizePhone } from "@/lib/utils";
@@ -136,9 +137,14 @@ export async function sendWhatsAppConversationMessage(
   phoneNumber: string,
   message: string,
   leadId?: string | null,
+  options?: {
+    nextFollowupAt?: string | null;
+    moveStatus?: LeadStatus | null;
+  },
 ): Promise<{
   success: boolean;
   message?: WhatsAppMessage;
+  lead?: Lead;
   error?: string;
 }> {
   const auth = await getAuthenticatedSupabase();
@@ -171,6 +177,29 @@ export async function sendWhatsAppConversationMessage(
     crypto.randomUUID();
   const avatarUrl = await fetchContactProfilePictureUrl(normalizedPhone);
 
+  const now = new Date().toISOString();
+  let updatedLead: Lead | null = null;
+
+  if (leadId) {
+    const leadUpdate: Record<string, unknown> = {
+      status: options?.moveStatus || "contatado",
+      last_contact_at: now,
+      updated_at: now,
+    };
+
+    if (options?.nextFollowupAt) leadUpdate.next_followup_at = options.nextFollowupAt;
+
+    const { data: leadData } = await auth.supabase
+      .from("leads")
+      .update(leadUpdate)
+      .eq("id", leadId)
+      .eq("user_id", auth.user.id)
+      .select()
+      .single();
+
+    updatedLead = (leadData as Lead | null) ?? null;
+  }
+
   const { data, error } = await auth.supabase
     .from("whatsapp_messages")
     .upsert(
@@ -192,6 +221,17 @@ export async function sendWhatsAppConversationMessage(
 
   if (error) return { success: false, error: error.message };
 
+  if (leadId) {
+    await auth.supabase.from("interactions").insert({
+      lead_id: leadId,
+      user_id: auth.user.id,
+      note: "Mensagem enviada pela inbox WhatsApp",
+      message,
+      type: "whatsapp_sent",
+      channel: "whatsapp",
+    });
+  }
+
   await upsertWhatsAppConversation({
     userId: auth.user.id,
     leadId: leadId ?? null,
@@ -204,15 +244,18 @@ export async function sendWhatsAppConversationMessage(
   });
 
   revalidatePath("/");
-  return { success: true, message: data as WhatsAppMessage };
+  return { success: true, message: data as WhatsAppMessage, lead: updatedLead ?? undefined };
 }
 
 export async function saveWhatsAppConversationAsLead(input: {
   phoneNumber: string;
+  leadId?: string | null;
   name?: string | null;
   company?: string;
   source?: string;
   status?: LeadStatus;
+  temperature?: Lead["temperature"] | null;
+  ownerName?: string | null;
   nextFollowupAt?: string | null;
 }): Promise<{
   success: boolean;
@@ -228,14 +271,24 @@ export async function saveWhatsAppConversationAsLead(input: {
   const fallbackName = input.name?.trim() || phone;
   const status = input.status ?? "novo";
   const now = new Date().toISOString();
-  const { data: existing } = await auth.supabase
-    .from("leads")
-    .select("*")
-    .eq("user_id", auth.user.id)
-    .eq("phone", phone)
-    .maybeSingle();
+  const { data: existingById } = input.leadId
+    ? await auth.supabase
+        .from("leads")
+        .select("*")
+        .eq("id", input.leadId)
+        .eq("user_id", auth.user.id)
+        .maybeSingle()
+    : { data: null };
+  const { data: existingByPhone } = existingById
+    ? { data: null }
+    : await auth.supabase
+        .from("leads")
+        .select("*")
+        .eq("user_id", auth.user.id)
+        .eq("phone", phone)
+        .maybeSingle();
 
-  let lead = existing as Lead | null;
+  let lead = (existingById ?? existingByPhone) as Lead | null;
 
   if (lead) {
     const { data: updatedLead } = await auth.supabase
@@ -245,6 +298,8 @@ export async function saveWhatsAppConversationAsLead(input: {
         company: input.company ?? lead.company,
         source: input.source ?? lead.source,
         status,
+        temperature: input.temperature ?? lead.temperature ?? "morno",
+        owner_name: input.ownerName ?? lead.owner_name ?? "",
         last_contact_at: now,
         next_followup_at: input.nextFollowupAt || lead.next_followup_at,
         updated_at: now,
@@ -265,6 +320,8 @@ export async function saveWhatsAppConversationAsLead(input: {
         company: input.company ?? "",
         source: input.source ?? "WhatsApp",
         status,
+        temperature: input.temperature ?? "morno",
+        owner_name: input.ownerName ?? "",
         last_contact_at: now,
         next_followup_at: input.nextFollowupAt || null,
         updated_at: now,
@@ -293,6 +350,41 @@ export async function saveWhatsAppConversationAsLead(input: {
 
   revalidatePath("/");
   return { success: true, lead };
+}
+
+export async function updateWhatsAppConversationStatus(
+  phoneNumber: string,
+  status: WhatsAppConversation["status"],
+): Promise<{
+  success: boolean;
+  error?: string;
+}> {
+  const auth = await getAuthenticatedSupabase();
+  if ("error" in auth) return { success: false, error: auth.error };
+
+  const phone = normalizePhone(phoneNumber);
+  if (!phone) return { success: false, error: "Numero de telefone invalido" };
+
+  const { error } = await auth.supabase
+    .from("whatsapp_conversations")
+    .upsert({
+      user_id: auth.user.id,
+      phone_number: phone,
+      status,
+      unread_count: status === "unread" ? 1 : 0,
+      last_read_at: status === "unread" ? null : new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    }, { onConflict: "user_id,phone_number" });
+
+  if (error) {
+    const message = error.message.includes("whatsapp_conversations_status_check")
+      ? "Aplique supabase/conversations_operational_migration.sql para liberar o status Resolvida."
+      : error.message;
+    return { success: false, error: message };
+  }
+
+  revalidatePath("/");
+  return { success: true };
 }
 
 function normalizeEvolutionStatus(status: unknown) {
