@@ -53,7 +53,11 @@ function ProspectingModalContent({
   }, [onClose]);
 
   function search(input: ProspectingSearchInput) {
-    prospecting.searchBusinesses.mutate(input);
+    prospecting.searchBusinesses.mutate(input, {
+      onSuccess: (result) => {
+        prospecting.setSelectedBusiness(result.businesses[0] ?? null);
+      },
+    });
   }
 
   async function lookupCnpj(cnpj: string) {

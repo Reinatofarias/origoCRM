@@ -47,7 +47,7 @@ export function ProspectingDesktop({
               </div>
               <h2 className="mt-2 text-3xl font-semibold text-white">Encontre empresas e transforme em leads</h2>
               <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-400">
-                Arquitetura preparada para Outscraper, Apify e Google Places. Esta versão usa mocks profissionais com a mesma camada de dados futura.
+                Integração server-side preparada para Outscraper agora, com espaço para Apify e Google Places em próximas fontes.
               </p>
             </div>
             <button
@@ -71,7 +71,7 @@ export function ProspectingDesktop({
             {isLoading && <ProspectingSkeleton />}
             {!isLoading && businesses.length === 0 && (
               <div className="flex h-full min-h-80 items-center justify-center rounded-2xl border border-dashed border-white/10 bg-white/[0.03] text-sm text-zinc-500">
-                Faça uma busca por nicho e cidade para iniciar a prospecção.
+                Configure OUTSCRAPER_API_KEY na Vercel e faça uma busca por nicho e cidade para iniciar a prospecção real.
               </div>
             )}
             {!isLoading && businesses.length > 0 && (

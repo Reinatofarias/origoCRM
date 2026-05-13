@@ -1,12 +1,6 @@
 import type { EnrichedCompany, ProspectBusiness } from "../../types";
 
-function delay(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 export async function enrichGoogleBusiness(business: ProspectBusiness): Promise<EnrichedCompany> {
-  await delay(720);
-
   const firstName = business.name.split(" ")[0] || business.name;
   const hasSite = Boolean(business.website);
   const ratingText = business.rating ? `${business.rating.toFixed(1)} estrelas` : "sem avaliação pública";
