@@ -25,8 +25,12 @@ import {
   Check,
   CheckCheck,
   Clock3,
+  Copy,
+  Database,
   Edit3,
+  Eye,
   ExternalLink,
+  FileDown,
   Archive,
   Loader2,
   Link2,
@@ -40,6 +44,7 @@ import {
   Search,
   Send,
   Settings,
+  ShieldCheck,
   Sparkles,
   Trash2,
   UserRound,
@@ -48,7 +53,7 @@ import {
 } from "lucide-react";
 import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
-import { FormEvent, KeyboardEvent, MouseEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { FormEvent, KeyboardEvent, MouseEvent, ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 
 import { recordAuditLog as recordAuditLogAction } from "@/actions/audit";
 import {
@@ -1687,6 +1692,12 @@ function Workspace({
                   <SettingsView
                     archivedLeads={archivedLeads}
                     auditLogs={auditLogs}
+                    leads={leads}
+                    tasks={tasks}
+                    templates={templates}
+                    user={user}
+                    whatsappLogs={whatsappLogs}
+                    whatsappMessages={whatsappMessages}
                     onUnarchiveLead={(lead) => void unarchiveLead(lead)}
                   />
                 )}
@@ -5221,17 +5232,7 @@ function migrationChecksInitialState(configured: boolean): MigrationCheck[] {
   if (!configured) {
     return [
       {
-        label: "Campos comerciais",
-        status: "missing",
-        detail: "Supabase nao configurado neste ambiente",
-      },
-      {
-        label: "Tabela de tarefas",
-        status: "missing",
-        detail: "Supabase nao configurado neste ambiente",
-      },
-      {
-        label: "Trilha de auditoria",
+        label: "Supabase",
         status: "missing",
         detail: "Supabase nao configurado neste ambiente",
       },
@@ -5239,6 +5240,11 @@ function migrationChecksInitialState(configured: boolean): MigrationCheck[] {
   }
 
   return [
+    {
+      label: "Supabase",
+      status: "checking",
+      detail: "Verificando conexao autenticada",
+    },
     {
       label: "Campos comerciais",
       status: "checking",
@@ -5254,165 +5260,736 @@ function migrationChecksInitialState(configured: boolean): MigrationCheck[] {
       status: "checking",
       detail: "Verificando audit_logs_migration.sql",
     },
+    {
+      label: "Conversas operacionais",
+      status: "checking",
+      detail: "Verificando conversations_operational_migration.sql",
+    },
+    {
+      label: "Webhook WhatsApp",
+      status: "checking",
+      detail: "Verificando recebimento recente de eventos",
+    },
   ];
+}
+
+type SettingsTab = "system" | "whatsapp" | "team" | "crm" | "audit" | "logs" | "data";
+type UserRole = "admin" | "seller" | "support" | "readonly";
+type CrmPreferences = {
+  companyName: string;
+  brandName: string;
+  defaultSlaHours: string;
+  businessHours: string;
+  defaultFollowupDays: string;
+  defaultWhatsAppSource: string;
+  defaultOwnerName: string;
+};
+
+const settingsTabs: Array<{ id: SettingsTab; label: string }> = [
+  { id: "system", label: "Sistema" },
+  { id: "whatsapp", label: "WhatsApp" },
+  { id: "team", label: "Equipe" },
+  { id: "crm", label: "CRM" },
+  { id: "audit", label: "Auditoria" },
+  { id: "logs", label: "Logs" },
+  { id: "data", label: "Dados" },
+];
+
+const defaultCrmPreferences: CrmPreferences = {
+  companyName: "OrigoCRM",
+  brandName: "OrigoCRM",
+  defaultSlaHours: "24",
+  businessHours: "08:00-18:00",
+  defaultFollowupDays: "1",
+  defaultWhatsAppSource: "WhatsApp",
+  defaultOwnerName: "",
+};
+
+const migrationSqlByLabel: Record<string, string> = {
+  "Campos comerciais": [
+    "alter table public.leads add column if not exists estimated_value numeric(12,2);",
+    "alter table public.leads add column if not exists owner_name text not null default '';",
+    "alter table public.leads add column if not exists temperature text not null default 'morno';",
+    "alter table public.leads add column if not exists outcome_reason text not null default '';",
+    "alter table public.leads add column if not exists sla_hours integer not null default 24;",
+    "alter table public.leads add column if not exists archived_at timestamptz;",
+    "alter table public.leads drop constraint if exists leads_status_check;",
+    "alter table public.leads drop constraint if exists leads_closed_outcome_reason_check;",
+    "create index if not exists leads_user_id_temperature_idx on public.leads(user_id, temperature);",
+    "create index if not exists leads_user_id_owner_name_idx on public.leads(user_id, owner_name);",
+    "create index if not exists leads_user_id_archived_at_idx on public.leads(user_id, archived_at);",
+  ].join("\n"),
+  "Tabela de tarefas": [
+    "create table if not exists public.tasks (",
+    "  id uuid primary key default gen_random_uuid(),",
+    "  user_id uuid not null references auth.users(id) on delete cascade,",
+    "  lead_id uuid not null references public.leads(id) on delete cascade,",
+    "  type text not null default 'followup',",
+    "  title text not null,",
+    "  notes text,",
+    "  due_at timestamptz not null,",
+    "  status text not null default 'open' check (status in ('open', 'completed', 'canceled')),",
+    "  completed_at timestamptz,",
+    "  created_at timestamptz not null default now(),",
+    "  updated_at timestamptz not null default now()",
+    ");",
+    "alter table public.tasks drop constraint if exists tasks_type_check;",
+    "alter table public.tasks add constraint tasks_type_check check (type in ('followup', 'call', 'email', 'whatsapp', 'meeting', 'other'));",
+    "create index if not exists tasks_user_id_status_due_at_idx on public.tasks(user_id, status, due_at);",
+    "create index if not exists tasks_user_id_lead_id_idx on public.tasks(user_id, lead_id);",
+    "alter table public.tasks enable row level security;",
+  ].join("\n"),
+  "Trilha de auditoria": [
+    "create table if not exists public.audit_logs (",
+    "  id uuid primary key default gen_random_uuid(),",
+    "  user_id uuid references auth.users(id) on delete set null,",
+    "  entity_type text not null check (entity_type in ('lead', 'task', 'template', 'whatsapp', 'system')),",
+    "  entity_id uuid,",
+    "  action text not null,",
+    "  summary text not null,",
+    "  metadata jsonb not null default '{}'::jsonb,",
+    "  created_at timestamptz not null default now()",
+    ");",
+    "create index if not exists audit_logs_user_id_created_at_idx on public.audit_logs(user_id, created_at desc);",
+    "create index if not exists audit_logs_user_id_entity_idx on public.audit_logs(user_id, entity_type, entity_id);",
+    "alter table public.audit_logs enable row level security;",
+  ].join("\n"),
+  "Conversas operacionais": [
+    "alter table public.whatsapp_conversations drop constraint if exists whatsapp_conversations_status_check;",
+    "alter table public.whatsapp_conversations add constraint whatsapp_conversations_status_check check (status in ('open', 'unread', 'waiting', 'responded', 'converted', 'resolved', 'archived'));",
+    "create index if not exists whatsapp_conversations_user_id_status_updated_at_idx on public.whatsapp_conversations(user_id, status, updated_at desc);",
+  ].join("\n"),
+};
+
+function readCrmPreferences(): CrmPreferences {
+  if (typeof window === "undefined") return defaultCrmPreferences;
+
+  try {
+    const raw = window.localStorage.getItem("origocrm:settings");
+    return raw ? { ...defaultCrmPreferences, ...JSON.parse(raw) } : defaultCrmPreferences;
+  } catch {
+    return defaultCrmPreferences;
+  }
+}
+
+function readUserRole(): UserRole {
+  if (typeof window === "undefined") return "admin";
+  const value = window.localStorage.getItem("origocrm:user-role");
+  return value === "seller" || value === "support" || value === "readonly" ? value : "admin";
 }
 
 function SettingsView({
   auditLogs,
   archivedLeads,
+  leads,
+  tasks,
+  templates,
+  user,
+  whatsappLogs,
+  whatsappMessages,
   onUnarchiveLead,
 }: {
   auditLogs: AuditLog[];
   archivedLeads: Lead[];
+  leads: Lead[];
+  tasks: Task[];
+  templates: MessageTemplate[];
+  user: AuthUser;
+  whatsappLogs: WhatsAppLog[];
+  whatsappMessages: WhatsAppMessage[];
   onUnarchiveLead: (lead: Lead) => void;
 }) {
   const supabase = useMemo(() => createSupabaseClient(), []);
   const [checks, setChecks] = useState<MigrationCheck[]>(() => migrationChecksInitialState(Boolean(supabase)));
+  const [activeTab, setActiveTab] = useState<SettingsTab>("system");
+  const [lastCheckedAt, setLastCheckedAt] = useState<string | null>(null);
+  const [checking, setChecking] = useState(false);
+  const [copiedLabel, setCopiedLabel] = useState("");
+  const [evolutionStatus, setEvolutionStatus] = useState<{
+    configured: boolean;
+    connected: boolean;
+    state: string;
+    instanceName?: string;
+    phoneNumber?: string | null;
+    profileName?: string | null;
+    error?: string;
+  } | null>(null);
+  const [evolutionLoading, setEvolutionLoading] = useState(false);
+  const [evolutionFeedback, setEvolutionFeedback] = useState("");
+  const [role, setRole] = useState<UserRole>(() => readUserRole());
+  const [preferences, setPreferences] = useState<CrmPreferences>(() => readCrmPreferences());
+  const [auditEntityFilter, setAuditEntityFilter] = useState<AuditLog["entity_type"] | "all">("all");
+  const [auditActionFilter, setAuditActionFilter] = useState("all");
+  const [auditSearch, setAuditSearch] = useState("");
+  const [selectedAuditLog, setSelectedAuditLog] = useState<AuditLog | null>(null);
+  const [logStatusFilter, setLogStatusFilter] = useState<WhatsAppLog["status"] | "all">("all");
+  const [selectedWhatsAppLog, setSelectedWhatsAppLog] = useState<WhatsAppLog | null>(null);
+  const lastWebhook = whatsappLogs[0] ?? null;
+  const lastError = whatsappLogs.find((log) => log.status === "error") ?? null;
+  const lastMessage = whatsappMessages[0] ?? null;
+  const pendingChecks = checks.filter((check) => check.status === "missing");
+  const auditActions = useMemo(
+    () => Array.from(new Set(auditLogs.map((log) => log.action))).sort((a, b) => a.localeCompare(b)),
+    [auditLogs],
+  );
+  const filteredAuditLogs = useMemo(() => {
+    const search = auditSearch.trim().toLowerCase();
+    return auditLogs.filter((log) => {
+      const matchesEntity = auditEntityFilter === "all" || log.entity_type === auditEntityFilter;
+      const matchesAction = auditActionFilter === "all" || log.action === auditActionFilter;
+      const matchesSearch =
+        !search ||
+        [log.summary, log.action, log.entity_type, JSON.stringify(log.metadata)]
+          .some((value) => value.toLowerCase().includes(search));
+      return matchesEntity && matchesAction && matchesSearch;
+    });
+  }, [auditActionFilter, auditEntityFilter, auditLogs, auditSearch]);
+  const filteredWhatsappLogs = useMemo(
+    () => whatsappLogs.filter((log) => logStatusFilter === "all" || log.status === logStatusFilter),
+    [logStatusFilter, whatsappLogs],
+  );
+  const environmentHost = typeof window === "undefined" ? "indefinido" : window.location.host;
+  const rolePermissions: Record<UserRole, string[]> = {
+    admin: ["Pipeline", "Conversas", "Tarefas", "Templates", "Configuracoes", "Excluir lead", "Alterar funil", "Desconectar WhatsApp"],
+    seller: ["Pipeline", "Conversas", "Tarefas", "Templates"],
+    support: ["Conversas", "Tarefas", "Templates"],
+    readonly: ["Leitura de dados"],
+  };
 
-  useEffect(() => {
+  const runChecks = useCallback(async () => {
     if (!supabase) {
+      setChecks(migrationChecksInitialState(false));
       return;
     }
 
-    let mounted = true;
     const client = supabase;
+    setChecking(true);
+    const [session, commercial, tasksResult, auditResult, conversationResult, webhookResult, evolutionResult] = await Promise.all([
+      client.auth.getUser(),
+      client
+        .from("leads")
+        .select("id,estimated_value,owner_name,temperature,outcome_reason,sla_hours,archived_at")
+        .limit(1),
+      client
+        .from("tasks")
+        .select("id,lead_id,type,title,due_at,status,completed_at")
+        .limit(1),
+      client
+        .from("audit_logs")
+        .select("id,entity_type,entity_id,action,summary,metadata")
+        .limit(1),
+      client
+        .from("whatsapp_conversations")
+        .select("id,status,unread_count,last_read_at")
+        .limit(1),
+      fetch("/api/webhooks/evolution", { cache: "no-store" }).then((response) => response.json()).catch(() => null),
+      fetch("/api/evolution/status", { cache: "no-store" }).then(async (response) => ({ ok: response.ok, data: await response.json() })).catch(() => null),
+    ]);
+    const evolutionData = evolutionResult?.data;
 
-    async function runChecks() {
-      const [commercial, tasksResult, auditResult] = await Promise.all([
-        client
-          .from("leads")
-          .select("id,estimated_value,owner_name,temperature,outcome_reason,sla_hours,archived_at")
-          .limit(1),
-        client
-          .from("tasks")
-          .select("id,lead_id,type,title,due_at,status,completed_at")
-          .limit(1),
-        client
-          .from("audit_logs")
-          .select("id,entity_type,entity_id,action,summary,metadata")
-          .limit(1),
-      ]);
-
-      if (!mounted) return;
-
-      setChecks([
-        {
-          label: "Campos comerciais",
-          status: commercial.error ? "missing" : "ok",
-          detail: commercial.error
-            ? "Aplique commercial_pipeline_migration.sql, lead_archiving_contracts_migration.sql e custom_pipeline_stages_migration.sql"
-            : "Campos comerciais, arquivamento, etapas customizadas e contratos basicos disponiveis em leads",
-        },
-        {
-          label: "Tabela de tarefas",
-          status: tasksResult.error ? "missing" : "ok",
-          detail: tasksResult.error
-            ? "Aplique supabase/tasks_migration.sql e tasks_meeting_type_migration.sql"
-            : "Tabela tasks disponivel para agenda profissional",
-        },
-        {
-          label: "Trilha de auditoria",
-          status: auditResult.error ? "missing" : "ok",
-          detail: auditResult.error
-            ? "Aplique supabase/audit_logs_migration.sql"
-            : "Tabela audit_logs pronta para acoes sensiveis",
-        },
-      ]);
+    if (evolutionData) {
+      setEvolutionStatus({
+        configured: Boolean(evolutionData.configured),
+        connected: Boolean(evolutionData.connected),
+        state: evolutionData.state ?? "indefinido",
+        instanceName: evolutionData.instanceName,
+        phoneNumber: evolutionData.phoneNumber,
+        profileName: evolutionData.profileName,
+        error: evolutionData.error,
+      });
     }
 
-    void runChecks();
-
-    return () => {
-      mounted = false;
-    };
+    setChecks([
+      {
+        label: "Supabase",
+        status: session.data.user ? "ok" : "missing",
+        detail: session.data.user ? "Sessao autenticada e banco acessivel" : "Usuario nao autenticado ou RLS bloqueando leitura",
+      },
+      {
+        label: "Campos comerciais",
+        status: commercial.error ? "missing" : "ok",
+        detail: commercial.error
+          ? "Aplique commercial_pipeline_migration.sql, lead_archiving_contracts_migration.sql e custom_pipeline_stages_migration.sql"
+          : "Campos comerciais, arquivamento e etapas customizadas disponiveis",
+      },
+      {
+        label: "Tabela de tarefas",
+        status: tasksResult.error ? "missing" : "ok",
+        detail: tasksResult.error
+          ? "Aplique supabase/tasks_migration.sql e tasks_meeting_type_migration.sql"
+          : "Tabela tasks disponivel para agenda profissional",
+      },
+      {
+        label: "Trilha de auditoria",
+        status: auditResult.error ? "missing" : "ok",
+        detail: auditResult.error
+          ? "Aplique supabase/audit_logs_migration.sql"
+          : "Tabela audit_logs pronta para acoes sensiveis",
+      },
+      {
+        label: "Conversas operacionais",
+        status: conversationResult.error ? "missing" : "ok",
+        detail: conversationResult.error
+          ? "Aplique supabase/conversations_operational_migration.sql"
+          : "Status resolvida/arquivada e inbox operacional disponiveis",
+      },
+      {
+        label: "Webhook WhatsApp",
+        status: webhookResult?.status === "ok" ? "ok" : "missing",
+        detail: webhookResult?.status === "ok"
+          ? `Endpoint ativo com ${(webhookResult.events ?? []).length} eventos suportados`
+          : "Nao foi possivel validar o endpoint publico do webhook",
+      },
+      {
+        label: "Evolution",
+        status: evolutionData?.configured ? "ok" : "missing",
+        detail: evolutionData?.configured
+          ? `Instancia ${evolutionData.instanceName || "configurada"} em estado ${evolutionData.state ?? "indefinido"}`
+          : "Variaveis da Evolution ausentes ou nao acessiveis",
+      },
+    ]);
+    setLastCheckedAt(new Date().toISOString());
+    setChecking(false);
   }, [supabase]);
 
+  useEffect(() => {
+    const timeout = window.setTimeout(() => {
+      void runChecks();
+    }, 0);
+
+    return () => window.clearTimeout(timeout);
+  }, [runChecks]);
+
+  useEffect(() => {
+    if (typeof window !== "undefined") window.localStorage.setItem("origocrm:settings", JSON.stringify(preferences));
+  }, [preferences]);
+
+  useEffect(() => {
+    if (typeof window !== "undefined") window.localStorage.setItem("origocrm:user-role", role);
+  }, [role]);
+
+  async function copyText(label: string, text: string) {
+    await navigator.clipboard.writeText(text);
+    setCopiedLabel(label);
+    window.setTimeout(() => setCopiedLabel((current) => (current === label ? "" : current)), 1600);
+  }
+
+  async function refreshEvolutionStatus() {
+    setEvolutionFeedback("");
+    setEvolutionLoading(true);
+    try {
+      const response = await fetch("/api/evolution/status", { cache: "no-store" });
+      const data = await response.json();
+      setEvolutionStatus({
+        configured: Boolean(data.configured),
+        connected: Boolean(data.connected),
+        state: data.state ?? "indefinido",
+        instanceName: data.instanceName,
+        phoneNumber: data.phoneNumber,
+        profileName: data.profileName,
+        error: data.error,
+      });
+      if (!response.ok) setEvolutionFeedback(data.error ?? "Nao foi possivel consultar a Evolution");
+    } catch {
+      setEvolutionFeedback("Nao foi possivel consultar a Evolution");
+    } finally {
+      setEvolutionLoading(false);
+    }
+  }
+
+  async function generateQrCode() {
+    setEvolutionFeedback("");
+    setEvolutionLoading(true);
+    try {
+      const response = await fetch("/api/evolution/qrcode", { cache: "no-store" });
+      const data = await response.json();
+      setEvolutionFeedback(data.error ?? (data.pairingCode ? `Codigo de pareamento: ${data.pairingCode}` : "QR solicitado. Abra a tela WhatsApp para escanear."));
+    } catch {
+      setEvolutionFeedback("Nao foi possivel gerar QR Code");
+    } finally {
+      setEvolutionLoading(false);
+    }
+  }
+
+  async function disconnectEvolution() {
+    setEvolutionFeedback("");
+    setEvolutionLoading(true);
+    try {
+      const response = await fetch("/api/evolution/disconnect", { method: "DELETE" });
+      const data = await response.json();
+      setEvolutionFeedback(data.error ?? "WhatsApp desconectado");
+      await refreshEvolutionStatus();
+    } catch {
+      setEvolutionFeedback("Nao foi possivel desconectar");
+    } finally {
+      setEvolutionLoading(false);
+    }
+  }
+
+  async function testWebhook() {
+    const response = await fetch("/api/webhooks/evolution", { cache: "no-store" });
+    const data = await response.json();
+    setEvolutionFeedback(response.ok ? `Webhook ativo: ${(data.events ?? []).join(", ")}` : "Webhook nao respondeu");
+  }
+
+  function updatePreference<K extends keyof CrmPreferences>(key: K, value: CrmPreferences[K]) {
+    setPreferences((current) => ({ ...current, [key]: value }));
+  }
+
+  function exportLeads() {
+    downloadCsv("origocrm-leads.csv", leads.map((lead) => ({
+      nome: lead.name,
+      telefone: lead.phone,
+      empresa: lead.company,
+      origem: lead.source,
+      status: lead.status,
+      temperatura: lead.temperature ?? "",
+      responsavel: lead.owner_name ?? "",
+      criado_em: lead.created_at,
+    })));
+  }
+
+  function exportMessages() {
+    downloadCsv("origocrm-conversas.csv", whatsappMessages.map((message) => ({
+      telefone: message.phone_number,
+      direcao: message.direction,
+      conteudo: getWhatsAppMessageDisplay(message),
+      status: message.status,
+      criado_em: message.created_at,
+    })));
+  }
+
+  function exportAudit() {
+    downloadCsv("origocrm-auditoria.csv", filteredAuditLogs.map((log) => ({
+      entidade: log.entity_type,
+      acao: log.action,
+      resumo: log.summary,
+      metadata: JSON.stringify(log.metadata),
+      criado_em: log.created_at,
+    })));
+  }
+
   return (
-    <div className="grid gap-5 xl:grid-cols-2">
+    <div className="space-y-5">
+      <div className="flex flex-wrap gap-2 rounded-lg border border-white/10 bg-white/[0.025] p-2">
+        {settingsTabs.map((tab) => (
+          <button
+            className={`h-9 rounded-md px-3 text-sm transition ${
+              activeTab === tab.id ? "bg-[#8B5CF6] text-white" : "text-zinc-400 hover:bg-white/[0.06]"
+            }`}
+            key={tab.id}
+            onClick={() => setActiveTab(tab.id)}
+            type="button"
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
+      {activeTab === "system" && (
       <section className="rounded-xl border border-white/10 bg-white/[0.035] p-5">
-        <h2 className="text-lg font-semibold">Banco de dados</h2>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <h2 className="text-lg font-semibold">Diagnostico operacional</h2>
+            <p className="mt-1 text-sm text-zinc-500">Banco, migrations, webhook, Evolution e ambiente.</p>
+            <p className="mt-2 text-xs text-zinc-600">
+              Ultimo teste: {lastCheckedAt ? new Date(lastCheckedAt).toLocaleString("pt-BR") : "ainda nao executado"}
+            </p>
+          </div>
+          <button
+            className="flex h-10 items-center justify-center gap-2 rounded-lg border border-white/10 px-3 text-sm text-zinc-200 transition hover:bg-white/[0.06] disabled:opacity-60"
+            disabled={checking}
+            onClick={() => void runChecks()}
+            type="button"
+          >
+            {checking ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+            Verificar agora
+          </button>
+        </div>
         <div className="mt-4 space-y-3 text-sm text-zinc-400">
-          <div className="flex items-center justify-between gap-3 rounded-lg border border-white/10 bg-black/20 p-3">
-            <span>Supabase</span>
-            <span className="text-[#25D366]">Ativo</span>
-          </div>
-          <div className="flex items-center justify-between gap-3 rounded-lg border border-white/10 bg-black/20 p-3">
-            <span>Tabelas do CRM</span>
-            <span>leads, interacoes, mensagens, tarefas</span>
-          </div>
           {checks.map((check) => (
             <div className="rounded-lg border border-white/10 bg-black/20 p-3" key={check.label}>
-              <div className="flex items-center justify-between gap-3">
-                <span>{check.label}</span>
-                <span className={
-                  check.status === "ok"
-                    ? "text-[#25D366]"
-                    : check.status === "missing"
-                      ? "text-amber-300"
-                      : "text-zinc-500"
-                }>
-                  {check.status === "ok" ? "Aplicada" : check.status === "missing" ? "Pendente" : "Verificando"}
-                </span>
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <div className="font-medium text-zinc-100">{check.label}</div>
+                  <p className="mt-2 text-xs text-zinc-500">{check.detail}</p>
+                </div>
+                <div className="flex shrink-0 items-center gap-2">
+                  <SettingsStatusPill status={check.status} />
+                  {check.status === "missing" && migrationSqlByLabel[check.label] && (
+                    <button
+                      className="flex h-8 items-center gap-1 rounded-md border border-amber-400/25 px-2 text-xs text-amber-200 transition hover:bg-amber-400/10"
+                      onClick={() => void copyText(check.label, migrationSqlByLabel[check.label])}
+                      type="button"
+                    >
+                      <Copy className="h-3.5 w-3.5" />
+                      {copiedLabel === check.label ? "Copiado" : "Copiar SQL"}
+                    </button>
+                  )}
+                </div>
               </div>
-              <p className="mt-2 text-xs text-zinc-500">{check.detail}</p>
             </div>
           ))}
         </div>
-      </section>
-
-      <section className="rounded-xl border border-white/10 bg-white/[0.035] p-5">
-        <h2 className="text-lg font-semibold">Evolution</h2>
-        <div className="mt-4 space-y-3 text-sm text-zinc-400">
-          <div className="rounded-lg border border-white/10 bg-black/20 p-3">
-            <div className="text-zinc-500">Webhook publico</div>
-            <div className="mt-1 break-all font-mono text-xs text-zinc-300">
-              /api/webhooks/evolution
-            </div>
+        <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <SettingsMetric icon={Database} label="Banco" value={supabase ? "Configurado" : "Pendente"} />
+          <SettingsMetric icon={ShieldCheck} label="Usuario" value={user.email ?? user.id} />
+          <SettingsMetric icon={Settings} label="Ambiente" value={environmentHost} />
+          <SettingsMetric icon={MessageCircle} label="WhatsApp" value={evolutionStatus?.connected ? "Conectado" : "Pendente"} />
+        </div>
+        {pendingChecks.length > 0 && (
+          <div className="mt-4 rounded-lg border border-amber-400/20 bg-amber-400/10 p-3 text-sm text-amber-100">
+            {pendingChecks.length} item(ns) pedem acao. Copie o SQL pendente e aplique no SQL Editor do Supabase.
           </div>
-          <div className="rounded-lg border border-white/10 bg-black/20 p-3">
-            <div className="text-zinc-500">Variaveis esperadas na Vercel</div>
-            <div className="mt-1 font-mono text-xs text-zinc-300">
-              EVOLUTION_API_URL, EVOLUTION_API_KEY, EVOLUTION_INSTANCE_NAME,
-              EVOLUTION_WEBHOOK_KEY
+        )}
+      </section>
+      )}
+
+      {activeTab === "whatsapp" && (
+      <section className="rounded-xl border border-white/10 bg-white/[0.035] p-5">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h2 className="text-lg font-semibold">Evolution</h2>
+            <p className="mt-1 text-sm text-zinc-500">Estado da instancia, webhook e acoes operacionais.</p>
+          </div>
+          <SettingsStatusPill status={evolutionStatus?.connected ? "ok" : "missing"} okLabel={evolutionStatus?.connected ? "Conectado" : "Pendente"} />
+        </div>
+        <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+          <SettingsMetric icon={Wifi} label="Estado" value={evolutionStatus?.state ?? "nao verificado"} />
+          <SettingsMetric icon={UserRound} label="Numero conectado" value={evolutionStatus?.phoneNumber ?? "Nao informado"} />
+          <SettingsMetric icon={MessageCircle} label="Perfil" value={evolutionStatus?.profileName ?? "Nao informado"} />
+          <SettingsMetric icon={Clock3} label="Ultimo webhook" value={lastWebhook ? new Date(lastWebhook.created_at).toLocaleString("pt-BR") : "Sem eventos"} />
+          <SettingsMetric icon={Send} label="Ultima mensagem" value={lastMessage ? new Date(lastMessage.created_at).toLocaleString("pt-BR") : "Sem mensagens"} />
+          <SettingsMetric icon={AlertTriangle} label="Ultimo erro" value={lastError?.error_message ?? lastError?.event_type ?? "Sem erros recentes"} />
+        </div>
+        {evolutionFeedback && <p className="mt-3 text-sm text-zinc-300">{evolutionFeedback}</p>}
+        <div className="mt-4 grid gap-2 md:grid-cols-5">
+          <button className="flex h-10 items-center justify-center gap-2 rounded-lg border border-white/10 px-3 text-sm text-zinc-200 transition hover:bg-white/[0.06] disabled:opacity-60" disabled={evolutionLoading} onClick={() => void refreshEvolutionStatus()} type="button">
+            <RefreshCw className="h-4 w-4" /> Atualizar
+          </button>
+          <button className="flex h-10 items-center justify-center gap-2 rounded-lg border border-white/10 px-3 text-sm text-zinc-200 transition hover:bg-white/[0.06] disabled:opacity-60" disabled={evolutionLoading} onClick={() => void generateQrCode()} type="button">
+            <QrCode className="h-4 w-4" /> Gerar QR
+          </button>
+          <button className="flex h-10 items-center justify-center gap-2 rounded-lg border border-white/10 px-3 text-sm text-zinc-200 transition hover:bg-white/[0.06] disabled:opacity-60" disabled={evolutionLoading} onClick={() => void generateQrCode()} type="button">
+            <RotateCcw className="h-4 w-4" /> Reconectar
+          </button>
+          <button className="flex h-10 items-center justify-center gap-2 rounded-lg border border-red-400/20 bg-red-500/10 px-3 text-sm text-red-300 transition hover:bg-red-500/20 disabled:opacity-60" disabled={evolutionLoading} onClick={() => void disconnectEvolution()} type="button">
+            <WifiOff className="h-4 w-4" /> Desconectar
+          </button>
+          <button className="flex h-10 items-center justify-center gap-2 rounded-lg border border-white/10 px-3 text-sm text-zinc-200 transition hover:bg-white/[0.06] disabled:opacity-60" onClick={() => void testWebhook()} type="button">
+            <ExternalLink className="h-4 w-4" /> Testar webhook
+          </button>
+        </div>
+        <div className="mt-5 divide-y divide-white/10 overflow-hidden rounded-lg border border-white/10">
+          {whatsappLogs.slice(0, 8).map((log) => (
+            <div className="grid gap-2 bg-black/20 p-3 text-sm md:grid-cols-[1fr_auto]" key={log.id}>
+              <div>
+                <div className="font-medium text-zinc-100">{friendlyWhatsAppLogLabel(log)}</div>
+                <div className="mt-1 text-xs text-zinc-500">{log.event_type} - {log.status}</div>
+              </div>
+              <div className="text-xs text-zinc-500">{new Date(log.created_at).toLocaleString("pt-BR")}</div>
+            </div>
+          ))}
+          {whatsappLogs.length === 0 && <div className="p-4 text-sm text-zinc-500">Nenhum log recebido.</div>}
+        </div>
+      </section>
+      )}
+
+      {activeTab === "team" && (
+      <section className="rounded-xl border border-white/10 bg-white/[0.035] p-5">
+        <h2 className="text-lg font-semibold">Usuarios e seguranca</h2>
+        <div className="mt-4 grid gap-4 xl:grid-cols-2">
+          <div className="rounded-lg border border-white/10 bg-black/20 p-4">
+            <div className="text-sm text-zinc-500">Usuario logado</div>
+            <div className="mt-1 font-medium text-zinc-100">{user.email ?? user.id}</div>
+            <label className="mt-4 block text-sm text-zinc-300">
+              Papel operacional
+              <select
+                className="mt-2 h-10 w-full rounded-lg border border-white/10 bg-black/30 px-3 text-sm outline-none focus:border-[#8B5CF6]"
+                onChange={(event) => setRole(event.target.value as UserRole)}
+                value={role}
+              >
+                <option value="admin">Admin</option>
+                <option value="seller">Vendedor</option>
+                <option value="support">Atendimento</option>
+                <option value="readonly">Leitura</option>
+              </select>
+            </label>
+          </div>
+          <div className="rounded-lg border border-white/10 bg-black/20 p-4">
+            <div className="text-sm font-medium text-zinc-100">Permissoes por modulo</div>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {["Pipeline", "Conversas", "Tarefas", "Templates", "Configuracoes"].map((item) => (
+                <span className={`rounded-full border px-2.5 py-1 text-xs ${rolePermissions[role].includes(item) ? "border-[#25D366]/25 bg-[#25D366]/10 text-[#9AF0B8]" : "border-white/10 text-zinc-500"}`} key={item}>
+                  {item}
+                </span>
+              ))}
+            </div>
+            <div className="mt-4 text-sm font-medium text-zinc-100">Acoes sensiveis</div>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {["Excluir lead", "Arquivar conversa", "Alterar funil", "Desconectar WhatsApp"].map((item) => (
+                <span className={`rounded-full border px-2.5 py-1 text-xs ${role === "admin" ? "border-amber-400/25 bg-amber-400/10 text-amber-100" : "border-white/10 text-zinc-500"}`} key={item}>
+                  {item}
+                </span>
+              ))}
             </div>
           </div>
         </div>
+        <p className="mt-4 text-sm text-zinc-500">Convite de equipe e permissoes server-side devem entrar quando houver multiusuario real.</p>
       </section>
+      )}
 
-      <section className="rounded-xl border border-white/10 bg-white/[0.035] p-5 xl:col-span-2">
+      {activeTab === "crm" && (
+      <section className="rounded-xl border border-white/10 bg-white/[0.035] p-5">
+        <h2 className="text-lg font-semibold">Preferencias do CRM</h2>
+        <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          <SettingsInput label="Nome da empresa" value={preferences.companyName} onChange={(value) => updatePreference("companyName", value)} />
+          <SettingsInput label="Marca exibida" value={preferences.brandName} onChange={(value) => updatePreference("brandName", value)} />
+          <SettingsInput label="SLA padrao (horas)" value={preferences.defaultSlaHours} onChange={(value) => updatePreference("defaultSlaHours", value)} />
+          <SettingsInput label="Horario comercial" value={preferences.businessHours} onChange={(value) => updatePreference("businessHours", value)} />
+          <SettingsInput label="Follow-up padrao (dias)" value={preferences.defaultFollowupDays} onChange={(value) => updatePreference("defaultFollowupDays", value)} />
+          <SettingsInput label="Origem padrao WhatsApp" value={preferences.defaultWhatsAppSource} onChange={(value) => updatePreference("defaultWhatsAppSource", value)} />
+          <SettingsInput label="Responsavel padrao" value={preferences.defaultOwnerName} onChange={(value) => updatePreference("defaultOwnerName", value)} />
+        </div>
+        <div className="mt-5 rounded-lg border border-white/10 bg-black/20 p-4">
+          <div className="text-sm font-medium text-zinc-100">Funil e temperaturas</div>
+          <p className="mt-1 text-sm text-zinc-500">Etapas seguem configuraveis na tela Pipeline. Temperaturas atuais: frio, morno e quente.</p>
+        </div>
+      </section>
+      )}
+
+      {activeTab === "audit" && (
+      <section className="rounded-xl border border-white/10 bg-white/[0.035] p-5">
         <div className="flex items-center justify-between gap-3">
           <div>
-            <h2 className="text-lg font-semibold">Auditoria recente</h2>
+            <h2 className="text-lg font-semibold">Auditoria profissional</h2>
             <p className="mt-1 text-sm text-zinc-500">Acoes sensiveis registradas para rastreabilidade operacional.</p>
           </div>
-          <span className="rounded-full border border-white/10 px-2 py-1 text-xs text-zinc-500">
-            {auditLogs.length}
-          </span>
+          <button className="flex h-10 items-center justify-center gap-2 rounded-lg border border-white/10 px-3 text-sm text-zinc-200 transition hover:bg-white/[0.06] disabled:opacity-60" onClick={exportAudit} type="button">
+            <FileDown className="h-4 w-4" />
+            Exportar CSV
+          </button>
+        </div>
+        <div className="mt-4 grid gap-2 md:grid-cols-[1fr_160px_220px]">
+          <input
+            className="h-10 rounded-lg border border-white/10 bg-black/30 px-3 text-sm outline-none focus:border-[#8B5CF6]"
+            onChange={(event) => setAuditSearch(event.target.value)}
+            placeholder="Buscar resumo, acao ou metadata"
+            value={auditSearch}
+          />
+          <select
+            className="h-10 rounded-lg border border-white/10 bg-black/30 px-3 text-sm outline-none"
+            onChange={(event) => setAuditEntityFilter(event.target.value as AuditLog["entity_type"] | "all")}
+            value={auditEntityFilter}
+          >
+            <option value="all">Todas entidades</option>
+            <option value="lead">Lead</option>
+            <option value="task">Task</option>
+            <option value="template">Template</option>
+            <option value="whatsapp">WhatsApp</option>
+            <option value="system">Sistema</option>
+          </select>
+          <select
+            className="h-10 rounded-lg border border-white/10 bg-black/30 px-3 text-sm outline-none"
+            onChange={(event) => setAuditActionFilter(event.target.value)}
+            value={auditActionFilter}
+          >
+            <option value="all">Todas acoes</option>
+            {auditActions.map((action) => (
+              <option key={action} value={action}>{action}</option>
+            ))}
+          </select>
         </div>
         <div className="mt-4 divide-y divide-white/10 overflow-hidden rounded-lg border border-white/10">
-          {auditLogs.length === 0 ? (
+          {filteredAuditLogs.length === 0 ? (
             <div className="p-4 text-sm text-zinc-500">
               Nenhum registro carregado. Se a migracao estiver pendente, aplique audit_logs_migration.sql.
             </div>
           ) : (
-            auditLogs.slice(0, 10).map((log) => (
-              <div className="grid gap-2 bg-black/20 p-3 text-sm md:grid-cols-[1fr_auto]" key={log.id}>
+            filteredAuditLogs.slice(0, 30).map((log) => (
+              <button className="grid w-full gap-2 bg-black/20 p-3 text-left text-sm transition hover:bg-white/[0.04] md:grid-cols-[1fr_auto_auto]" key={log.id} onClick={() => setSelectedAuditLog(log)} type="button">
                 <div>
                   <div className="font-medium text-zinc-100">{log.summary}</div>
                   <div className="mt-1 text-xs text-zinc-500">
-                    {log.entity_type} · {log.action}
+                    {log.entity_type} - {log.action}
                   </div>
                 </div>
                 <div className="text-xs text-zinc-500">
                   {new Date(log.created_at).toLocaleString("pt-BR")}
                 </div>
-              </div>
+              </button>
             ))
           )}
         </div>
+        {selectedAuditLog && (
+          <SettingsDetailPanel title={selectedAuditLog.summary} onClose={() => setSelectedAuditLog(null)}>
+            <pre className="overflow-auto whitespace-pre-wrap text-xs text-zinc-300">{JSON.stringify(selectedAuditLog, null, 2)}</pre>
+          </SettingsDetailPanel>
+        )}
+      </section>
+      )}
+
+      {activeTab === "logs" && (
+      <section className="rounded-xl border border-white/10 bg-white/[0.035] p-5">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h2 className="text-lg font-semibold">Logs WhatsApp amigaveis</h2>
+            <p className="mt-1 text-sm text-zinc-500">Webhooks, falhas e eventos de sincronizacao em linguagem operacional.</p>
+          </div>
+          <select
+            className="h-10 rounded-lg border border-white/10 bg-black/30 px-3 text-sm outline-none"
+            onChange={(event) => setLogStatusFilter(event.target.value as WhatsAppLog["status"] | "all")}
+            value={logStatusFilter}
+          >
+            <option value="all">Todos</option>
+            <option value="success">Sucesso</option>
+            <option value="error">Erro</option>
+          </select>
+        </div>
+        <div className="mt-4 divide-y divide-white/10 overflow-hidden rounded-lg border border-white/10">
+          {filteredWhatsappLogs.slice(0, 40).map((log) => (
+            <div className="grid gap-3 bg-black/20 p-3 text-sm md:grid-cols-[1fr_auto_auto] md:items-center" key={log.id}>
+              <div>
+                <div className="font-medium text-zinc-100">{friendlyWhatsAppLogLabel(log)}</div>
+                <div className="mt-1 text-xs text-zinc-500">{log.event_type} - {new Date(log.created_at).toLocaleString("pt-BR")}</div>
+              </div>
+              <SettingsStatusPill status={log.status === "success" ? "ok" : "missing"} okLabel={log.status} missingLabel={log.status} />
+              <button className="flex h-8 items-center gap-1 rounded-md border border-white/10 px-2 text-xs text-zinc-300 hover:bg-white/[0.06]" onClick={() => setSelectedWhatsAppLog(log)} type="button">
+                <Eye className="h-3.5 w-3.5" /> Ver payload
+              </button>
+            </div>
+          ))}
+          {filteredWhatsappLogs.length === 0 && <div className="p-4 text-sm text-zinc-500">Nenhum log encontrado.</div>}
+        </div>
+        {selectedWhatsAppLog && (
+          <SettingsDetailPanel title={friendlyWhatsAppLogLabel(selectedWhatsAppLog)} onClose={() => setSelectedWhatsAppLog(null)}>
+            <pre className="overflow-auto whitespace-pre-wrap text-xs text-zinc-300">{JSON.stringify(selectedWhatsAppLog.payload, null, 2)}</pre>
+          </SettingsDetailPanel>
+        )}
+      </section>
+      )}
+
+      {activeTab === "data" && (
+      <div className="grid gap-5 xl:grid-cols-[0.8fr_1.2fr]">
+      <section className="rounded-xl border border-white/10 bg-white/[0.035] p-5">
+        <h2 className="text-lg font-semibold">Backup e dados</h2>
+        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+          <SettingsMetric icon={UserRound} label="Leads" value={leads.length.toString()} />
+          <SettingsMetric icon={MessageCircle} label="Mensagens" value={whatsappMessages.length.toString()} />
+          <SettingsMetric icon={CalendarClock} label="Tarefas" value={tasks.length.toString()} />
+          <SettingsMetric icon={Database} label="Logs" value={whatsappLogs.length.toString()} />
+          <SettingsMetric icon={Sparkles} label="Templates" value={templates.length.toString()} />
+          <SettingsMetric icon={Archive} label="Arquivados" value={archivedLeads.length.toString()} />
+        </div>
+        <div className="mt-4 grid gap-2">
+          <button className="flex h-10 items-center justify-center gap-2 rounded-lg border border-white/10 px-3 text-sm text-zinc-200 transition hover:bg-white/[0.06] disabled:opacity-60" onClick={exportLeads} type="button"><FileDown className="h-4 w-4" /> Exportar leads</button>
+          <button className="flex h-10 items-center justify-center gap-2 rounded-lg border border-white/10 px-3 text-sm text-zinc-200 transition hover:bg-white/[0.06] disabled:opacity-60" onClick={exportMessages} type="button"><FileDown className="h-4 w-4" /> Exportar conversas</button>
+          <button className="flex h-10 items-center justify-center gap-2 rounded-lg border border-white/10 px-3 text-sm text-zinc-200 transition hover:bg-white/[0.06] disabled:opacity-60" onClick={exportAudit} type="button"><FileDown className="h-4 w-4" /> Exportar auditoria</button>
+        </div>
+        <p className="mt-4 text-sm text-zinc-500">Retencao atual: manter historico operacional. Importacao CSV entra em fase posterior.</p>
       </section>
 
-      <section className="rounded-xl border border-white/10 bg-white/[0.035] p-5 xl:col-span-2">
+      <section className="rounded-xl border border-white/10 bg-white/[0.035] p-5">
         <div className="flex items-center justify-between gap-3">
           <div>
             <h2 className="text-lg font-semibold">Leads arquivados</h2>
@@ -5452,8 +6029,126 @@ function SettingsView({
           )}
         </div>
       </section>
+      </div>
+      )}
     </div>
   );
+}
+
+function SettingsStatusPill({
+  status,
+  okLabel = "Aplicada",
+  missingLabel = "Pendente",
+}: {
+  status: MigrationCheck["status"];
+  okLabel?: string;
+  missingLabel?: string;
+}) {
+  const className =
+    status === "ok"
+      ? "border-[#25D366]/25 bg-[#25D366]/10 text-[#9AF0B8]"
+      : status === "missing"
+        ? "border-amber-400/25 bg-amber-400/10 text-amber-100"
+        : "border-white/10 bg-white/[0.04] text-zinc-400";
+
+  return (
+    <span className={`rounded-full border px-2 py-1 text-xs ${className}`}>
+      {status === "ok" ? okLabel : status === "missing" ? missingLabel : "Verificando"}
+    </span>
+  );
+}
+
+function SettingsMetric({
+  icon: Icon,
+  label,
+  value,
+}: {
+  icon: typeof Database;
+  label: string;
+  value: string;
+}) {
+  return (
+    <div className="rounded-lg border border-white/10 bg-black/20 p-3">
+      <div className="flex items-center gap-2 text-xs uppercase text-zinc-500">
+        <Icon className="h-4 w-4" />
+        {label}
+      </div>
+      <div className="mt-2 truncate text-sm font-medium text-zinc-100">{value}</div>
+    </div>
+  );
+}
+
+function SettingsInput({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label className="block text-sm text-zinc-300">
+      {label}
+      <input
+        className="mt-2 h-10 w-full rounded-lg border border-white/10 bg-black/30 px-3 text-sm text-zinc-100 outline-none transition focus:border-[#8B5CF6]"
+        onChange={(event) => onChange(event.target.value)}
+        value={value}
+      />
+    </label>
+  );
+}
+
+function SettingsDetailPanel({
+  title,
+  children,
+  onClose,
+}: {
+  title: string;
+  children: ReactNode;
+  onClose: () => void;
+}) {
+  return (
+    <div className="mt-4 rounded-lg border border-white/10 bg-black/30 p-4">
+      <div className="flex items-center justify-between gap-3">
+        <h3 className="font-medium text-zinc-100">{title}</h3>
+        <button className="text-sm text-zinc-500 hover:text-zinc-200" onClick={onClose} type="button">
+          Fechar
+        </button>
+      </div>
+      <div className="mt-3 max-h-80 overflow-auto">{children}</div>
+    </div>
+  );
+}
+
+function friendlyWhatsAppLogLabel(log: WhatsAppLog) {
+  if (log.status === "error") return log.error_message || "Falha na integracao WhatsApp";
+  if (log.event_type.includes("messages.upsert.ignored")) return "Mensagem ignorada pelo webhook";
+  if (log.event_type.includes("messages.upsert.unmatched_saved")) return "Conversa criada sem lead vinculado";
+  if (log.event_type.includes("messages.upsert")) return "Mensagem recebida pelo webhook";
+  if (log.event_type.includes("messages.update")) return "Status de entrega atualizado";
+  if (log.event_type.includes("connection")) return "Estado da conexao atualizado";
+  if (log.event_type.includes("qr")) return "QR Code atualizado";
+  return "Evento WhatsApp registrado";
+}
+
+function downloadCsv(filename: string, rows: Record<string, string | number | null | undefined>[]) {
+  if (rows.length === 0) return;
+
+  const headers = Object.keys(rows[0]);
+  const escape = (value: string | number | null | undefined) =>
+    `"${String(value ?? "").replaceAll("\"", "\"\"")}"`;
+  const csv = [
+    headers.join(","),
+    ...rows.map((row) => headers.map((header) => escape(row[header])).join(",")),
+  ].join("\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
 }
 
 function LeadForm({
