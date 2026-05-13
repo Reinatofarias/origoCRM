@@ -1,5 +1,5 @@
 import { CrmApp } from "@/components/crm-app";
 
 export default function WhatsAppPage() {
-  return <CrmApp initialView="whatsapp" />;
+  return <CrmApp initialView="settings" initialSettingsTab="whatsapp" />;
 }

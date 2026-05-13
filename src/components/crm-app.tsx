@@ -344,7 +344,13 @@ function BrandLogo({
   );
 }
 
-export function CrmApp({ initialView = "dashboard" }: { initialView?: View } = {}) {
+export function CrmApp({
+  initialView = "dashboard",
+  initialSettingsTab,
+}: {
+  initialView?: View;
+  initialSettingsTab?: SettingsTab;
+} = {}) {
   const supabase = useMemo(() => createSupabaseClient(), []);
   const [user, setUser] = useState<AuthUser | null>(null);
   const [authLoading, setAuthLoading] = useState(isSupabaseConfigured);
@@ -382,7 +388,14 @@ export function CrmApp({ initialView = "dashboard" }: { initialView?: View } = {
 
   if (!user) return <AuthScreen />;
 
-  return <Workspace initialView={initialView} user={user} onLogout={() => setUser(null)} />;
+  return (
+    <Workspace
+      initialSettingsTab={initialSettingsTab}
+      initialView={initialView}
+      user={user}
+      onLogout={() => setUser(null)}
+    />
+  );
 }
 
 function MissingSupabaseConfig() {
@@ -482,15 +495,19 @@ function Workspace({
   user,
   onLogout,
   initialView,
+  initialSettingsTab,
 }: {
   user: AuthUser;
   onLogout: () => void;
   initialView: View;
+  initialSettingsTab?: SettingsTab;
 }) {
   const supabase = useMemo(() => createSupabaseClient(), []);
   const router = useRouter();
   const pathname = usePathname();
-  const view = pathViews[pathname] ?? initialView;
+  const routedView = pathViews[pathname] ?? initialView;
+  const view = routedView === "whatsapp" ? "settings" : routedView;
+  const settingsInitialTab = routedView === "whatsapp" ? "whatsapp" : initialSettingsTab;
   const savedFilters = useMemo(() => readSavedPipelineFilters(), []);
   const initialFilterPresets = useMemo(() => readSavedPipelineFilterPresets(), []);
   const initialPipelineStages = useMemo(() => readPipelineStages(), []);
@@ -1463,7 +1480,6 @@ function Workspace({
               ["leads", "Leads", UserRound],
               ["templates", "Mensagens prontas", MessageCircle],
               ["conversations", "Conversas", MessageCircle],
-              ["whatsapp", "Conexao WhatsApp", QrCode],
               ["settings", "Configuracoes", Settings],
             ].map(([key, label, Icon]) => (
               <button
@@ -1583,7 +1599,7 @@ function Workspace({
                   </button>
                 </>
               )}
-              {view !== "whatsapp" && view !== "settings" && (
+              {view !== "settings" && (
                 <button
                   className="flex h-11 items-center justify-center gap-2 rounded-lg bg-[#8B5CF6] px-4 text-sm font-medium transition hover:bg-[#7C3AED]"
                   onClick={() => {
@@ -1687,11 +1703,11 @@ function Workspace({
                     }}
                   />
                 )}
-                {view === "whatsapp" && <WhatsAppConnection />}
                 {view === "settings" && (
                   <SettingsView
                     archivedLeads={archivedLeads}
                     auditLogs={auditLogs}
+                    initialTab={settingsInitialTab}
                     leads={leads}
                     tasks={tasks}
                     templates={templates}
@@ -3654,256 +3670,6 @@ function Templates({
   );
 }
 
-function WhatsAppConnection() {
-  const [loading, setLoading] = useState(true);
-  const [qrLoading, setQrLoading] = useState(false);
-  const [disconnecting, setDisconnecting] = useState(false);
-  const [lastCheckedAt, setLastCheckedAt] = useState<string | null>(null);
-  const [status, setStatus] = useState<{
-    configured: boolean;
-    connected: boolean;
-    state: string;
-    instanceName?: string;
-    phoneNumber?: string | null;
-    profileName?: string | null;
-    error?: string;
-  } | null>(null);
-  const [qrCode, setQrCode] = useState<string | null>(null);
-  const [pairingCode, setPairingCode] = useState<string | null>(null);
-  const [qrError, setQrError] = useState("");
-
-  const loadStatus = useCallback(async (showLoading = true) => {
-    if (showLoading) setLoading(true);
-
-    try {
-      const response = await fetch("/api/evolution/status", { cache: "no-store" });
-      const data = await response.json();
-      setStatus({
-        ...data,
-        error: data.error ?? (!response.ok ? "Nao foi possivel consultar a Evolution" : undefined),
-      });
-      setLastCheckedAt(new Date().toISOString());
-    } catch {
-      setStatus({
-        configured: true,
-        connected: false,
-        state: "error",
-        error: "Nao foi possivel consultar a Evolution",
-      });
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  async function loadQrCode() {
-    setQrError("");
-    setPairingCode(null);
-    setQrLoading(true);
-
-    try {
-      const response = await fetch("/api/evolution/qrcode", { cache: "no-store" });
-      const data = await response.json();
-
-      if (!response.ok || data.error) {
-        setQrError(data.error ?? "Nao foi possivel gerar o QR Code");
-        return;
-      }
-
-      setQrCode(data.base64 ?? null);
-      setPairingCode(data.pairingCode ?? null);
-
-      if (!data.base64 && !data.pairingCode) {
-        setQrError("A Evolution retornou codigo de conexao, mas nao retornou imagem de QR Code.");
-      }
-
-      await loadStatus(false);
-    } catch {
-      setQrError("Nao foi possivel gerar o QR Code");
-    } finally {
-      setQrLoading(false);
-    }
-  }
-
-  async function disconnectWhatsApp() {
-    setQrError("");
-    setDisconnecting(true);
-
-    try {
-      const response = await fetch("/api/evolution/disconnect", {
-        method: "DELETE",
-        cache: "no-store",
-      });
-      const data = await response.json();
-
-      if (!response.ok || data.error) {
-        setQrError(data.error ?? "Nao foi possivel desconectar o WhatsApp");
-        return;
-      }
-
-      setQrCode(null);
-      setPairingCode(null);
-      await loadStatus(false);
-    } catch {
-      setQrError("Nao foi possivel desconectar o WhatsApp");
-    } finally {
-      setDisconnecting(false);
-    }
-  }
-
-  useEffect(() => {
-    const initialLoad = window.setTimeout(() => {
-      void loadStatus();
-    }, 0);
-
-    const interval = window.setInterval(() => {
-      void loadStatus(false);
-    }, 5000);
-
-    return () => {
-      window.clearTimeout(initialLoad);
-      window.clearInterval(interval);
-    };
-  }, [loadStatus]);
-
-  const connected = status?.connected;
-  const healthTone = connected
-    ? "border-[#25D366]/30 bg-[#25D366]/10 text-[#25D366]"
-    : status?.error
-      ? "border-red-400/30 bg-red-500/10 text-red-200"
-      : "border-amber-400/30 bg-amber-500/10 text-amber-100";
-
-  return (
-    <div className="grid gap-5 xl:grid-cols-[0.85fr_1.15fr]">
-      <section className="rounded-lg border border-white/10 bg-white/[0.035] p-5">
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <h2 className="text-lg font-semibold">Instancia</h2>
-            <p className="mt-1 text-sm text-zinc-500">
-              {status?.instanceName || "OrigoCRM"}
-            </p>
-          </div>
-          <div
-            className={`flex items-center gap-2 rounded-full px-3 py-1 text-xs ${
-              connected ? "bg-[#25D366]/15 text-[#25D366]" : "bg-red-500/15 text-red-300"
-            }`}
-          >
-            {connected ? <Wifi className="h-4 w-4" /> : <WifiOff className="h-4 w-4" />}
-            {connected ? "Conectado" : "Desconectado"}
-          </div>
-        </div>
-
-        <div className="mt-5 grid gap-3">
-          <div className={`rounded-lg border p-4 ${healthTone}`}>
-            <div className="text-sm opacity-80">Saude da conexao</div>
-            <div className="mt-1 font-medium">
-              {connected ? "Operacional" : status?.error ? "Com erro" : "Aguardando conexao"}
-            </div>
-          </div>
-          <div className="rounded-lg border border-white/10 bg-black/20 p-4">
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div>
-                <div className="text-sm text-zinc-500">Estado tecnico</div>
-                <div className="mt-1 font-mono text-sm text-zinc-200">
-                  {loading ? "consultando..." : status?.state ?? "indefinido"}
-                </div>
-              </div>
-              <div>
-                <div className="text-sm text-zinc-500">Numero conectado</div>
-                <div className="mt-1 font-mono text-sm text-zinc-200">
-                  {status?.phoneNumber || "Nao informado pela Evolution"}
-                </div>
-              </div>
-              <div>
-                <div className="text-sm text-zinc-500">Perfil</div>
-                <div className="mt-1 text-sm text-zinc-200">
-                  {status?.profileName || "Nao informado"}
-                </div>
-              </div>
-              <div>
-                <div className="text-sm text-zinc-500">Ultima verificacao</div>
-                <div className="mt-1 text-sm text-zinc-200">
-                  {lastCheckedAt
-                    ? new Date(lastCheckedAt).toLocaleTimeString("pt-BR", {
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      })
-                    : "Pendente"}
-                </div>
-              </div>
-            </div>
-            {status?.error && <p className="mt-3 text-sm text-red-300">{status.error}</p>}
-          </div>
-        </div>
-
-        <div className="mt-5 flex flex-col gap-3 sm:flex-row">
-          <button
-            className="flex h-11 items-center justify-center gap-2 rounded-lg border border-white/10 px-4 text-sm text-zinc-200 transition hover:bg-white/[0.06]"
-            onClick={() => void loadStatus()}
-            type="button"
-          >
-            <RefreshCw className="h-4 w-4" />
-            Atualizar
-          </button>
-          {connected ? (
-            <button
-              className="flex h-11 items-center justify-center gap-2 rounded-lg border border-red-400/25 bg-red-500/10 px-4 text-sm font-medium text-red-200 transition hover:bg-red-500/20 disabled:opacity-60"
-              disabled={disconnecting}
-              onClick={disconnectWhatsApp}
-              type="button"
-            >
-              {disconnecting ? <Loader2 className="h-4 w-4 animate-spin" /> : <WifiOff className="h-4 w-4" />}
-              Desconectar
-            </button>
-          ) : (
-            <button
-              className="flex h-11 items-center justify-center gap-2 rounded-lg bg-[#8B5CF6] px-4 text-sm font-medium transition hover:bg-[#7C3AED] disabled:opacity-60"
-              disabled={qrLoading}
-              onClick={loadQrCode}
-              type="button"
-            >
-              {qrLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <QrCode className="h-4 w-4" />}
-              Reconectar / Gerar QR
-            </button>
-          )}
-        </div>
-      </section>
-
-      <section className="rounded-lg border border-white/10 bg-white/[0.035] p-5">
-        <h2 className="text-lg font-semibold">Conectar WhatsApp</h2>
-        <div className="mt-5 flex min-h-80 items-center justify-center rounded-lg border border-dashed border-white/10 bg-black/20 p-5">
-          {connected ? (
-            <div className="text-center text-sm text-zinc-400">
-              <Wifi className="mx-auto mb-3 h-8 w-8 text-[#25D366]" />
-              WhatsApp conectado. As conversas novas chegam pelo webhook.
-            </div>
-          ) : qrCode ? (
-            // QR Code vem como data URL da Evolution, entao nao passa pelo otimizador de imagem.
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              alt="QR Code para conectar WhatsApp"
-              className="h-72 w-72 rounded-lg bg-white p-3"
-              src={qrCode}
-            />
-          ) : pairingCode ? (
-            <div className="text-center">
-              <div className="text-sm text-zinc-500">Codigo de pareamento</div>
-              <div className="mt-3 rounded-lg border border-white/10 bg-black/30 px-5 py-3 font-mono text-2xl tracking-widest text-zinc-100">
-                {pairingCode}
-              </div>
-            </div>
-          ) : (
-            <div className="max-w-sm text-center text-sm leading-6 text-zinc-500">
-              Gere o QR Code e leia com o app do WhatsApp no celular. Depois clique em Atualizar
-              para confirmar o status conectado. A tela tambem consulta o status automaticamente.
-            </div>
-          )}
-        </div>
-        {qrError && <p className="mt-3 text-sm text-red-300">{qrError}</p>}
-      </section>
-    </div>
-  );
-}
-
 type ConversationStatusFilter = "all" | "unread" | "waiting" | "responded" | "converted" | "resolved" | "archived";
 type ConversationLeadFilter = "all" | "without" | "with";
 type ConversationPriorityFilter = "all" | "failed" | "hot" | "unassigned" | "today";
@@ -5381,6 +5147,7 @@ function readUserRole(): UserRole {
 function SettingsView({
   auditLogs,
   archivedLeads,
+  initialTab,
   leads,
   tasks,
   templates,
@@ -5391,6 +5158,7 @@ function SettingsView({
 }: {
   auditLogs: AuditLog[];
   archivedLeads: Lead[];
+  initialTab?: SettingsTab;
   leads: Lead[];
   tasks: Task[];
   templates: MessageTemplate[];
@@ -5401,7 +5169,7 @@ function SettingsView({
 }) {
   const supabase = useMemo(() => createSupabaseClient(), []);
   const [checks, setChecks] = useState<MigrationCheck[]>(() => migrationChecksInitialState(Boolean(supabase)));
-  const [activeTab, setActiveTab] = useState<SettingsTab>("system");
+  const [activeTab, setActiveTab] = useState<SettingsTab>(initialTab ?? "system");
   const [lastCheckedAt, setLastCheckedAt] = useState<string | null>(null);
   const [checking, setChecking] = useState(false);
   const [copiedLabel, setCopiedLabel] = useState("");
@@ -5415,6 +5183,9 @@ function SettingsView({
     error?: string;
   } | null>(null);
   const [evolutionLoading, setEvolutionLoading] = useState(false);
+  const [evolutionDisconnecting, setEvolutionDisconnecting] = useState(false);
+  const [evolutionQrCode, setEvolutionQrCode] = useState<string | null>(null);
+  const [evolutionPairingCode, setEvolutionPairingCode] = useState<string | null>(null);
   const [evolutionFeedback, setEvolutionFeedback] = useState("");
   const [role, setRole] = useState<UserRole>(() => readUserRole());
   const [preferences, setPreferences] = useState<CrmPreferences>(() => readCrmPreferences());
@@ -5568,6 +5339,12 @@ function SettingsView({
     if (typeof window !== "undefined") window.localStorage.setItem("origocrm:user-role", role);
   }, [role]);
 
+  useEffect(() => {
+    if (!initialTab) return undefined;
+    const timeout = window.setTimeout(() => setActiveTab(initialTab), 0);
+    return () => window.clearTimeout(timeout);
+  }, [initialTab]);
+
   async function copyText(label: string, text: string) {
     await navigator.clipboard.writeText(text);
     setCopiedLabel(label);
@@ -5599,11 +5376,27 @@ function SettingsView({
 
   async function generateQrCode() {
     setEvolutionFeedback("");
+    setEvolutionQrCode(null);
+    setEvolutionPairingCode(null);
     setEvolutionLoading(true);
     try {
       const response = await fetch("/api/evolution/qrcode", { cache: "no-store" });
       const data = await response.json();
-      setEvolutionFeedback(data.error ?? (data.pairingCode ? `Codigo de pareamento: ${data.pairingCode}` : "QR solicitado. Abra a tela WhatsApp para escanear."));
+      if (!response.ok || data.error) {
+        setEvolutionFeedback(data.error ?? "Nao foi possivel gerar QR Code");
+        return;
+      }
+
+      setEvolutionQrCode(data.base64 ?? null);
+      setEvolutionPairingCode(data.pairingCode ?? null);
+      await refreshEvolutionStatus();
+      setEvolutionFeedback(
+        data.base64
+          ? "QR gerado. Escaneie pelo WhatsApp e clique em Atualizar."
+          : data.pairingCode
+            ? "Codigo de pareamento gerado."
+            : "A Evolution respondeu, mas nao retornou QR ou codigo de pareamento.",
+      );
     } catch {
       setEvolutionFeedback("Nao foi possivel gerar QR Code");
     } finally {
@@ -5613,16 +5406,23 @@ function SettingsView({
 
   async function disconnectEvolution() {
     setEvolutionFeedback("");
-    setEvolutionLoading(true);
+    setEvolutionDisconnecting(true);
     try {
       const response = await fetch("/api/evolution/disconnect", { method: "DELETE" });
       const data = await response.json();
-      setEvolutionFeedback(data.error ?? "WhatsApp desconectado");
+      if (!response.ok || data.error) {
+        setEvolutionFeedback(data.error ?? "Nao foi possivel desconectar");
+        return;
+      }
+
+      setEvolutionQrCode(null);
+      setEvolutionPairingCode(null);
       await refreshEvolutionStatus();
+      setEvolutionFeedback("WhatsApp desconectado");
     } catch {
       setEvolutionFeedback("Nao foi possivel desconectar");
     } finally {
-      setEvolutionLoading(false);
+      setEvolutionDisconnecting(false);
     }
   }
 
@@ -5747,50 +5547,97 @@ function SettingsView({
 
       {activeTab === "whatsapp" && (
       <section className="rounded-xl border border-white/10 bg-white/[0.035] p-5">
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <h2 className="text-lg font-semibold">Evolution</h2>
-            <p className="mt-1 text-sm text-zinc-500">Estado da instancia, webhook e acoes operacionais.</p>
-          </div>
-          <SettingsStatusPill status={evolutionStatus?.connected ? "ok" : "missing"} okLabel={evolutionStatus?.connected ? "Conectado" : "Pendente"} />
-        </div>
-        <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-          <SettingsMetric icon={Wifi} label="Estado" value={evolutionStatus?.state ?? "nao verificado"} />
-          <SettingsMetric icon={UserRound} label="Numero conectado" value={evolutionStatus?.phoneNumber ?? "Nao informado"} />
-          <SettingsMetric icon={MessageCircle} label="Perfil" value={evolutionStatus?.profileName ?? "Nao informado"} />
-          <SettingsMetric icon={Clock3} label="Ultimo webhook" value={lastWebhook ? new Date(lastWebhook.created_at).toLocaleString("pt-BR") : "Sem eventos"} />
-          <SettingsMetric icon={Send} label="Ultima mensagem" value={lastMessage ? new Date(lastMessage.created_at).toLocaleString("pt-BR") : "Sem mensagens"} />
-          <SettingsMetric icon={AlertTriangle} label="Ultimo erro" value={lastError?.error_message ?? lastError?.event_type ?? "Sem erros recentes"} />
-        </div>
-        {evolutionFeedback && <p className="mt-3 text-sm text-zinc-300">{evolutionFeedback}</p>}
-        <div className="mt-4 grid gap-2 md:grid-cols-5">
-          <button className="flex h-10 items-center justify-center gap-2 rounded-lg border border-white/10 px-3 text-sm text-zinc-200 transition hover:bg-white/[0.06] disabled:opacity-60" disabled={evolutionLoading} onClick={() => void refreshEvolutionStatus()} type="button">
-            <RefreshCw className="h-4 w-4" /> Atualizar
-          </button>
-          <button className="flex h-10 items-center justify-center gap-2 rounded-lg border border-white/10 px-3 text-sm text-zinc-200 transition hover:bg-white/[0.06] disabled:opacity-60" disabled={evolutionLoading} onClick={() => void generateQrCode()} type="button">
-            <QrCode className="h-4 w-4" /> Gerar QR
-          </button>
-          <button className="flex h-10 items-center justify-center gap-2 rounded-lg border border-white/10 px-3 text-sm text-zinc-200 transition hover:bg-white/[0.06] disabled:opacity-60" disabled={evolutionLoading} onClick={() => void generateQrCode()} type="button">
-            <RotateCcw className="h-4 w-4" /> Reconectar
-          </button>
-          <button className="flex h-10 items-center justify-center gap-2 rounded-lg border border-red-400/20 bg-red-500/10 px-3 text-sm text-red-300 transition hover:bg-red-500/20 disabled:opacity-60" disabled={evolutionLoading} onClick={() => void disconnectEvolution()} type="button">
-            <WifiOff className="h-4 w-4" /> Desconectar
-          </button>
-          <button className="flex h-10 items-center justify-center gap-2 rounded-lg border border-white/10 px-3 text-sm text-zinc-200 transition hover:bg-white/[0.06] disabled:opacity-60" onClick={() => void testWebhook()} type="button">
-            <ExternalLink className="h-4 w-4" /> Testar webhook
-          </button>
-        </div>
-        <div className="mt-5 divide-y divide-white/10 overflow-hidden rounded-lg border border-white/10">
-          {whatsappLogs.slice(0, 8).map((log) => (
-            <div className="grid gap-2 bg-black/20 p-3 text-sm md:grid-cols-[1fr_auto]" key={log.id}>
+        <div className="grid gap-5 xl:grid-cols-[0.95fr_1.05fr]">
+          <div className="space-y-4">
+            <div className="flex items-start justify-between gap-3">
               <div>
-                <div className="font-medium text-zinc-100">{friendlyWhatsAppLogLabel(log)}</div>
-                <div className="mt-1 text-xs text-zinc-500">{log.event_type} - {log.status}</div>
+                <h2 className="text-lg font-semibold">Evolution</h2>
+                <p className="mt-1 text-sm text-zinc-500">Estado da instancia, webhook e acoes operacionais.</p>
               </div>
-              <div className="text-xs text-zinc-500">{new Date(log.created_at).toLocaleString("pt-BR")}</div>
+              <SettingsStatusPill
+                status={evolutionStatus?.connected ? "ok" : "missing"}
+                okLabel={evolutionStatus?.connected ? "Conectado" : "Pendente"}
+              />
             </div>
-          ))}
-          {whatsappLogs.length === 0 && <div className="p-4 text-sm text-zinc-500">Nenhum log recebido.</div>}
+            <div className="grid gap-3 sm:grid-cols-2">
+              <SettingsMetric icon={Wifi} label="Estado" value={evolutionStatus?.state ?? "nao verificado"} />
+              <SettingsMetric icon={UserRound} label="Numero conectado" value={evolutionStatus?.phoneNumber ?? "Nao informado"} />
+              <SettingsMetric icon={MessageCircle} label="Perfil" value={evolutionStatus?.profileName ?? "Nao informado"} />
+              <SettingsMetric icon={Clock3} label="Ultimo webhook" value={lastWebhook ? new Date(lastWebhook.created_at).toLocaleString("pt-BR") : "Sem eventos"} />
+              <SettingsMetric icon={Send} label="Ultima mensagem" value={lastMessage ? new Date(lastMessage.created_at).toLocaleString("pt-BR") : "Sem mensagens"} />
+              <SettingsMetric icon={AlertTriangle} label="Ultimo erro" value={lastError?.error_message ?? lastError?.event_type ?? "Sem erros recentes"} />
+            </div>
+            {evolutionFeedback && <p className="rounded-lg border border-white/10 bg-black/20 p-3 text-sm text-zinc-300">{evolutionFeedback}</p>}
+            {evolutionStatus?.error && <p className="rounded-lg border border-red-400/20 bg-red-500/10 p-3 text-sm text-red-200">{evolutionStatus.error}</p>}
+            <div className="grid gap-2 sm:grid-cols-2">
+              <button className="flex h-10 items-center justify-center gap-2 rounded-lg border border-white/10 px-3 text-sm text-zinc-200 transition hover:bg-white/[0.06] disabled:opacity-60" disabled={evolutionLoading} onClick={() => void refreshEvolutionStatus()} type="button">
+                {evolutionLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />} Atualizar
+              </button>
+              <button className="flex h-10 items-center justify-center gap-2 rounded-lg border border-white/10 px-3 text-sm text-zinc-200 transition hover:bg-white/[0.06] disabled:opacity-60" disabled={evolutionLoading} onClick={() => void generateQrCode()} type="button">
+                {evolutionLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <QrCode className="h-4 w-4" />} Gerar QR
+              </button>
+              <button className="flex h-10 items-center justify-center gap-2 rounded-lg border border-white/10 px-3 text-sm text-zinc-200 transition hover:bg-white/[0.06] disabled:opacity-60" disabled={evolutionLoading} onClick={() => void generateQrCode()} type="button">
+                <RotateCcw className="h-4 w-4" /> Reconectar
+              </button>
+              <button className="flex h-10 items-center justify-center gap-2 rounded-lg border border-red-400/20 bg-red-500/10 px-3 text-sm text-red-300 transition hover:bg-red-500/20 disabled:opacity-60" disabled={evolutionDisconnecting} onClick={() => void disconnectEvolution()} type="button">
+                {evolutionDisconnecting ? <Loader2 className="h-4 w-4 animate-spin" /> : <WifiOff className="h-4 w-4" />} Desconectar
+              </button>
+              <button className="flex h-10 items-center justify-center gap-2 rounded-lg border border-white/10 px-3 text-sm text-zinc-200 transition hover:bg-white/[0.06] disabled:opacity-60 sm:col-span-2" onClick={() => void testWebhook()} type="button">
+                <ExternalLink className="h-4 w-4" /> Testar webhook
+              </button>
+            </div>
+          </div>
+
+          <div className="space-y-4">
+            <div className="rounded-lg border border-white/10 bg-black/20 p-4">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <h3 className="font-semibold text-zinc-100">Pareamento WhatsApp</h3>
+                  <p className="mt-1 text-sm text-zinc-500">Gere o QR ou codigo e conecte pelo app do WhatsApp.</p>
+                </div>
+                {evolutionStatus?.connected ? <Wifi className="h-5 w-5 text-[#25D366]" /> : <QrCode className="h-5 w-5 text-zinc-500" />}
+              </div>
+              <div className="mt-4 flex min-h-80 items-center justify-center rounded-lg border border-dashed border-white/10 bg-black/20 p-5">
+                {evolutionStatus?.connected ? (
+                  <div className="text-center text-sm text-zinc-400">
+                    <Wifi className="mx-auto mb-3 h-8 w-8 text-[#25D366]" />
+                    WhatsApp conectado. As conversas novas chegam pelo webhook.
+                  </div>
+                ) : evolutionQrCode ? (
+                  // QR Code vem como data URL da Evolution, entao nao passa pelo otimizador de imagem.
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    alt="QR Code para conectar WhatsApp"
+                    className="h-72 w-72 rounded-lg bg-white p-3"
+                    src={evolutionQrCode}
+                  />
+                ) : evolutionPairingCode ? (
+                  <div className="text-center">
+                    <div className="text-sm text-zinc-500">Codigo de pareamento</div>
+                    <div className="mt-3 rounded-lg border border-white/10 bg-black/30 px-5 py-3 font-mono text-2xl tracking-widest text-zinc-100">
+                      {evolutionPairingCode}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="max-w-sm text-center text-sm leading-6 text-zinc-500">
+                    Clique em Gerar QR ou Reconectar para iniciar o pareamento da instancia.
+                  </div>
+                )}
+              </div>
+            </div>
+            <div className="divide-y divide-white/10 overflow-hidden rounded-lg border border-white/10">
+              {whatsappLogs.slice(0, 5).map((log) => (
+                <div className="grid gap-2 bg-black/20 p-3 text-sm md:grid-cols-[1fr_auto]" key={log.id}>
+                  <div>
+                    <div className="font-medium text-zinc-100">{friendlyWhatsAppLogLabel(log)}</div>
+                    <div className="mt-1 text-xs text-zinc-500">{log.event_type} - {log.status}</div>
+                  </div>
+                  <div className="text-xs text-zinc-500">{new Date(log.created_at).toLocaleString("pt-BR")}</div>
+                </div>
+              ))}
+              {whatsappLogs.length === 0 && <div className="p-4 text-sm text-zinc-500">Nenhum log recebido.</div>}
+            </div>
+          </div>
         </div>
       </section>
       )}
