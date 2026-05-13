@@ -55,7 +55,7 @@ alter table public.interactions add column if not exists type text not null defa
 create table if not exists public.tasks (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references auth.users(id) on delete cascade,
-  lead_id uuid not null references public.leads(id) on delete cascade,
+  lead_id uuid references public.leads(id) on delete cascade,
   type text not null default 'followup' check (type in ('followup', 'call', 'email', 'whatsapp', 'meeting', 'other')),
   title text not null,
   notes text,

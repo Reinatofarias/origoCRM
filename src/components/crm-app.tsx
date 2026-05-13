@@ -123,6 +123,7 @@ type InteractionInput = {
   channel: Interaction["channel"];
 };
 type TaskInput = {
+  lead_id?: string | null;
   type: Task["type"];
   title: string;
   notes?: string | null;
@@ -1118,11 +1119,12 @@ function Workspace({
     }
   }
 
-  async function createTask(lead: Lead, input: TaskInput) {
+  async function createTask(lead: Lead | null, input: TaskInput) {
     const now = new Date().toISOString();
+    const leadId = lead?.id ?? input.lead_id ?? null;
     const task: Task = {
       id: newId("task"),
-      lead_id: lead.id,
+      lead_id: leadId,
       user_id: user.id,
       type: input.type,
       title: input.title.trim(),
@@ -1136,38 +1138,41 @@ function Workspace({
     const previousTasks = remoteTasks;
     const previousLeads = remoteLeads;
     const previousInteractions = remoteInteractions;
-    const interaction = makeInteraction(
-      lead.id,
-      `Tarefa criada: ${task.title} (${taskTypeLabel(task.type)})`,
-      task.type === "followup" ? "followup_created" : "note",
-    );
+    const interaction = lead
+      ? makeInteraction(
+          lead.id,
+          `Tarefa criada: ${task.title} (${taskTypeLabel(task.type)})`,
+          task.type === "followup" ? "followup_created" : "note",
+        )
+      : null;
 
     setRemoteTasks((items) => [task, ...items]);
     const shouldUpdateLeadFollowup =
+      Boolean(lead) &&
       task.type === "followup" &&
-      (!lead.next_followup_at ||
+      (!lead?.next_followup_at ||
         new Date(task.due_at).getTime() <= new Date(lead.next_followup_at).getTime());
-    if (shouldUpdateLeadFollowup) {
+    if (shouldUpdateLeadFollowup && lead) {
       patchLeadOptimistic(lead.id, { next_followup_at: task.due_at, updated_at: now });
     }
-    addInteractionOptimistic(interaction);
+    if (interaction) addInteractionOptimistic(interaction);
     showToast("Tarefa criada");
 
     if (supabase) {
-      const [taskResult, { error: interactionError }] = await Promise.all([
-        createTaskAction(
-          {
-            id: task.id,
-            lead_id: lead.id,
-            type: task.type,
-            title: task.title,
-            notes: task.notes,
-            due_at: task.due_at,
-          },
-          { cancelOpenFollowups: false },
-        ),
-        supabase.from("interactions").insert({ ...interaction, user_id: user.id }),
-      ]);
+      const taskResult = await createTaskAction(
+        {
+          id: task.id,
+          lead_id: leadId,
+          type: task.type,
+          title: task.title,
+          notes: task.notes,
+          due_at: task.due_at,
+        },
+        { cancelOpenFollowups: false },
+      );
+      const interactionError = interaction
+        ? (await supabase.from("interactions").insert({ ...interaction, user_id: user.id })).error
+        : null;
 
       if (!taskResult.success || interactionError) {
         setRemoteTasks(previousTasks);
@@ -1182,22 +1187,24 @@ function Workspace({
         entity_id: task.id,
         action: "task.created",
         summary: `Tarefa criada: ${task.title}`,
-        metadata: { lead_id: lead.id, type: task.type, due_at: task.due_at },
+        metadata: { lead_id: leadId, type: task.type, due_at: task.due_at },
       });
     }
   }
 
-  async function completeTask(task: Task, lead: Lead) {
+  async function completeTask(task: Task, lead: Lead | null) {
     const now = new Date().toISOString();
     const previousTasks = remoteTasks;
     const previousLeads = remoteLeads;
     const previousInteractions = remoteInteractions;
-    const shouldClearFollowup = lead.next_followup_at === task.due_at;
-    const interaction = makeInteraction(
-      lead.id,
-      `Follow-up concluido: ${task.title}`,
-      "note",
-    );
+    const shouldClearFollowup = Boolean(lead && lead.next_followup_at === task.due_at);
+    const interaction = lead
+      ? makeInteraction(
+          lead.id,
+          `Follow-up concluido: ${task.title}`,
+          "note",
+        )
+      : null;
 
     setRemoteTasks((items) =>
       items.map((item) =>
@@ -1206,17 +1213,17 @@ function Workspace({
           : item,
       ),
     );
-    if (shouldClearFollowup) {
+    if (shouldClearFollowup && lead) {
       patchLeadOptimistic(lead.id, { next_followup_at: null, updated_at: now });
     }
-    addInteractionOptimistic(interaction);
-    showToast("Follow-up concluido");
+    if (interaction) addInteractionOptimistic(interaction);
+    showToast("Tarefa concluida");
 
     if (supabase) {
-      const [taskResult, { error: interactionError }] = await Promise.all([
-        completeTaskAction(task.id, { leadId: lead.id, clearLeadFollowup: shouldClearFollowup }),
-        supabase.from("interactions").insert({ ...interaction, user_id: user.id }),
-      ]);
+      const taskResult = await completeTaskAction(task.id, { leadId: lead?.id ?? null, clearLeadFollowup: shouldClearFollowup });
+      const interactionError = interaction
+        ? (await supabase.from("interactions").insert({ ...interaction, user_id: user.id })).error
+        : null;
 
       if (!taskResult.success || interactionError) {
         setRemoteTasks(previousTasks);
@@ -1231,20 +1238,23 @@ function Workspace({
         entity_id: task.id,
         action: "task.completed",
         summary: `Tarefa concluida: ${task.title}`,
-        metadata: { lead_id: lead.id, type: task.type, completed_at: now },
+        metadata: { lead_id: lead?.id ?? null, type: task.type, completed_at: now },
       });
     }
   }
 
-  async function rescheduleTask(task: Task, lead: Lead, dueAt: string) {
+  async function rescheduleTask(task: Task, lead: Lead | null, dueAt: string) {
     const now = new Date().toISOString();
     const previousTasks = remoteTasks;
     const previousLeads = remoteLeads;
-    const interaction = makeInteraction(
-      lead.id,
-      `Tarefa reagendada: ${task.title} para ${new Date(dueAt).toLocaleString("pt-BR")}`,
-      task.type === "followup" ? "followup_created" : "note",
-    );
+    const previousInteractions = remoteInteractions;
+    const interaction = lead
+      ? makeInteraction(
+          lead.id,
+          `Tarefa reagendada: ${task.title} para ${new Date(dueAt).toLocaleString("pt-BR")}`,
+          task.type === "followup" ? "followup_created" : "note",
+        )
+      : null;
 
     setRemoteTasks((items) =>
       items.map((item) =>
@@ -1253,25 +1263,26 @@ function Workspace({
           : item,
       ),
     );
-    if (task.type === "followup") {
+    if (task.type === "followup" && lead) {
       patchLeadOptimistic(lead.id, { next_followup_at: dueAt, updated_at: now });
     }
-    addInteractionOptimistic(interaction);
+    if (interaction) addInteractionOptimistic(interaction);
     showToast("Tarefa reagendada");
 
     if (supabase) {
-      const [taskResult, { error: interactionError }] = await Promise.all([
-        rescheduleTaskAction(task.id, {
-          leadId: lead.id,
-          dueAt,
-          updateLeadFollowup: task.type === "followup",
-        }),
-        supabase.from("interactions").insert({ ...interaction, user_id: user.id }),
-      ]);
+      const taskResult = await rescheduleTaskAction(task.id, {
+        leadId: lead?.id ?? null,
+        dueAt,
+        updateLeadFollowup: task.type === "followup" && Boolean(lead),
+      });
+      const interactionError = interaction
+        ? (await supabase.from("interactions").insert({ ...interaction, user_id: user.id })).error
+        : null;
 
       if (!taskResult.success || interactionError) {
         setRemoteTasks(previousTasks);
         setRemoteLeads(previousLeads);
+        setRemoteInteractions(previousInteractions);
         showToast("Erro ao reagendar tarefa");
         return;
       }
@@ -1281,7 +1292,7 @@ function Workspace({
         entity_id: task.id,
         action: "task.rescheduled",
         summary: `Tarefa reagendada: ${task.title}`,
-        metadata: { lead_id: lead.id, type: task.type, due_at: dueAt },
+        metadata: { lead_id: lead?.id ?? null, type: task.type, due_at: dueAt },
       });
     }
   }
@@ -1483,8 +1494,8 @@ function Workspace({
           <nav className="mt-4 grid grid-cols-4 gap-2 lg:grid-cols-1">
             {[
               ["dashboard", "Dashboard", BarChart3],
-              ["pipeline", "Pipeline", Sparkles],
-              ["tasks", "Agenda", CalendarClock],
+              ["pipeline", "CRM", Sparkles],
+              ["tasks", "Tarefas", CalendarClock],
               ["leads", "Leads", UserRound],
               ["conversations", "Conversas", MessageCircle],
               ["settings", "Configuracoes", Settings],
@@ -1668,6 +1679,7 @@ function Workspace({
                   <TasksView
                     leads={leads}
                     onCompleteTask={completeTask}
+                    onCreateTask={createTask}
                     onOpenLead={(lead) => setSelectedLeadId(lead.id)}
                     onRescheduleTask={rescheduleTask}
                     tasks={tasks}
@@ -1898,6 +1910,7 @@ function Dashboard({
     () =>
       tasks.filter((task) => {
         if (task.status !== "open") return false;
+        if (!task.lead_id) return false;
         const lead = leadById.get(task.lead_id);
         return Boolean(lead) && (ownerFilter === "all" || lead?.owner_name === ownerFilter);
       }),
@@ -1909,7 +1922,7 @@ function Dashboard({
         .filter(isTaskDueToday)
         .map((task) => ({
           task,
-          lead: leadById.get(task.lead_id) ?? null,
+          lead: task.lead_id ? leadById.get(task.lead_id) ?? null : null,
           dueAt: task.due_at,
           title: task.title,
         }))
@@ -2143,8 +2156,8 @@ function Dashboard({
         <section className="self-start rounded-lg border border-white/10 bg-white/[0.03] p-5">
           <div className="flex items-center justify-between gap-3">
             <div>
-              <h2 className="text-lg font-semibold">Agenda de hoje</h2>
-              <p className="mt-1 text-sm text-zinc-500">Atrasados primeiro, depois proximos contatos do dia.</p>
+              <h2 className="text-lg font-semibold">Tarefas de hoje</h2>
+              <p className="mt-1 text-sm text-zinc-500">Atrasadas primeiro, depois proximas tarefas comerciais do dia.</p>
             </div>
             <span className="rounded-full border border-white/10 px-2 py-1 text-xs text-zinc-400">
               {todayAgenda.length}
@@ -2173,7 +2186,7 @@ function Dashboard({
           </div>
           {todayAgenda.length > 6 && (
             <div className="mt-3 rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-xs text-zinc-500">
-              Mais {todayAgenda.length - 6} item(ns) na agenda. Use a rolagem interna para revisar sem perder o contexto do dashboard.
+              Mais {todayAgenda.length - 6} item(ns) em tarefas. Use a rolagem interna para revisar sem perder o contexto do dashboard.
             </div>
           )}
         </section>
@@ -2677,25 +2690,32 @@ function TasksView({
   leads,
   onOpenLead,
   onCompleteTask,
+  onCreateTask,
   onRescheduleTask,
 }: {
   tasks: Task[];
   leads: Lead[];
   onOpenLead: (lead: Lead) => void;
-  onCompleteTask: (task: Task, lead: Lead) => void;
-  onRescheduleTask: (task: Task, lead: Lead, dueAt: string) => void;
+  onCompleteTask: (task: Task, lead: Lead | null) => void;
+  onCreateTask: (lead: Lead | null, input: TaskInput) => void;
+  onRescheduleTask: (task: Task, lead: Lead | null, dueAt: string) => void;
 }) {
   const [scope, setScope] = useState<TaskScope>("open");
   const [owner, setOwner] = useState("all");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
+  const [taskLeadId, setTaskLeadId] = useState("");
+  const [taskType, setTaskType] = useState<Task["type"]>("other");
+  const [taskTitle, setTaskTitle] = useState("");
+  const [taskNotes, setTaskNotes] = useState("");
+  const [taskDueAt, setTaskDueAt] = useState(() => toDateTimeLocal(new Date().toISOString()));
   const owners = Array.from(
     new Set(leads.map((lead) => lead.owner_name?.trim()).filter((item): item is string => Boolean(item))),
   ).sort((a, b) => a.localeCompare(b));
+  const sortedLeads = [...leads].sort((a, b) => a.name.localeCompare(b.name));
   const taskRows = tasks
     .map((task) => ({ task, lead: leads.find((lead) => lead.id === task.lead_id) ?? null }))
-    .filter((item): item is { task: Task; lead: Lead } => Boolean(item.lead))
     .filter(({ task, lead }) => {
-      if (owner !== "all" && lead.owner_name !== owner) return false;
+      if (owner !== "all" && lead?.owner_name !== owner) return false;
       if (scope === "completed") return task.status === "completed";
       if (task.status !== "open") return false;
       if (scope === "overdue") return isTaskOverdue(task);
@@ -2729,6 +2749,26 @@ function TasksView({
     setSelectedIds(new Set());
   }
 
+  function submitTask(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const title = taskTitle.trim();
+    if (!title) return;
+
+    const lead = taskLeadId ? leads.find((item) => item.id === taskLeadId) ?? null : null;
+    onCreateTask(lead, {
+      lead_id: lead?.id ?? null,
+      type: taskType,
+      title,
+      notes: taskNotes.trim() || null,
+      due_at: fromDateTimeLocal(taskDueAt),
+    });
+    setTaskTitle("");
+    setTaskNotes("");
+    setTaskType("other");
+    setTaskLeadId("");
+    setTaskDueAt(toDateTimeLocal(new Date().toISOString()));
+  }
+
   return (
     <div className="space-y-5">
       <div className="grid gap-3 md:grid-cols-5">
@@ -2755,11 +2795,78 @@ function TasksView({
         ))}
       </div>
 
+      <form
+        className="rounded-lg border border-white/10 bg-white/[0.03] p-4"
+        onSubmit={submitTask}
+      >
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <h2 className="text-lg font-semibold">Nova tarefa</h2>
+            <p className="mt-1 text-sm text-zinc-500">Crie tarefas operacionais do dia ou vincule a um lead do CRM.</p>
+          </div>
+          <button className="flex h-10 items-center justify-center gap-2 rounded-lg bg-[#8B5CF6] px-4 text-sm font-medium transition hover:bg-[#7C3AED]">
+            <Plus className="h-4 w-4" />
+            Adicionar tarefa
+          </button>
+        </div>
+        <div className="mt-4 grid gap-3 lg:grid-cols-[1.1fr_0.8fr_0.8fr_0.8fr]">
+          <Input label="Titulo" onChange={setTaskTitle} required value={taskTitle} />
+          <label className="block text-sm text-zinc-300">
+            Tipo
+            <select
+              className="mt-2 h-11 w-full rounded-lg border border-white/10 bg-black/30 px-3 text-sm text-zinc-100 outline-none transition focus:border-[#8B5CF6]"
+              onChange={(event) => setTaskType(event.target.value as Task["type"])}
+              value={taskType}
+            >
+              <option value="other">Operacional</option>
+              <option value="followup">Follow-up</option>
+              <option value="whatsapp">WhatsApp</option>
+              <option value="call">Ligacao</option>
+              <option value="email">Email</option>
+              <option value="meeting">Reuniao</option>
+            </select>
+          </label>
+          <label className="block text-sm text-zinc-300">
+            Lead vinculado
+            <select
+              className="mt-2 h-11 w-full rounded-lg border border-white/10 bg-black/30 px-3 text-sm text-zinc-100 outline-none transition focus:border-[#8B5CF6]"
+              onChange={(event) => setTaskLeadId(event.target.value)}
+              value={taskLeadId}
+            >
+              <option value="">Sem lead</option>
+              {sortedLeads.map((lead) => (
+                <option key={lead.id} value={lead.id}>
+                  {lead.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="block text-sm text-zinc-300">
+            Quando
+            <input
+              className="mt-2 h-11 w-full rounded-lg border border-white/10 bg-black/30 px-3 text-sm text-zinc-100 outline-none transition focus:border-[#8B5CF6]"
+              onChange={(event) => setTaskDueAt(event.target.value)}
+              type="datetime-local"
+              value={taskDueAt}
+            />
+          </label>
+        </div>
+        <label className="mt-3 block text-sm text-zinc-300">
+          Observacao
+          <textarea
+            className="mt-2 min-h-20 w-full rounded-lg border border-white/10 bg-black/30 p-3 text-sm outline-none transition focus:border-[#8B5CF6]"
+            onChange={(event) => setTaskNotes(event.target.value)}
+            placeholder="Detalhe o que precisa ser feito, contexto ou criterio de conclusao"
+            value={taskNotes}
+          />
+        </label>
+      </form>
+
       <section className="rounded-lg border border-white/10 bg-white/[0.03] p-4">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div>
-            <h2 className="text-lg font-semibold">Controle de agenda</h2>
-            <p className="mt-1 text-sm text-zinc-500">Conclua, abra o lead ou reagende proximas acoes.</p>
+            <h2 className="text-lg font-semibold">Controle de tarefas</h2>
+            <p className="mt-1 text-sm text-zinc-500">Conclua tarefas operacionais, abra leads ou reagende proximas acoes.</p>
           </div>
           <div className="flex flex-col gap-2 sm:flex-row">
             <select
@@ -2806,26 +2913,32 @@ function TasksView({
                         </span>
                         <span className="font-medium text-zinc-100">{task.title}</span>
                       </div>
-                      <button
-                        className="mt-1 text-left text-sm text-zinc-500 transition hover:text-zinc-200"
-                        onClick={() => onOpenLead(lead)}
-                        type="button"
-                      >
-                        {lead.name} · {lead.company || "Sem empresa"}
-                      </button>
+                      {lead ? (
+                        <button
+                          className="mt-1 text-left text-sm text-zinc-500 transition hover:text-zinc-200"
+                          onClick={() => onOpenLead(lead)}
+                          type="button"
+                        >
+                          {lead.name} - {lead.company || "Sem empresa"}
+                        </button>
+                      ) : (
+                        <div className="mt-1 text-sm text-zinc-500">Tarefa operacional sem lead vinculado</div>
+                      )}
                     </div>
                     <div>
                       <div className={`text-sm ${due.tone}`}>{due.text}</div>
-                      <div className="mt-1 text-xs text-zinc-500">{lead.owner_name || "Sem responsavel"}</div>
+                      <div className="mt-1 text-xs text-zinc-500">{lead?.owner_name || "Sem responsavel"}</div>
                     </div>
                     <div className="flex flex-wrap gap-2 lg:justify-end">
-                      <button
-                        className="h-9 rounded-lg border border-white/10 px-3 text-xs text-zinc-300 transition hover:bg-white/[0.06]"
-                        onClick={() => onOpenLead(lead)}
-                        type="button"
-                      >
-                        Abrir
-                      </button>
+                      {lead && (
+                        <button
+                          className="h-9 rounded-lg border border-white/10 px-3 text-xs text-zinc-300 transition hover:bg-white/[0.06]"
+                          onClick={() => onOpenLead(lead)}
+                          type="button"
+                        >
+                          Abrir
+                        </button>
+                      )}
                       {task.status === "open" && (
                         <>
                           <button
@@ -3719,7 +3832,7 @@ function LeadCard({
         <div className="min-w-0 flex-1">
           <div className="truncate font-medium text-white">{lead.name}</div>
           <div className="mt-1 truncate text-xs text-zinc-500">
-            {lead.company || "Sem empresa"} / {lead.owner_name || "Sem responsavel"}
+            {lead.company || "Sem empresa"} / {lead?.owner_name || "Sem responsavel"}
           </div>
         </div>
       </div>
@@ -5358,7 +5471,7 @@ const migrationSqlByLabel: Record<string, string> = {
     "create table if not exists public.tasks (",
     "  id uuid primary key default gen_random_uuid(),",
     "  user_id uuid not null references auth.users(id) on delete cascade,",
-    "  lead_id uuid not null references public.leads(id) on delete cascade,",
+    "  lead_id uuid references public.leads(id) on delete cascade,",
     "  type text not null default 'followup',",
     "  title text not null,",
     "  notes text,",
@@ -5368,10 +5481,12 @@ const migrationSqlByLabel: Record<string, string> = {
     "  created_at timestamptz not null default now(),",
     "  updated_at timestamptz not null default now()",
     ");",
+    "alter table public.tasks alter column lead_id drop not null;",
     "alter table public.tasks drop constraint if exists tasks_type_check;",
     "alter table public.tasks add constraint tasks_type_check check (type in ('followup', 'call', 'email', 'whatsapp', 'meeting', 'other'));",
     "create index if not exists tasks_user_id_status_due_at_idx on public.tasks(user_id, status, due_at);",
     "create index if not exists tasks_user_id_lead_id_idx on public.tasks(user_id, lead_id);",
+    "create index if not exists tasks_user_id_due_at_idx on public.tasks(user_id, due_at);",
     "alter table public.tasks enable row level security;",
   ].join("\n"),
   "Trilha de auditoria": [
@@ -5494,8 +5609,8 @@ function SettingsView({
   );
   const environmentHost = typeof window === "undefined" ? "indefinido" : window.location.host;
   const rolePermissions: Record<UserRole, string[]> = {
-    admin: ["Pipeline", "Conversas", "Tarefas", "Templates", "Configuracoes", "Excluir lead", "Alterar funil", "Desconectar WhatsApp"],
-    seller: ["Pipeline", "Conversas", "Tarefas", "Templates"],
+    admin: ["CRM", "Conversas", "Tarefas", "Templates", "Configuracoes", "Excluir lead", "Alterar funil", "Desconectar WhatsApp"],
+    seller: ["CRM", "Conversas", "Tarefas", "Templates"],
     support: ["Conversas", "Tarefas", "Templates"],
     readonly: ["Leitura de dados"],
   };
@@ -5560,8 +5675,8 @@ function SettingsView({
         label: "Tabela de tarefas",
         status: tasksResult.error ? "missing" : "ok",
         detail: tasksResult.error
-          ? "Aplique supabase/tasks_migration.sql e tasks_meeting_type_migration.sql"
-          : "Tabela tasks disponivel para agenda profissional",
+          ? "Aplique supabase/tasks_migration.sql, tasks_meeting_type_migration.sql e tasks_operational_migration.sql"
+          : "Tabela tasks disponivel para tarefas comerciais e operacionais",
       },
       {
         label: "Trilha de auditoria",
@@ -5958,7 +6073,7 @@ function SettingsView({
           <div className="rounded-lg border border-white/10 bg-black/20 p-4">
             <div className="text-sm font-medium text-zinc-100">Permissoes por modulo</div>
             <div className="mt-3 flex flex-wrap gap-2">
-              {["Pipeline", "Conversas", "Tarefas", "Templates", "Configuracoes"].map((item) => (
+              {["CRM", "Conversas", "Tarefas", "Templates", "Configuracoes"].map((item) => (
                 <span className={`rounded-full border px-2.5 py-1 text-xs ${rolePermissions[role].includes(item) ? "border-[#25D366]/25 bg-[#25D366]/10 text-[#9AF0B8]" : "border-white/10 text-zinc-500"}`} key={item}>
                   {item}
                 </span>
@@ -5992,7 +6107,7 @@ function SettingsView({
         </div>
         <div className="mt-5 rounded-lg border border-white/10 bg-black/20 p-4">
           <div className="text-sm font-medium text-zinc-100">Funil e temperaturas</div>
-          <p className="mt-1 text-sm text-zinc-500">Etapas seguem configuraveis na tela Pipeline. Temperaturas atuais: frio, morno e quente.</p>
+          <p className="mt-1 text-sm text-zinc-500">Etapas seguem configuraveis na tela CRM. Temperaturas atuais: frio, morno e quente.</p>
         </div>
       </section>
       )}
@@ -6487,7 +6602,7 @@ function LeadDetails({
                   {temperatureLabel.text}
                 </span>
                 <span className="rounded-full border border-white/10 px-2 py-0.5 text-xs text-zinc-400">
-                  {lead.owner_name || "Sem responsavel"}
+                  {lead?.owner_name || "Sem responsavel"}
                 </span>
               </div>
               <div className="mt-2 truncate text-sm text-zinc-500">
@@ -7385,4 +7500,5 @@ function Modal({
     </div>
   );
 }
+
 

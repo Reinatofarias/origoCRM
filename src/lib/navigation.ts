@@ -25,8 +25,8 @@ export const pathViews: Record<string, View> = Object.fromEntries(
 
 export const viewTitles: Record<View, string> = {
   dashboard: "Dashboard",
-  pipeline: "Pipeline",
-  tasks: "Agenda",
+  pipeline: "CRM",
+  tasks: "Tarefas",
   leads: "Leads",
   templates: "Mensagens prontas",
   conversations: "Conversas",
@@ -36,7 +36,8 @@ export const viewTitles: Record<View, string> = {
 
 export function getViewSubtitle(view: View) {
   if (view === "conversations") return "Mensagens salvas pelo webhook da Evolution.";
-  if (view === "tasks") return "Tarefas comerciais, follow-ups e proximas acoes.";
+  if (view === "tasks") return "Tarefas operacionais, comerciais e proximas acoes.";
+  if (view === "pipeline") return "Funil comercial, leads e oportunidades em andamento.";
   if (view === "whatsapp") return "Conecte a instancia OrigoCRM pelo QR Code.";
   if (view === "settings") return "Status das conexoes e proximos ajustes do CRM.";
   return "Cadencia continua: abrir, enviar, proximo.";

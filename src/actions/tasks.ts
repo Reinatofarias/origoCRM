@@ -30,6 +30,8 @@ export async function createTask(input: TaskInput, options: { cancelOpenFollowup
   if ("error" in auth) return { success: false, error: auth.error } satisfies ActionResult;
 
   if (options.cancelOpenFollowups && input.type === "followup") {
+    if (!input.lead_id) return { success: false, error: "Lead obrigatorio para cancelar follow-ups" } satisfies ActionResult;
+
     const { error: cancelError } = await auth.supabase
       .from("tasks")
       .update({ status: "canceled" })
@@ -45,7 +47,7 @@ export async function createTask(input: TaskInput, options: { cancelOpenFollowup
     .from("tasks")
     .insert({
       ...(input.id ? { id: input.id } : {}),
-      lead_id: input.lead_id,
+      lead_id: input.lead_id ?? null,
       user_id: auth.user.id,
       type: input.type,
       title: input.title,
@@ -58,7 +60,7 @@ export async function createTask(input: TaskInput, options: { cancelOpenFollowup
 
   if (error) return { success: false, error: error.message } satisfies ActionResult;
 
-  if (input.type === "followup") {
+  if (input.type === "followup" && input.lead_id) {
     const { data: lead } = await auth.supabase
       .from("leads")
       .select("next_followup_at")
@@ -83,21 +85,25 @@ export async function createTask(input: TaskInput, options: { cancelOpenFollowup
   return { success: true, data } satisfies ActionResult;
 }
 
-export async function completeTask(taskId: string, input: { leadId: string; clearLeadFollowup?: boolean }) {
+export async function completeTask(taskId: string, input: { leadId?: string | null; clearLeadFollowup?: boolean }) {
   const auth = await getAuthenticatedSupabase();
   if ("error" in auth) return { success: false, error: auth.error } satisfies ActionResult;
 
   const now = new Date().toISOString();
-  const { error } = await auth.supabase
+  const query = auth.supabase
     .from("tasks")
     .update({ status: "completed", completed_at: now })
     .eq("id", taskId)
-    .eq("lead_id", input.leadId)
     .eq("user_id", auth.user.id);
+
+  if (input.leadId) query.eq("lead_id", input.leadId);
+  else query.is("lead_id", null);
+
+  const { error } = await query;
 
   if (error) return { success: false, error: error.message } satisfies ActionResult;
 
-  if (input.clearLeadFollowup) {
+  if (input.clearLeadFollowup && input.leadId) {
     await auth.supabase
       .from("leads")
       .update({ next_followup_at: null })
@@ -109,20 +115,24 @@ export async function completeTask(taskId: string, input: { leadId: string; clea
   return { success: true } satisfies ActionResult;
 }
 
-export async function rescheduleTask(taskId: string, input: { leadId: string; dueAt: string; updateLeadFollowup?: boolean }) {
+export async function rescheduleTask(taskId: string, input: { leadId?: string | null; dueAt: string; updateLeadFollowup?: boolean }) {
   const auth = await getAuthenticatedSupabase();
   if ("error" in auth) return { success: false, error: auth.error } satisfies ActionResult;
 
-  const { error } = await auth.supabase
+  const query = auth.supabase
     .from("tasks")
     .update({ due_at: input.dueAt, status: "open", completed_at: null })
     .eq("id", taskId)
-    .eq("lead_id", input.leadId)
     .eq("user_id", auth.user.id);
+
+  if (input.leadId) query.eq("lead_id", input.leadId);
+  else query.is("lead_id", null);
+
+  const { error } = await query;
 
   if (error) return { success: false, error: error.message } satisfies ActionResult;
 
-  if (input.updateLeadFollowup) {
+  if (input.updateLeadFollowup && input.leadId) {
     await auth.supabase
       .from("leads")
       .update({ next_followup_at: input.dueAt })

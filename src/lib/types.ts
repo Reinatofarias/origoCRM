@@ -42,7 +42,7 @@ export type Interaction = {
 export type Task = {
   id: string;
   user_id?: string | null;
-  lead_id: string;
+  lead_id?: string | null;
   type: "followup" | "call" | "email" | "whatsapp" | "meeting" | "other";
   title: string;
   notes?: string | null;
@@ -74,7 +74,7 @@ export type AuditLogInput = {
 
 export type TaskInput = {
   id?: string;
-  lead_id: string;
+  lead_id?: string | null;
   type: Task["type"];
   title: string;
   notes?: string | null;
