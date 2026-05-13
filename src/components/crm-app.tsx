@@ -506,8 +506,9 @@ function Workspace({
   const router = useRouter();
   const pathname = usePathname();
   const routedView = pathViews[pathname] ?? initialView;
-  const view = routedView === "whatsapp" ? "settings" : routedView;
-  const settingsInitialTab = routedView === "whatsapp" ? "whatsapp" : initialSettingsTab;
+  const view = routedView === "whatsapp" || routedView === "templates" ? "settings" : routedView;
+  const settingsInitialTab =
+    routedView === "whatsapp" ? "whatsapp" : routedView === "templates" ? "templates" : initialSettingsTab;
   const savedFilters = useMemo(() => readSavedPipelineFilters(), []);
   const initialFilterPresets = useMemo(() => readSavedPipelineFilterPresets(), []);
   const initialPipelineStages = useMemo(() => readPipelineStages(), []);
@@ -1478,7 +1479,6 @@ function Workspace({
               ["pipeline", "Pipeline", Sparkles],
               ["tasks", "Agenda", CalendarClock],
               ["leads", "Leads", UserRound],
-              ["templates", "Mensagens prontas", MessageCircle],
               ["conversations", "Conversas", MessageCircle],
               ["settings", "Configuracoes", Settings],
             ].map(([key, label, Icon]) => (
@@ -1677,13 +1677,6 @@ function Workspace({
                     onOpen={(lead) => setSelectedLeadId(lead.id)}
                   />
                 )}
-                {view === "templates" && (
-                  <Templates
-                    templates={templates}
-                    onAddTemplate={addTemplate}
-                    onDeleteTemplate={(template) => setTemplatePendingDelete(template)}
-                  />
-                )}
                 {view === "conversations" && (
                   <Conversations
                     columns={visiblePipelineStages}
@@ -1709,6 +1702,8 @@ function Workspace({
                     auditLogs={auditLogs}
                     initialTab={settingsInitialTab}
                     leads={leads}
+                    onAddTemplate={addTemplate}
+                    onDeleteTemplate={(template) => setTemplatePendingDelete(template)}
                     tasks={tasks}
                     templates={templates}
                     user={user}
@@ -5039,7 +5034,7 @@ function migrationChecksInitialState(configured: boolean): MigrationCheck[] {
   ];
 }
 
-type SettingsTab = "system" | "whatsapp" | "team" | "crm" | "audit" | "logs" | "data";
+type SettingsTab = "system" | "whatsapp" | "templates" | "team" | "crm" | "audit" | "logs" | "data";
 type UserRole = "admin" | "seller" | "support" | "readonly";
 type CrmPreferences = {
   companyName: string;
@@ -5054,6 +5049,7 @@ type CrmPreferences = {
 const settingsTabs: Array<{ id: SettingsTab; label: string }> = [
   { id: "system", label: "Sistema" },
   { id: "whatsapp", label: "WhatsApp" },
+  { id: "templates", label: "Mensagens" },
   { id: "team", label: "Equipe" },
   { id: "crm", label: "CRM" },
   { id: "audit", label: "Auditoria" },
@@ -5149,6 +5145,8 @@ function SettingsView({
   archivedLeads,
   initialTab,
   leads,
+  onAddTemplate,
+  onDeleteTemplate,
   tasks,
   templates,
   user,
@@ -5160,6 +5158,8 @@ function SettingsView({
   archivedLeads: Lead[];
   initialTab?: SettingsTab;
   leads: Lead[];
+  onAddTemplate: (title: string, body: string) => void;
+  onDeleteTemplate: (template: MessageTemplate) => void;
   tasks: Task[];
   templates: MessageTemplate[];
   user: AuthUser;
@@ -5639,6 +5639,25 @@ function SettingsView({
             </div>
           </div>
         </div>
+      </section>
+      )}
+
+      {activeTab === "templates" && (
+      <section className="space-y-4">
+        <div className="rounded-xl border border-white/10 bg-white/[0.035] p-5">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <h2 className="text-lg font-semibold">Mensagens prontas</h2>
+              <p className="mt-1 text-sm text-zinc-500">
+                Configure os textos usados no Lead 360, follow-ups e conversas do WhatsApp.
+              </p>
+            </div>
+            <span className="rounded-full border border-white/10 px-3 py-1 text-xs text-zinc-400">
+              {templates.length} cadastradas
+            </span>
+          </div>
+        </div>
+        <Templates templates={templates} onAddTemplate={onAddTemplate} onDeleteTemplate={onDeleteTemplate} />
       </section>
       )}
 
