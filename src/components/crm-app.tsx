@@ -91,6 +91,7 @@ import type {
   WhatsAppMessage,
 } from "@/lib/types";
 import { getViewSubtitle, pathViews, type View, viewPaths, viewTitles } from "@/lib/navigation";
+import { ProspectingModal } from "@/modules/prospecting";
 import {
   newId,
   normalizePhone,
@@ -530,6 +531,7 @@ function Workspace({
   const [dateFilter, setDateFilter] = useState<"all" | "today" | "overdue">(savedFilters.dateFilter);
   const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null);
   const [leadFormOpen, setLeadFormOpen] = useState(false);
+  const [prospectingOpen, setProspectingOpen] = useState(false);
   const [editingLead, setEditingLead] = useState<Lead | null>(null);
   const [leadPendingDelete, setLeadPendingDelete] = useState<Lead | null>(null);
   const [templatePendingDelete, setTemplatePendingDelete] = useState<MessageTemplate | null>(null);
@@ -1619,6 +1621,14 @@ function Workspace({
             ))}
           </nav>
           <button
+            className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg border border-[#8B5CF6]/35 bg-[#8B5CF6]/10 px-3 py-2 text-sm text-[#DDD6FE] shadow-lg shadow-[#8B5CF6]/10 transition hover:bg-[#8B5CF6]/20"
+            onClick={() => setProspectingOpen(true)}
+            type="button"
+          >
+            <Sparkles className="h-4 w-4" />
+            <span className="hidden sm:inline lg:inline">Prospecção</span>
+          </button>
+          <button
             className="mt-4 hidden w-full items-center justify-center gap-2 rounded-lg border border-white/10 px-3 py-2 text-sm text-zinc-400 transition hover:bg-white/[0.06] hover:text-white lg:flex"
             onClick={logout}
           >
@@ -1904,6 +1914,15 @@ function Workspace({
           onRemoveStage={removePipelineStage}
           onRenameStage={renamePipelineStage}
           onUpdateStageKind={updatePipelineStageKind}
+        />
+      )}
+      {prospectingOpen && (
+        <ProspectingModal
+          onAddLead={async (input) => {
+            await saveLead(input);
+            showToast("Lead adicionado ao CRM");
+          }}
+          onClose={() => setProspectingOpen(false)}
         />
       )}
     </main>
