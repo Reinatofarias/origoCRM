@@ -58,3 +58,11 @@ export interface ProspectingLeadPayload {
   input: LeadInput;
   sourceBusiness?: ProspectBusiness;
 }
+
+export type ProspectingDispatchStatus = "new" | "queued" | "sending" | "sent" | "failed" | "ignored" | "lead_added";
+
+export type ProspectingDispatchState = {
+  status: ProspectingDispatchStatus;
+  error?: string;
+  sentAt?: string;
+};

@@ -3,35 +3,67 @@
 import { BarChart3, Database, Download, Flame, Globe2, X } from "lucide-react";
 import type { ComponentType } from "react";
 
-import type { ProspectBusiness, ProspectingSearchInput } from "../../../types";
-import { BusinessCard, BusinessDetails, ProspectingSearchForm, ProspectingSkeleton } from "../components";
+import type { MessageTemplate } from "@/lib/types";
+
+import type { ProspectBusiness, ProspectingDispatchState, ProspectingSearchInput } from "../../../types";
+import { BusinessDetails, BusinessTable, CampaignPanel, ProspectingSearchForm, ProspectingSkeleton } from "../components";
 
 export function ProspectingDesktop({
   addedLeadIds,
   approach,
   businesses,
+  dispatchStates,
+  existingLeadPhones,
+  intervalSeconds,
   isLoading,
+  isSendingCampaign,
   metrics,
   onAddBusinessLead,
+  onClearSelection,
   onClose,
-  onGenerateApproach,
+  onIgnoreSelected,
   onExportBusinesses,
+  onIntervalChange,
   onSearch,
+  onSelectPhoneProspects,
   onSelectBusiness,
+  onStartCampaign,
+  onTemplateChange,
+  onToggleBusiness,
+  previewMessage,
+  selectedBusinessIds,
+  selectedTemplateId,
   selectedBusiness,
+  sendableCount,
+  templates,
 }: {
   addedLeadIds: Set<string>;
   approach: string;
   businesses: ProspectBusiness[];
+  dispatchStates: Record<string, ProspectingDispatchState>;
+  existingLeadPhones: Set<string>;
+  intervalSeconds: number;
   isLoading: boolean;
+  isSendingCampaign: boolean;
   metrics: { total: number; hot: number; withoutSite: number; weakProfiles: number };
   onAddBusinessLead: (business: ProspectBusiness) => void;
+  onClearSelection: () => void;
   onClose: () => void;
-  onGenerateApproach: (business: ProspectBusiness) => void;
+  onIgnoreSelected: () => void;
   onExportBusinesses: () => void;
+  onIntervalChange: (value: number) => void;
   onSearch: (input: ProspectingSearchInput) => void;
+  onSelectPhoneProspects: () => void;
   onSelectBusiness: (business: ProspectBusiness) => void;
+  onStartCampaign: () => void;
+  onTemplateChange: (templateId: string) => void;
+  onToggleBusiness: (business: ProspectBusiness) => void;
+  previewMessage: string;
+  selectedBusinessIds: Set<string>;
+  selectedTemplateId: string;
   selectedBusiness: ProspectBusiness | null;
+  sendableCount: number;
+  templates: MessageTemplate[];
 }) {
   return (
     <div className="hidden h-full min-h-0 grid-cols-[minmax(0,1fr)_25rem] gap-5 p-5 xl:grid">
@@ -43,9 +75,9 @@ export function ProspectingDesktop({
                 <Flame className="h-4 w-4" />
                 Prospecção Inteligente
               </div>
-              <h2 className="mt-2 text-3xl font-semibold text-white">Encontre empresas e transforme em leads</h2>
+              <h2 className="mt-2 text-3xl font-semibold text-white">Encontre empresas e inicie conversas</h2>
               <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-400">
-                Prospecção via SerpAPI Google Maps por tipo de empresa/profissional e estado. Retorno focado em nome, UF e telefone.
+                Prospecção via SerpAPI Google Maps com seleção, mensagem pronta e campanha WhatsApp sem poluir o CRM.
               </p>
             </div>
             <div className="flex gap-2">
@@ -84,23 +116,37 @@ export function ProspectingDesktop({
               </div>
             )}
             {!isLoading && businesses.length > 0 && (
-              <div className="grid gap-4 2xl:grid-cols-2">
-                {businesses.map((business) => (
-                  <BusinessCard
-                    business={business}
-                    isAdded={addedLeadIds.has(business.id)}
-                    key={business.id}
-                    onAddLead={() => onAddBusinessLead(business)}
-                    onGenerateApproach={() => onGenerateApproach(business)}
-                    onViewDetails={() => onSelectBusiness(business)}
-                  />
-                ))}
-              </div>
+              <BusinessTable
+                addedLeadIds={addedLeadIds}
+                businesses={businesses}
+                dispatchStates={dispatchStates}
+                existingLeadPhones={existingLeadPhones}
+                onAddLead={onAddBusinessLead}
+                onSelectBusiness={onSelectBusiness}
+                onToggleBusiness={onToggleBusiness}
+                selectedIds={selectedBusinessIds}
+              />
             )}
           </div>
         </div>
       </section>
       <div className="min-h-0 space-y-5 overflow-y-auto">
+        <CampaignPanel
+          dispatchStates={dispatchStates}
+          intervalSeconds={intervalSeconds}
+          isRunning={isSendingCampaign}
+          onClearSelection={onClearSelection}
+          onIgnoreSelected={onIgnoreSelected}
+          onIntervalChange={onIntervalChange}
+          onSelectPhoneProspects={onSelectPhoneProspects}
+          onStartCampaign={onStartCampaign}
+          onTemplateChange={onTemplateChange}
+          previewMessage={previewMessage}
+          selectedCount={selectedBusinessIds.size}
+          selectedTemplateId={selectedTemplateId}
+          sendableCount={sendableCount}
+          templates={templates}
+        />
         <BusinessDetails approach={approach} business={selectedBusiness} />
       </div>
     </div>

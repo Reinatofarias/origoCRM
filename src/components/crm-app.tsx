@@ -559,6 +559,10 @@ function Workspace({
   const whatsappLogs = remoteWhatsAppLogs;
   const auditLogs = remoteAuditLogs;
   const priorityLeads = useMemo(() => getPriorityLeads(leads), [leads]);
+  const existingLeadPhones = useMemo(
+    () => new Set([...leads, ...archivedLeads].map((lead) => normalizePhone(lead.phone)).filter(Boolean)),
+    [archivedLeads, leads],
+  );
 
   useEffect(() => {
     async function loadRemoteData() {
@@ -1918,11 +1922,20 @@ function Workspace({
       )}
       {prospectingOpen && (
         <ProspectingModal
+          existingLeadPhones={existingLeadPhones}
           onAddLead={async (input) => {
             await saveLead(input);
             showToast("Lead adicionado ao CRM");
           }}
           onClose={() => setProspectingOpen(false)}
+          onSendProspectingMessage={async (phoneNumber, message) => {
+            const result = await sendWhatsAppConversationMessage(phoneNumber, message, null);
+            if (result.message) {
+              setRemoteWhatsAppMessages((items) => upsertWhatsAppMessage(items, result.message as WhatsAppMessage));
+            }
+            return { success: result.success, error: result.error };
+          }}
+          templates={templates}
         />
       )}
     </main>
@@ -5815,6 +5828,14 @@ function applyMessageRealtimeEvent(current: WhatsAppMessage[], payload: {
   }
 
   return current;
+}
+
+function upsertWhatsAppMessage(current: WhatsAppMessage[], next: WhatsAppMessage) {
+  const exists = current.some((message) => message.id === next.id || message.message_id === next.message_id);
+  return (exists
+    ? current.map((message) => (message.id === next.id || message.message_id === next.message_id ? next : message))
+    : [...current, next]
+  ).sort(sortWhatsAppMessages);
 }
 
 function applyConversationRealtimeEvent(current: WhatsAppConversation[], payload: {
