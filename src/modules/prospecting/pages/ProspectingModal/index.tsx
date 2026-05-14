@@ -60,21 +60,6 @@ function ProspectingModalContent({
     });
   }
 
-  async function lookupCnpj(cnpj: string) {
-    const company = await prospecting.getCompanyByCnpj.mutateAsync({ cnpj });
-    const enriched = await prospecting.enrichCompany.mutateAsync({ company });
-    if ("legalName" in enriched) prospecting.setSelectedCompany(enriched);
-    else prospecting.setSelectedCompany(company);
-  }
-
-  function lookupCnae(input: { cnae: string; state: string }) {
-    prospecting.searchCompaniesByCnae.mutate(input, {
-      onSuccess: (result) => {
-        prospecting.setSelectedBusiness(result.businesses[0] ?? null);
-      },
-    });
-  }
-
   async function addBusinessLead(business: ProspectBusiness) {
     await onAddLead({
       name: business.name,
@@ -97,7 +82,7 @@ function ProspectingModalContent({
   }
 
   function exportBusinessesCsv() {
-    const businessRows = prospecting.businesses.map((business) => ({
+    const rows = prospecting.businesses.map((business) => ({
       nome: business.name,
       estado: business.state ?? "",
       telefone: business.phone ?? "",
@@ -106,18 +91,6 @@ function ProspectingModalContent({
       website: business.website ?? "",
       google_maps: business.googleMapsUrl ?? "",
     }));
-    const companyRow = prospecting.selectedCompany
-      ? [{
-          nome: prospecting.selectedCompany.tradeName || prospecting.selectedCompany.legalName,
-          estado: extractStateFromAddress(prospecting.selectedCompany.address),
-          telefone: prospecting.selectedCompany.phones.join(" | "),
-          cidade: "",
-          categoria: prospecting.selectedCompany.cnae,
-          website: "",
-          google_maps: "",
-        }]
-      : [];
-    const rows = [...businessRows, ...companyRow];
 
     downloadProspectingCsv("origocrm-prospeccao.csv", rows);
   }
@@ -130,15 +103,12 @@ function ProspectingModalContent({
           addedLeadIds={prospecting.addedLeadIds}
           approach={prospecting.generatedApproach}
           businesses={prospecting.businesses}
-          company={prospecting.selectedCompany}
           isLoading={prospecting.isLoading}
           metrics={prospecting.metrics}
           onAddBusinessLead={(business) => void addBusinessLead(business)}
           onClose={onClose}
           onGenerateApproach={generateApproach}
           onExportBusinesses={exportBusinessesCsv}
-          onLookupCnpj={(cnpj) => void lookupCnpj(cnpj)}
-          onLookupCnae={lookupCnae}
           onSearch={search}
           onSelectBusiness={prospecting.setSelectedBusiness}
           selectedBusiness={prospecting.selectedBusiness}
@@ -147,15 +117,12 @@ function ProspectingModalContent({
           addedLeadIds={prospecting.addedLeadIds}
           approach={prospecting.generatedApproach}
           businesses={prospecting.businesses}
-          company={prospecting.selectedCompany}
           isLoading={prospecting.isLoading}
           metrics={prospecting.metrics}
           onAddBusinessLead={(business) => void addBusinessLead(business)}
           onClose={onClose}
           onGenerateApproach={generateApproach}
           onExportBusinesses={exportBusinessesCsv}
-          onLookupCnpj={(cnpj) => void lookupCnpj(cnpj)}
-          onLookupCnae={lookupCnae}
           onSearch={search}
           onSelectBusiness={prospecting.setSelectedBusiness}
           selectedBusiness={prospecting.selectedBusiness}
@@ -181,11 +148,6 @@ function downloadProspectingCsv(filename: string, rows: Record<string, string>[]
   link.download = filename;
   link.click();
   URL.revokeObjectURL(url);
-}
-
-function extractStateFromAddress(address: string) {
-  const match = address.match(/\b(AC|AL|AP|AM|BA|CE|DF|ES|GO|MA|MT|MS|MG|PA|PB|PR|PE|PI|RJ|RN|RS|RO|RR|SC|SP|SE|TO)\b/);
-  return match?.[1] ?? "";
 }
 
 export default ProspectingModal;

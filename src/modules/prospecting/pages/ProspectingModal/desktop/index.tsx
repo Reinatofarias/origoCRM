@@ -3,22 +3,19 @@
 import { BarChart3, Database, Download, Flame, Globe2, X } from "lucide-react";
 import type { ComponentType } from "react";
 
-import type { CompanyByCnpj, ProspectBusiness, ProspectingSearchInput } from "../../../types";
-import { BusinessCard, BusinessDetails, CnpjLookupCard, ProspectingSearchForm, ProspectingSkeleton } from "../components";
+import type { ProspectBusiness, ProspectingSearchInput } from "../../../types";
+import { BusinessCard, BusinessDetails, ProspectingSearchForm, ProspectingSkeleton } from "../components";
 
 export function ProspectingDesktop({
   addedLeadIds,
   approach,
   businesses,
-  company,
   isLoading,
   metrics,
   onAddBusinessLead,
   onClose,
   onGenerateApproach,
   onExportBusinesses,
-  onLookupCnpj,
-  onLookupCnae,
   onSearch,
   onSelectBusiness,
   selectedBusiness,
@@ -26,15 +23,12 @@ export function ProspectingDesktop({
   addedLeadIds: Set<string>;
   approach: string;
   businesses: ProspectBusiness[];
-  company: CompanyByCnpj | null;
   isLoading: boolean;
   metrics: { total: number; hot: number; withoutSite: number; weakProfiles: number };
   onAddBusinessLead: (business: ProspectBusiness) => void;
   onClose: () => void;
   onGenerateApproach: (business: ProspectBusiness) => void;
   onExportBusinesses: () => void;
-  onLookupCnpj: (cnpj: string) => void;
-  onLookupCnae: (input: { cnae: string; state: string }) => void;
   onSearch: (input: ProspectingSearchInput) => void;
   onSelectBusiness: (business: ProspectBusiness) => void;
   selectedBusiness: ProspectBusiness | null;
@@ -57,7 +51,7 @@ export function ProspectingDesktop({
             <div className="flex gap-2">
               <button
                 className="flex h-10 items-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-3 text-xs text-zinc-300 transition hover:bg-white/[0.08] hover:text-white disabled:opacity-50"
-                disabled={businesses.length === 0 && !company}
+                disabled={businesses.length === 0}
                 onClick={onExportBusinesses}
                 type="button"
               >
@@ -108,7 +102,6 @@ export function ProspectingDesktop({
       </section>
       <div className="min-h-0 space-y-5 overflow-y-auto">
         <BusinessDetails approach={approach} business={selectedBusiness} />
-        <CnpjLookupCard company={company} isLoading={isLoading} onLookup={onLookupCnpj} onLookupCnae={onLookupCnae} />
       </div>
     </div>
   );

@@ -2,22 +2,19 @@
 
 import { Download, Flame, X } from "lucide-react";
 
-import type { CompanyByCnpj, ProspectBusiness, ProspectingSearchInput } from "../../../types";
-import { BusinessCard, BusinessDetails, CnpjLookupCard, ProspectingSearchForm, ProspectingSkeleton } from "../components";
+import type { ProspectBusiness, ProspectingSearchInput } from "../../../types";
+import { BusinessCard, BusinessDetails, ProspectingSearchForm, ProspectingSkeleton } from "../components";
 
 export function ProspectingMobile({
   addedLeadIds,
   approach,
   businesses,
-  company,
   isLoading,
   metrics,
   onAddBusinessLead,
   onClose,
   onGenerateApproach,
   onExportBusinesses,
-  onLookupCnpj,
-  onLookupCnae,
   onSearch,
   onSelectBusiness,
   selectedBusiness,
@@ -25,15 +22,12 @@ export function ProspectingMobile({
   addedLeadIds: Set<string>;
   approach: string;
   businesses: ProspectBusiness[];
-  company: CompanyByCnpj | null;
   isLoading: boolean;
   metrics: { total: number; hot: number; withoutSite: number; weakProfiles: number };
   onAddBusinessLead: (business: ProspectBusiness) => void;
   onClose: () => void;
   onGenerateApproach: (business: ProspectBusiness) => void;
   onExportBusinesses: () => void;
-  onLookupCnpj: (cnpj: string) => void;
-  onLookupCnae: (input: { cnae: string; state: string }) => void;
   onSearch: (input: ProspectingSearchInput) => void;
   onSelectBusiness: (business: ProspectBusiness) => void;
   selectedBusiness: ProspectBusiness | null;
@@ -48,12 +42,12 @@ export function ProspectingMobile({
               Prospecção Inteligente
             </div>
             <h2 className="mt-2 text-2xl font-semibold text-white">Buscar empresas</h2>
-            <p className="mt-2 text-sm leading-6 text-zinc-400">Google Maps, CNPJ e qualificação comercial em uma experiência única.</p>
+            <p className="mt-2 text-sm leading-6 text-zinc-400">Google Maps e qualificação comercial em uma experiência única.</p>
           </div>
           <div className="flex gap-2">
             <button
               className="rounded-xl border border-white/10 bg-white/[0.04] p-2 text-zinc-400 disabled:opacity-50"
-              disabled={businesses.length === 0 && !company}
+              disabled={businesses.length === 0}
               onClick={onExportBusinesses}
               type="button"
             >
@@ -89,7 +83,6 @@ export function ProspectingMobile({
           />
         ))}
         <BusinessDetails approach={approach} business={selectedBusiness} />
-        <CnpjLookupCard company={company} isLoading={isLoading} onLookup={onLookupCnpj} onLookupCnae={onLookupCnae} />
       </div>
     </div>
   );

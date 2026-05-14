@@ -1,6 +1,6 @@
 import type { LeadInput } from "@/lib/types";
 
-export type ProspectingProvider = "outscraper" | "apify" | "google_places" | "cnpj_ws";
+export type ProspectingProvider = "outscraper" | "apify" | "google_places";
 
 export type ProspectingStatus = "operational" | "limited" | "weak_profile" | "closed";
 
@@ -48,48 +48,8 @@ export interface ProspectingSearchResult {
   businesses: ProspectBusiness[];
 }
 
-export interface CompanyPartner {
-  name: string;
-  role: string;
-  since?: string;
-}
-
-export interface CompanyByCnpj {
-  cnpj: string;
-  legalName: string;
-  tradeName: string;
-  registrationStatus: string;
-  cnae: string;
-  openedAt: string;
-  shareCapital: string;
-  partners: CompanyPartner[];
-  address: string;
-  phones: string[];
-  emails: string[];
-  leadScore: number;
-  signals: ProspectBusinessSignal[];
-}
-
-export interface CnpjLookupInput {
-  cnpj: string;
-}
-
-export interface CnaeLookupInput {
-  cnae: string;
-  state: string;
-  limit?: number;
-}
-
-export interface CnaeCompanySearchResult {
-  query: string;
-  provider: "cnpj_ws";
-  hasNextPage: boolean;
-  businesses: ProspectBusiness[];
-}
-
 export interface EnrichedCompany {
   business: ProspectBusiness;
-  cnpj?: CompanyByCnpj;
   recommendedLead: LeadInput;
   approach: string;
 }
@@ -97,5 +57,4 @@ export interface EnrichedCompany {
 export interface ProspectingLeadPayload {
   input: LeadInput;
   sourceBusiness?: ProspectBusiness;
-  cnpj?: CompanyByCnpj;
 }
