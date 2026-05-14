@@ -23,6 +23,6 @@ function normalizeProspectBusiness(business: ProspectBusiness): ProspectBusiness
   return {
     ...business,
     signals: business.signals ?? [],
-    sourceProvider: business.sourceProvider ?? "outscraper",
+    sourceProvider: business.sourceProvider ?? "serpapi",
   };
 }

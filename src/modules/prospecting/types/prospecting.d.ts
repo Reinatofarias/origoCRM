@@ -1,6 +1,6 @@
 import type { LeadInput } from "@/lib/types";
 
-export type ProspectingProvider = "outscraper" | "apify" | "google_places";
+export type ProspectingProvider = "serpapi" | "outscraper" | "apify" | "google_places";
 
 export type ProspectingStatus = "operational" | "limited" | "weak_profile" | "closed";
 

@@ -45,7 +45,7 @@ export function ProspectingDesktop({
               </div>
               <h2 className="mt-2 text-3xl font-semibold text-white">Encontre empresas e transforme em leads</h2>
               <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-400">
-                Prospecção por tipo de empresa/profissional e estado. Retorno focado em nome, UF e telefone para ação comercial.
+                Prospecção via SerpAPI Google Maps por tipo de empresa/profissional e estado. Retorno focado em nome, UF e telefone.
               </p>
             </div>
             <div className="flex gap-2">
@@ -80,7 +80,7 @@ export function ProspectingDesktop({
             {isLoading && <ProspectingSkeleton />}
             {!isLoading && businesses.length === 0 && (
               <div className="flex h-full min-h-80 items-center justify-center rounded-2xl border border-dashed border-white/10 bg-white/[0.03] text-sm text-zinc-500">
-                Configure OUTSCRAPER_API_KEY na Vercel e busque por tipo de empresa/profissional e estado.
+                Configure SERPAPI_API_KEY na Vercel e busque por tipo de empresa/profissional e estado.
               </div>
             )}
             {!isLoading && businesses.length > 0 && (

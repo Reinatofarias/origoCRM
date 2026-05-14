@@ -4,29 +4,32 @@ import type { ProspectBusiness, ProspectBusinessSignal, ProspectingSearchInput }
 
 export const dynamic = "force-dynamic";
 
-type OutscraperPlace = {
-  name?: string;
-  name_for_emails?: string;
-  category?: string;
+type SerpApiLocalResult = {
+  position?: number;
+  title?: string;
+  place_id?: string;
+  data_id?: string;
+  data_cid?: string;
   type?: string;
-  phone?: string;
-  phone_1?: string;
-  site?: string;
-  website?: string;
+  types?: string[];
   address?: string;
-  full_address?: string;
-  city?: string;
-  state?: string;
+  phone?: string;
+  website?: string;
+  links?: {
+    website?: string;
+    directions?: string;
+    place?: string;
+  };
   rating?: number | string;
   reviews?: number | string;
-  reviews_count?: number | string;
-  business_status?: string;
-  photo?: string;
-  logo?: string;
-  location_link?: string;
-  google_id?: string;
-  place_id?: string;
-  cid?: string;
+  reviews_original?: string;
+  open_state?: string;
+  hours?: string;
+  thumbnail?: string;
+  gps_coordinates?: {
+    latitude?: number;
+    longitude?: number;
+  };
 };
 
 export async function POST(request: NextRequest) {
@@ -39,15 +42,16 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Informe tipo de empresa/profissional e estado" }, { status: 400 });
   }
 
-  const apiKey = process.env.OUTSCRAPER_API_KEY;
-  const endpoint = process.env.OUTSCRAPER_GOOGLE_MAPS_ENDPOINT ?? "https://api.app.outscraper.com/maps/search-v3";
+  const apiKey = process.env.SERPAPI_API_KEY;
+  const endpoint = process.env.SERPAPI_SEARCH_ENDPOINT ?? "https://serpapi.com/search.json";
+  const query = buildSearchQuery(niche, state, city);
 
   if (!apiKey) {
     return NextResponse.json(
       {
-        error: "OUTSCRAPER_API_KEY nao configurada na Vercel",
-        query: buildSearchQuery(niche, state, city),
-        provider: "outscraper",
+        error: "SERPAPI_API_KEY nao configurada na Vercel",
+        query,
+        provider: "serpapi",
         page: body.page ?? 1,
         hasNextPage: false,
         businesses: [],
@@ -56,154 +60,153 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const limit = Math.min(Math.max(Number(body.limit ?? 50), 1), 100);
-  const query = buildSearchQuery(niche, state, city);
-  const response = await fetch(endpoint, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      "x-api-key": apiKey,
-    },
-    body: JSON.stringify({
-      query: [query],
-      limit,
-      async: false,
-      language: "pt-BR",
-      region: "BR",
-      fields: [
-        "name",
-        "category",
-        "type",
-        "phone",
-        "phone_1",
-        "site",
-        "website",
-        "full_address",
-        "address",
-        "city",
-        "state",
-        "rating",
-        "reviews",
-        "business_status",
-        "photo",
-        "logo",
-        "location_link",
-        "google_id",
-        "place_id",
-        "cid",
-      ].join(","),
-    }),
-    cache: "no-store",
-  });
+  const limit = Math.min(Math.max(Number(body.limit ?? 20), 1), 20);
+  const url = new URL(endpoint);
+  url.searchParams.set("engine", "google_maps");
+  url.searchParams.set("type", "search");
+  url.searchParams.set("q", query);
+  url.searchParams.set("hl", "pt");
+  url.searchParams.set("gl", "br");
+  url.searchParams.set("google_domain", "google.com.br");
+  url.searchParams.set("api_key", apiKey);
 
+  const response = await fetch(url, { cache: "no-store" });
   const payload = await response.json().catch(() => null);
 
   if (!response.ok) {
     return NextResponse.json(
-      { error: extractOutscraperError(payload) ?? "Falha ao consultar Outscraper" },
+      { error: extractSerpApiError(payload) ?? "Falha ao consultar SerpAPI" },
       { status: response.status },
     );
   }
 
-  const places = extractPlaces(payload);
+  const apiError = extractSerpApiError(payload);
+  if (apiError) {
+    return NextResponse.json({ error: apiError }, { status: 502 });
+  }
+
+  const places = extractPlaces(payload).slice(0, limit);
 
   return NextResponse.json({
     query,
-    provider: "outscraper",
+    provider: "serpapi",
     page: body.page ?? 1,
-    hasNextPage: false,
-    businesses: places.map(mapOutscraperPlaceToBusiness),
+    hasNextPage: Boolean(extractPaginationNext(payload)),
+    businesses: places.map((place, index) => mapSerpApiPlaceToBusiness(place, index, state, city)),
   });
 }
 
 function buildSearchQuery(niche: string, state: string, city?: string) {
-  return [niche, city, state, "Brasil"].filter(Boolean).join(", ");
+  return [niche, city, state, "Brasil"].filter(Boolean).join(" ");
 }
 
-function extractPlaces(payload: unknown): OutscraperPlace[] {
-  if (Array.isArray(payload)) {
-    if (Array.isArray(payload[0])) return payload.flat() as OutscraperPlace[];
-    return payload as OutscraperPlace[];
-  }
-
+function extractPlaces(payload: unknown): SerpApiLocalResult[] {
   if (!payload || typeof payload !== "object") return [];
   const record = payload as Record<string, unknown>;
-  const data = record.data;
-  const results = record.results;
-
-  if (Array.isArray(data)) {
-    if (Array.isArray(data[0])) return data.flat() as OutscraperPlace[];
-    return data as OutscraperPlace[];
-  }
-
-  if (Array.isArray(results)) return results as OutscraperPlace[];
-
-  return [];
+  return Array.isArray(record.local_results) ? (record.local_results as SerpApiLocalResult[]) : [];
 }
 
-function mapOutscraperPlaceToBusiness(place: OutscraperPlace, index: number): ProspectBusiness {
+function mapSerpApiPlaceToBusiness(
+  place: SerpApiLocalResult,
+  index: number,
+  fallbackState: string,
+  fallbackCity?: string,
+): ProspectBusiness {
   const rating = toNumber(place.rating);
-  const reviewsCount = toNumber(place.reviews ?? place.reviews_count) ?? 0;
-  const website = place.website ?? place.site ?? "";
-  const leadScore = calculateLeadScore({ rating, reviewsCount, website, businessStatus: place.business_status });
+  const reviewsCount = toNumber(place.reviews) ?? extractReviewCount(place.reviews_original) ?? 0;
+  const website = place.website ?? place.links?.website ?? "";
+  const category = place.type ?? place.types?.[0] ?? "Empresa local";
+  const leadScore = calculateLeadScore({ rating, reviewsCount, website, openState: place.open_state });
 
   return {
-    id: place.google_id ?? place.place_id ?? place.cid ?? `outscraper-${index}`,
-    name: place.name ?? place.name_for_emails ?? "Empresa sem nome",
-    category: place.category ?? place.type ?? "Empresa local",
-    phone: place.phone ?? place.phone_1 ?? "",
+    id: place.place_id ?? place.data_id ?? place.data_cid ?? `serpapi-${index}`,
+    name: place.title ?? "Empresa sem nome",
+    category,
+    phone: place.phone ?? "",
     website,
-    address: place.full_address ?? place.address ?? "",
-    city: place.city ?? "",
-    state: place.state ?? "",
+    address: place.address ?? "",
+    city: fallbackCity ?? extractCityFromAddress(place.address) ?? "",
+    state: fallbackState,
     rating,
     reviewsCount,
-    businessStatus: normalizeBusinessStatus(place.business_status),
-    photoUrl: place.photo ?? place.logo ?? undefined,
-    googleMapsUrl: place.location_link,
+    businessStatus: normalizeBusinessStatus(place.open_state ?? place.hours),
+    photoUrl: place.thumbnail,
+    googleMapsUrl: buildGoogleMapsUrl(place),
     leadScore,
-    signals: buildSignals({ leadScore, reviewsCount, website }),
-    sourceProvider: "outscraper",
+    signals: buildSignals({ leadScore, reviewsCount, website, phone: place.phone ?? "" }),
+    sourceProvider: "serpapi",
   };
 }
 
-function calculateLeadScore(input: { rating?: number; reviewsCount: number; website: string; businessStatus?: string }) {
+function buildGoogleMapsUrl(place: SerpApiLocalResult) {
+  if (place.links?.place) return place.links.place;
+  if (place.gps_coordinates?.latitude && place.gps_coordinates.longitude) {
+    return `https://www.google.com/maps/search/?api=1&query=${place.gps_coordinates.latitude},${place.gps_coordinates.longitude}`;
+  }
+  if (place.title) return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(place.title)}`;
+  return undefined;
+}
+
+function calculateLeadScore(input: { rating?: number; reviewsCount: number; website: string; openState?: string }) {
   let score = 55;
   if ((input.rating ?? 0) >= 4.5) score += 18;
   if (input.reviewsCount >= 100) score += 15;
   else if (input.reviewsCount >= 30) score += 8;
   if (!input.website) score += 8;
-  if (input.businessStatus?.toLowerCase().includes("closed")) score -= 30;
+  if (input.openState?.toLowerCase().includes("permanentemente fechado")) score -= 30;
+  if (input.openState?.toLowerCase().includes("permanently closed")) score -= 30;
   return Math.max(0, Math.min(100, score));
 }
 
-function buildSignals(input: { leadScore: number; reviewsCount: number; website: string }): ProspectBusinessSignal[] {
+function buildSignals(input: { leadScore: number; reviewsCount: number; website: string; phone: string }): ProspectBusinessSignal[] {
   const signals: ProspectBusinessSignal[] = [];
   if (input.leadScore >= 85) signals.push({ id: "hot", label: "Lead Quente", tone: "hot" });
+  if (input.phone) signals.push({ id: "phone", label: "Telefone capturado", tone: "positive" });
+  if (!input.phone) signals.push({ id: "no-phone", label: "Sem telefone publico", tone: "warning" });
   if (!input.website) signals.push({ id: "no-site", label: "Empresa sem site", tone: "warning" });
-  if (input.reviewsCount < 50) signals.push({ id: "low-reviews", label: "Poucas avaliações", tone: "warning" });
+  if (input.reviewsCount < 50) signals.push({ id: "low-reviews", label: "Poucas avaliacoes", tone: "warning" });
   if (input.reviewsCount >= 100) signals.push({ id: "reviews", label: "Prova social forte", tone: "positive" });
-  if (signals.length === 0) signals.push({ id: "neutral", label: "Perfil comercial estável", tone: "neutral" });
+  if (signals.length === 0) signals.push({ id: "neutral", label: "Perfil comercial estavel", tone: "neutral" });
   return signals;
 }
 
 function normalizeBusinessStatus(status?: string): ProspectBusiness["businessStatus"] {
   const normalized = status?.toLowerCase() ?? "";
-  if (normalized.includes("closed")) return "closed";
-  if (normalized.includes("temporary") || normalized.includes("limited")) return "limited";
+  if (normalized.includes("closed") || normalized.includes("fechado")) return "closed";
+  if (normalized.includes("temporary") || normalized.includes("temporariamente")) return "limited";
   return "operational";
+}
+
+function extractCityFromAddress(address?: string) {
+  if (!address) return undefined;
+  const parts = address.split(",").map((part) => part.trim()).filter(Boolean);
+  return parts.length >= 2 ? parts.at(-2) : undefined;
+}
+
+function extractReviewCount(value?: string) {
+  if (!value) return undefined;
+  const number = Number(value.replace(/[^\d]/g, ""));
+  return Number.isFinite(number) ? number : undefined;
 }
 
 function toNumber(value: unknown) {
   if (typeof value === "number") return value;
   if (typeof value === "string" && value.trim()) {
-    const number = Number(value.replace(",", "."));
+    const number = Number(value.replace(",", ".").replace(/[^\d.]/g, ""));
     return Number.isFinite(number) ? number : undefined;
   }
   return undefined;
 }
 
-function extractOutscraperError(payload: unknown) {
+function extractPaginationNext(payload: unknown) {
+  if (!payload || typeof payload !== "object") return null;
+  const record = payload as Record<string, unknown>;
+  const pagination = record.serpapi_pagination;
+  if (!pagination || typeof pagination !== "object") return null;
+  return (pagination as Record<string, unknown>).next ?? null;
+}
+
+function extractSerpApiError(payload: unknown) {
   if (!payload || typeof payload !== "object") return null;
   const record = payload as Record<string, unknown>;
   return String(record.error ?? record.message ?? "") || null;

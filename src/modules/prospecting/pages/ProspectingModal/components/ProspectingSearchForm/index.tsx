@@ -19,7 +19,7 @@ export function ProspectingSearchForm({
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!niche.trim() || !state.trim()) return;
-    onSearch({ niche, state, city: city.trim() || undefined, limit: 50, provider: "outscraper" });
+    onSearch({ niche, state, city: city.trim() || undefined, limit: 20, provider: "serpapi" });
   }
 
   return (
