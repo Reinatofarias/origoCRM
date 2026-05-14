@@ -1,0 +1,77 @@
+"use server";
+
+import { revalidatePath } from "next/cache";
+
+import { createSupabaseServerClient } from "@/lib/server/supabase";
+import type { ProspectingCampaignInput } from "@/lib/types";
+
+type ActionResult<T = unknown> = {
+  success: boolean;
+  data?: T;
+  error?: string;
+};
+
+async function getAuthenticatedSupabase() {
+  const supabase = await createSupabaseServerClient();
+  if (!supabase) return { error: "Supabase nao configurado" };
+
+  const {
+    data: { user },
+    error,
+  } = await supabase.auth.getUser();
+
+  if (error || !user) return { error: "Sessao expirada. Entre novamente." };
+
+  return { supabase, user };
+}
+
+export async function createProspectingCampaign(input: ProspectingCampaignInput) {
+  const auth = await getAuthenticatedSupabase();
+  if ("error" in auth) return { success: false, error: auth.error } satisfies ActionResult;
+
+  const { data: campaign, error } = await auth.supabase
+    .from("prospecting_campaigns")
+    .insert({
+      user_id: auth.user.id,
+      name: input.name.trim() || "Campanha de prospeccao",
+      niche: input.niche ?? "",
+      state: input.state ?? "",
+      city: input.city ?? "",
+      template_id: input.template_id ?? null,
+      total_contacts: input.total_contacts,
+      whatsapp_validated_count: input.whatsapp_validated_count,
+      sent_count: input.sent_count,
+      failed_count: input.failed_count,
+      ignored_count: input.ignored_count,
+      status: input.status ?? "completed",
+    })
+    .select()
+    .single();
+
+  if (error) return { success: false, error: error.message } satisfies ActionResult;
+
+  const campaignId = (campaign as { id: string }).id;
+  if (input.contacts.length > 0) {
+    const { error: contactsError } = await auth.supabase.from("prospecting_campaign_contacts").insert(
+      input.contacts.map((contact) => ({
+        campaign_id: campaignId,
+        user_id: auth.user.id,
+        business_name: contact.business_name,
+        phone: contact.phone,
+        category: contact.category ?? "",
+        city: contact.city ?? "",
+        state: contact.state ?? "",
+        lead_score: contact.lead_score ?? null,
+        dispatch_status: contact.dispatch_status,
+        message: contact.message ?? null,
+        error: contact.error ?? null,
+        sent_at: contact.sent_at ?? null,
+      })),
+    );
+
+    if (contactsError) return { success: false, error: contactsError.message } satisfies ActionResult;
+  }
+
+  revalidatePath("/");
+  return { success: true, data: campaign } satisfies ActionResult;
+}

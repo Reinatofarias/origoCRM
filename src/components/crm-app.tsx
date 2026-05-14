@@ -46,6 +46,7 @@ import {
   Settings,
   ShieldCheck,
   Sparkles,
+  Tag,
   Trash2,
   UserRound,
   Wifi,
@@ -63,6 +64,12 @@ import {
   updateLead as updateLeadAction,
 } from "@/actions/leads";
 import { moveLeadStage } from "@/actions/pipeline";
+import { createProspectingCampaign as createProspectingCampaignAction } from "@/actions/prospecting";
+import {
+  assignLeadTag as assignLeadTagAction,
+  createTag as createTagAction,
+  removeLeadTag as removeLeadTagAction,
+} from "@/actions/tags";
 import {
   completeTask as completeTaskAction,
   createTask as createTaskAction,
@@ -83,9 +90,11 @@ import type {
   AuditLog,
   Interaction,
   Lead,
+  LeadTag,
   LeadInput,
   LeadStatus,
   MessageTemplate,
+  Tag as CrmTag,
   Task,
   WhatsAppLog,
   WhatsAppConversation,
@@ -156,6 +165,7 @@ type SavedPipelineFilter = {
     statusFilter: LeadStatus | "all";
     temperatureFilter: Lead["temperature"] | "all";
     dateFilter: "all" | "today" | "overdue";
+    tagFilter?: string | "all";
   };
 };
 type PipelineStage = {
@@ -222,6 +232,7 @@ function readSavedPipelineFilters() {
       statusFilter: "all" as LeadStatus | "all",
       temperatureFilter: "all" as Lead["temperature"] | "all",
       dateFilter: "all" as "all" | "today" | "overdue",
+      tagFilter: "all",
     };
   }
 
@@ -232,12 +243,14 @@ function readSavedPipelineFilters() {
         statusFilter: "all" as LeadStatus | "all",
         temperatureFilter: "all" as Lead["temperature"] | "all",
         dateFilter: "all" as "all" | "today" | "overdue",
+        tagFilter: "all",
       };
     }
     const parsed = JSON.parse(raw) as {
       statusFilter?: LeadStatus | "all";
       temperatureFilter?: Lead["temperature"] | "all";
       dateFilter?: "all" | "today" | "overdue";
+      tagFilter?: string | "all";
     };
     const statusFilter =
       parsed.statusFilter && parsed.statusFilter !== "all"
@@ -248,12 +261,14 @@ function readSavedPipelineFilters() {
       statusFilter,
       temperatureFilter: parsed.temperatureFilter ?? "all",
       dateFilter: parsed.dateFilter ?? "all",
+      tagFilter: parsed.tagFilter ?? "all",
     };
   } catch {
     return {
       statusFilter: "all" as LeadStatus | "all",
       temperatureFilter: "all" as Lead["temperature"] | "all",
       dateFilter: "all" as "all" | "today" | "overdue",
+      tagFilter: "all",
     };
   }
 }
@@ -335,6 +350,25 @@ function createPipelineStageId(title: string, existingStages: PipelineStage[]) {
   }
 
   return next;
+}
+
+function groupLeadTagsByLead(leadTags: LeadTag[], tags: CrmTag[]) {
+  const tagsById = new Map(tags.map((tag) => [tag.id, tag]));
+  const grouped = new Map<string, CrmTag[]>();
+
+  for (const relation of leadTags) {
+    const tag = tagsById.get(relation.tag_id);
+    if (!tag) continue;
+    grouped.set(relation.lead_id, [...(grouped.get(relation.lead_id) ?? []), tag]);
+  }
+
+  return grouped;
+}
+
+function pickTagColor(name: string) {
+  const colors = ["#8B5CF6", "#25D366", "#F59E0B", "#0EA5E9", "#F43F5E", "#A78BFA"];
+  const index = Array.from(name).reduce((sum, char) => sum + char.charCodeAt(0), 0) % colors.length;
+  return colors[index];
 }
 
 function BrandLogo({
@@ -531,6 +565,7 @@ function Workspace({
   const [statusFilter, setStatusFilter] = useState<LeadStatus | "all">(savedFilters.statusFilter);
   const [temperatureFilter, setTemperatureFilter] = useState<Lead["temperature"] | "all">(savedFilters.temperatureFilter);
   const [dateFilter, setDateFilter] = useState<"all" | "today" | "overdue">(savedFilters.dateFilter);
+  const [tagFilter, setTagFilter] = useState<string | "all">(savedFilters.tagFilter ?? "all");
   const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null);
   const [leadFormOpen, setLeadFormOpen] = useState(false);
   const [prospectingOpen, setProspectingOpen] = useState(false);
@@ -552,6 +587,8 @@ function Workspace({
   const [remoteWhatsAppMessages, setRemoteWhatsAppMessages] = useState<WhatsAppMessage[]>([]);
   const [remoteWhatsAppLogs, setRemoteWhatsAppLogs] = useState<WhatsAppLog[]>([]);
   const [remoteAuditLogs, setRemoteAuditLogs] = useState<AuditLog[]>([]);
+  const [remoteTags, setRemoteTags] = useState<CrmTag[]>([]);
+  const [remoteLeadTags, setRemoteLeadTags] = useState<LeadTag[]>([]);
   const leads = remoteLeads;
   const archivedLeads = remoteArchivedLeads;
   const templates = remoteTemplates;
@@ -560,11 +597,14 @@ function Workspace({
   const whatsappMessages = remoteWhatsAppMessages;
   const whatsappLogs = remoteWhatsAppLogs;
   const auditLogs = remoteAuditLogs;
+  const tags = remoteTags;
+  const leadTags = remoteLeadTags;
   const priorityLeads = useMemo(() => getPriorityLeads(leads), [leads]);
   const existingLeadPhones = useMemo(
     () => new Set([...leads, ...archivedLeads].map((lead) => normalizeProspectingWhatsAppPhone(lead.phone)).filter(Boolean)),
     [archivedLeads, leads],
   );
+  const tagsByLeadId = useMemo(() => groupLeadTagsByLead(leadTags, tags), [leadTags, tags]);
 
   useEffect(() => {
     async function loadRemoteData() {
@@ -582,6 +622,8 @@ function Workspace({
         whatsappMessageResult,
         whatsappLogResult,
         auditLogResult,
+        tagResult,
+        leadTagResult,
       ] = await Promise.all([
         supabase.from("leads").select("*").order("created_at", { ascending: false }),
         supabase.from("message_templates").select("*").order("created_at", { ascending: true }),
@@ -590,6 +632,8 @@ function Workspace({
         supabase.from("whatsapp_messages").select("*").order("created_at", { ascending: false }).limit(100),
         supabase.from("whatsapp_logs").select("*").order("created_at", { ascending: false }).limit(30),
         supabase.from("audit_logs").select("*").order("created_at", { ascending: false }).limit(80),
+        supabase.from("tags").select("*").order("name", { ascending: true }),
+        supabase.from("lead_tags").select("*"),
       ]);
 
       if (
@@ -614,6 +658,8 @@ function Workspace({
       setRemoteWhatsAppMessages((whatsappMessageResult.data as WhatsAppMessage[] | null) ?? []);
       setRemoteWhatsAppLogs((whatsappLogResult.data as WhatsAppLog[] | null) ?? []);
       setRemoteAuditLogs((auditLogResult.data as AuditLog[] | null) ?? []);
+      if (!tagResult.error) setRemoteTags((tagResult.data as CrmTag[] | null) ?? []);
+      if (!leadTagResult.error) setRemoteLeadTags((leadTagResult.data as LeadTag[] | null) ?? []);
       setLoading(false);
     }
 
@@ -629,9 +675,9 @@ function Workspace({
   useEffect(() => {
     window.localStorage.setItem(
       "origocrm:pipeline-filters",
-      JSON.stringify({ statusFilter, temperatureFilter, dateFilter }),
+      JSON.stringify({ statusFilter, temperatureFilter, dateFilter, tagFilter }),
     );
-  }, [dateFilter, statusFilter, temperatureFilter]);
+  }, [dateFilter, statusFilter, tagFilter, temperatureFilter]);
 
   useEffect(() => {
     window.localStorage.setItem("origocrm:pipeline-filter-presets", JSON.stringify(savedFilterPresets));
@@ -650,11 +696,12 @@ function Workspace({
         )) &&
       (statusFilter === "all" || lead.status === statusFilter) &&
       (temperatureFilter === "all" || (lead.temperature ?? "morno") === temperatureFilter) &&
+      (tagFilter === "all" || (tagsByLeadId.get(lead.id) ?? []).some((tag) => tag.id === tagFilter)) &&
       (dateFilter === "all" ||
         (dateFilter === "today" && isLeadCreatedToday(lead)) ||
         (dateFilter === "overdue" && isFollowupOverdue(lead))),
     );
-  }, [dateFilter, leads, query, statusFilter, temperatureFilter]);
+  }, [dateFilter, leads, query, statusFilter, tagFilter, tagsByLeadId, temperatureFilter]);
 
   const selectedLead = leads.find((lead) => lead.id === selectedLeadId) ?? null;
   const selectedPipelineLeads = filteredLeads.filter((lead) => selectedPipelineLeadIds.has(lead.id));
@@ -681,6 +728,7 @@ function Workspace({
       temperatura: lead.temperature ?? "morno",
       valor_estimado: lead.estimated_value ?? "",
       responsavel: lead.owner_name ?? "",
+      tags: (tagsByLeadId.get(lead.id) ?? []).map((tag) => tag.name).join(" | "),
       proximo_followup: lead.next_followup_at ?? "",
       motivo: lead.outcome_reason ?? "",
     }));
@@ -693,6 +741,7 @@ function Workspace({
       temperatura: "",
       valor_estimado: "",
       responsavel: "",
+      tags: "",
       proximo_followup: "",
       motivo: "",
     });
@@ -724,7 +773,7 @@ function Workspace({
     const preset: SavedPipelineFilter = {
       id: newId("filter"),
       name: name.trim(),
-      filters: { query, statusFilter, temperatureFilter, dateFilter },
+      filters: { query, statusFilter, temperatureFilter, dateFilter, tagFilter },
     };
     setSavedFilterPresets((items) => [preset, ...items.filter((item) => item.name !== preset.name)].slice(0, 12));
     showToast("Filtro salvo");
@@ -741,6 +790,7 @@ function Workspace({
     );
     setTemperatureFilter(preset.filters.temperatureFilter);
     setDateFilter(preset.filters.dateFilter);
+    setTagFilter(preset.filters.tagFilter ?? "all");
     showToast(`Filtro aplicado: ${preset.name}`);
   }
 
@@ -876,12 +926,90 @@ function Workspace({
     }
   }
 
+  async function createLeadTag(name: string) {
+    const trimmed = name.trim();
+    if (!trimmed) return null;
+
+    const existing = tags.find((tag) => tag.name.toLowerCase() === trimmed.toLowerCase());
+    if (existing) return existing;
+
+    const optimisticTag: CrmTag = {
+      id: newId("tag"),
+      user_id: user.id,
+      name: trimmed,
+      color: pickTagColor(trimmed),
+      created_at: new Date().toISOString(),
+    };
+    setRemoteTags((items) => [...items, optimisticTag].sort((a, b) => a.name.localeCompare(b.name)));
+
+    const result = await createTagAction({ name: trimmed, color: optimisticTag.color });
+    if (!result.success || !result.data) {
+      setRemoteTags((items) => items.filter((tag) => tag.id !== optimisticTag.id));
+      showToast(result.error ?? "Erro ao criar tag");
+      return null;
+    }
+
+    const createdTag = result.data as CrmTag;
+    setRemoteTags((items) =>
+      items.map((tag) => (tag.id === optimisticTag.id ? createdTag : tag)).sort((a, b) => a.name.localeCompare(b.name)),
+    );
+    return createdTag;
+  }
+
+  async function assignTagToLead(lead: Lead, tagId: string) {
+    if (leadTags.some((item) => item.lead_id === lead.id && item.tag_id === tagId)) return;
+
+    const optimistic: LeadTag = {
+      user_id: user.id,
+      lead_id: lead.id,
+      tag_id: tagId,
+      created_at: new Date().toISOString(),
+    };
+    setRemoteLeadTags((items) => [...items, optimistic]);
+
+    const result = await assignLeadTagAction(lead.id, tagId);
+    if (!result.success) {
+      setRemoteLeadTags((items) => items.filter((item) => !(item.lead_id === lead.id && item.tag_id === tagId)));
+      showToast(result.error ?? "Erro ao aplicar tag");
+      return;
+    }
+
+    await recordAuditLog({
+      entity_type: "lead",
+      entity_id: lead.id,
+      action: "lead.tag_added",
+      summary: `Tag aplicada em ${lead.name}`,
+      metadata: { tag_id: tagId },
+    });
+  }
+
+  async function removeTagFromLead(lead: Lead, tagId: string) {
+    const previous = remoteLeadTags;
+    setRemoteLeadTags((items) => items.filter((item) => !(item.lead_id === lead.id && item.tag_id === tagId)));
+
+    const result = await removeLeadTagAction(lead.id, tagId);
+    if (!result.success) {
+      setRemoteLeadTags(previous);
+      showToast(result.error ?? "Erro ao remover tag");
+      return;
+    }
+
+    await recordAuditLog({
+      entity_type: "lead",
+      entity_id: lead.id,
+      action: "lead.tag_removed",
+      summary: `Tag removida de ${lead.name}`,
+      metadata: { tag_id: tagId },
+    });
+  }
+
   async function deleteLead(lead: Lead) {
     const previousLeads = remoteLeads;
     const previousArchivedLeads = remoteArchivedLeads;
     const previousTasks = remoteTasks;
     const previousInteractions = remoteInteractions;
     const previousWhatsAppMessages = remoteWhatsAppMessages;
+    const previousLeadTags = remoteLeadTags;
 
     setSelectedLeadId((current) => (current === lead.id ? null : current));
     setLeadPendingDelete(null);
@@ -892,6 +1020,7 @@ function Workspace({
     setRemoteWhatsAppMessages((items) =>
       items.map((message) => (message.lead_id === lead.id ? { ...message, lead_id: null } : message)),
     );
+    setRemoteLeadTags((items) => items.filter((item) => item.lead_id !== lead.id));
     setSelectedPipelineLeadIds((current) => {
       const next = new Set(current);
       next.delete(lead.id);
@@ -907,6 +1036,7 @@ function Workspace({
       setRemoteTasks(previousTasks);
       setRemoteInteractions(previousInteractions);
       setRemoteWhatsAppMessages(previousWhatsAppMessages);
+      setRemoteLeadTags(previousLeadTags);
       showToast(result.error ?? "Erro ao excluir lead");
       return;
     }
@@ -1694,6 +1824,18 @@ function Workspace({
                     <option value="today">Criados hoje</option>
                     <option value="overdue">Follow-up atrasado</option>
                   </select>
+                  <select
+                    className="h-11 rounded-lg border border-white/10 bg-white/[0.04] px-3 text-sm text-zinc-300 outline-none transition focus:border-[#8B5CF6]"
+                    onChange={(event) => setTagFilter(event.target.value)}
+                    value={tagFilter}
+                  >
+                    <option value="all">Todas tags</option>
+                    {tags.map((tag) => (
+                      <option key={tag.id} value={tag.id}>
+                        {tag.name}
+                      </option>
+                    ))}
+                  </select>
                   {view === "pipeline" && (
                     <>
                       <select
@@ -1778,6 +1920,7 @@ function Workspace({
                   <Pipeline
                     bulkOwnerName={bulkOwnerName}
                     columns={visiblePipelineStages}
+                    leadTags={tagsByLeadId}
                     leads={filteredLeads}
                     onBulkArchive={() => void bulkArchiveSelectedLeads()}
                     onBulkAssignOwner={() => void bulkAssignOwner()}
@@ -1810,6 +1953,7 @@ function Workspace({
                 )}
                 {view === "leads" && (
                   <LeadList
+                    leadTags={tagsByLeadId}
                     leads={filteredLeads}
                     onEdit={(lead) => {
                       setEditingLead(lead);
@@ -1877,12 +2021,17 @@ function Workspace({
           interactions={interactions.filter((item) => item.lead_id === selectedLead.id)}
           key={selectedLead.id}
           columns={visiblePipelineStages}
+          availableTags={tags}
+          leadTags={tagsByLeadId.get(selectedLead.id) ?? []}
           lead={selectedLead}
           onAddInteraction={addInteraction}
           onCompleteTask={completeTask}
           onCreateTask={createTask}
           onClose={() => setSelectedLeadId(null)}
           onDelete={(lead) => setLeadPendingDelete(lead)}
+          onCreateTag={(name) => createLeadTag(name)}
+          onAssignTag={(tagId) => assignTagToLead(selectedLead, tagId)}
+          onRemoveTag={(tagId) => removeTagFromLead(selectedLead, tagId)}
           onScheduleFollowup={scheduleFollowup}
           onSend={sendWhatsApp}
           onSaveLead={(input) => saveLead(input, selectedLead.id)}
@@ -1936,6 +2085,14 @@ function Workspace({
               setRemoteWhatsAppMessages((items) => upsertWhatsAppMessage(items, result.message as WhatsAppMessage));
             }
             return { success: result.success, error: result.error };
+          }}
+          onCampaignCompleted={async (campaign) => {
+            const result = await createProspectingCampaignAction(campaign);
+            if (!result.success) {
+              showToast(result.error ?? "Campanha enviada, mas nao foi salva no historico");
+              return;
+            }
+            showToast("Campanha registrada no CRM");
           }}
           onValidateWhatsAppNumbers={checkWhatsAppNumbers}
           templates={templates}
@@ -3512,6 +3669,7 @@ function getPipelineMeta(id: LeadStatus, title: string) {
 
 function Pipeline({
   leads,
+  leadTags,
   columns,
   recentLeadId,
   selectedLeadIds,
@@ -3530,6 +3688,7 @@ function Pipeline({
   onQuickSchedule,
 }: {
   leads: Lead[];
+  leadTags: Map<string, CrmTag[]>;
   columns: PipelineStage[];
   recentLeadId: string | null;
   selectedLeadIds: Set<string>;
@@ -3599,6 +3758,7 @@ function Pipeline({
                 key={column.id}
                 id={column.id}
                 leads={columnLeads}
+                leadTags={leadTags}
                 onLeadClick={onLeadClick}
                 onLeadDelete={onLeadDelete}
                 onQuickSchedule={onQuickSchedule}
@@ -4117,6 +4277,7 @@ function PipelineColumn({
   id,
   title,
   leads,
+  leadTags,
   columns,
   closedStageIds,
   recentLeadId,
@@ -4131,6 +4292,7 @@ function PipelineColumn({
   id: LeadStatus;
   title: string;
   leads: Lead[];
+  leadTags: Map<string, CrmTag[]>;
   columns: PipelineStage[];
   closedStageIds: Set<LeadStatus>;
   recentLeadId: string | null;
@@ -4200,6 +4362,7 @@ function PipelineColumn({
               key={lead.id}
               highlighted={recentLeadId === lead.id}
               lead={lead}
+              leadTags={leadTags.get(lead.id) ?? []}
               onClick={() => onLeadClick(lead)}
               onDelete={() => onLeadDelete(lead)}
               onQuickSchedule={() => onQuickSchedule(lead)}
@@ -4224,6 +4387,7 @@ function PipelineColumn({
 
 function SortableLeadCard({
   lead,
+  leadTags,
   columns,
   closedStageIds,
   highlighted,
@@ -4236,6 +4400,7 @@ function SortableLeadCard({
   onToggleSelection,
 }: {
   lead: Lead;
+  leadTags: CrmTag[];
   columns: PipelineStage[];
   closedStageIds: Set<LeadStatus>;
   highlighted: boolean;
@@ -4264,6 +4429,7 @@ function SortableLeadCard({
         closedStageIds={closedStageIds}
         highlighted={highlighted}
         lead={lead}
+        leadTags={leadTags}
         onClick={onClick}
         onDelete={onDelete}
         onQuickSchedule={onQuickSchedule}
@@ -4279,6 +4445,7 @@ function SortableLeadCard({
 
 function LeadCard({
   lead,
+  leadTags = [],
   columns,
   closedStageIds,
   onClick,
@@ -4293,6 +4460,7 @@ function LeadCard({
   onQuickSchedule,
 }: {
   lead: Lead;
+  leadTags?: CrmTag[];
   columns?: PipelineStage[];
   closedStageIds?: Set<LeadStatus>;
   onClick: () => void;
@@ -4407,6 +4575,20 @@ function LeadCard({
         <span className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-1 text-[11px] text-zinc-400">
           {getSourceLabel(lead.source)}
         </span>
+        {leadTags.slice(0, 3).map((tag) => (
+          <span
+            className="rounded-full border px-2 py-1 text-[11px]"
+            key={tag.id}
+            style={{ borderColor: `${tag.color}66`, backgroundColor: `${tag.color}18`, color: tag.color }}
+          >
+            {tag.name}
+          </span>
+        ))}
+        {leadTags.length > 3 && (
+          <span className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-1 text-[11px] text-zinc-500">
+            +{leadTags.length - 3}
+          </span>
+        )}
       </div>
 
       <div className="mt-3 grid gap-1.5 text-xs">
@@ -4466,11 +4648,13 @@ function LeadCard({
 
 function LeadList({
   leads,
+  leadTags,
   onOpen,
   onEdit,
   onDelete,
 }: {
   leads: Lead[];
+  leadTags: Map<string, CrmTag[]>;
   onOpen: (lead: Lead) => void;
   onEdit: (lead: Lead) => void;
   onDelete: (lead: Lead) => void;
@@ -4489,6 +4673,17 @@ function LeadList({
           <div>
             <div className="text-sm text-zinc-300">{lead.company || "Sem empresa"}</div>
             <div className="text-sm text-zinc-500">{lead.source || "Sem origem"}</div>
+            <div className="mt-2 flex flex-wrap gap-1">
+              {(leadTags.get(lead.id) ?? []).slice(0, 4).map((tag) => (
+                <span
+                  className="rounded-full border px-2 py-0.5 text-[11px]"
+                  key={tag.id}
+                  style={{ borderColor: `${tag.color}66`, backgroundColor: `${tag.color}18`, color: tag.color }}
+                >
+                  {tag.name}
+                </span>
+              ))}
+            </div>
           </div>
           <div className="text-sm capitalize text-zinc-400">{lead.status}</div>
           <button
@@ -5955,6 +6150,11 @@ function migrationChecksInitialState(configured: boolean): MigrationCheck[] {
       detail: "Verificando conversations_operational_migration.sql",
     },
     {
+      label: "Tags e campanhas",
+      status: "checking",
+      detail: "Verificando tags_and_prospecting_campaigns_migration.sql",
+    },
+    {
       label: "Webhook WhatsApp",
       status: "checking",
       detail: "Verificando recebimento recente de eventos",
@@ -6050,6 +6250,31 @@ const migrationSqlByLabel: Record<string, string> = {
     "alter table public.whatsapp_conversations drop constraint if exists whatsapp_conversations_status_check;",
     "alter table public.whatsapp_conversations add constraint whatsapp_conversations_status_check check (status in ('open', 'unread', 'waiting', 'responded', 'converted', 'resolved', 'archived'));",
     "create index if not exists whatsapp_conversations_user_id_status_updated_at_idx on public.whatsapp_conversations(user_id, status, updated_at desc);",
+  ].join("\n"),
+  "Tags e campanhas": [
+    "create table if not exists public.tags (",
+    "  id uuid primary key default gen_random_uuid(),",
+    "  user_id uuid not null references auth.users(id) on delete cascade,",
+    "  name text not null,",
+    "  color text not null default '#8B5CF6',",
+    "  created_at timestamptz not null default now()",
+    ");",
+    "create table if not exists public.lead_tags (",
+    "  user_id uuid not null references auth.users(id) on delete cascade,",
+    "  lead_id uuid not null references public.leads(id) on delete cascade,",
+    "  tag_id uuid not null references public.tags(id) on delete cascade,",
+    "  created_at timestamptz not null default now(),",
+    "  primary key (lead_id, tag_id)",
+    ");",
+    "create table if not exists public.prospecting_campaigns (id uuid primary key default gen_random_uuid(), user_id uuid not null references auth.users(id) on delete cascade, name text not null, niche text not null default '', state text not null default '', city text not null default '', template_id uuid references public.message_templates(id) on delete set null, total_contacts integer not null default 0, whatsapp_validated_count integer not null default 0, sent_count integer not null default 0, failed_count integer not null default 0, ignored_count integer not null default 0, status text not null default 'completed', created_at timestamptz not null default now(), updated_at timestamptz not null default now());",
+    "create table if not exists public.prospecting_campaign_contacts (id uuid primary key default gen_random_uuid(), campaign_id uuid not null references public.prospecting_campaigns(id) on delete cascade, user_id uuid not null references auth.users(id) on delete cascade, business_name text not null, phone text not null default '', category text not null default '', city text not null default '', state text not null default '', lead_score integer, dispatch_status text not null default 'new', message text, error text, sent_at timestamptz, created_at timestamptz not null default now());",
+    "create unique index if not exists tags_user_id_lower_name_idx on public.tags(user_id, lower(name));",
+    "create index if not exists lead_tags_user_id_lead_id_idx on public.lead_tags(user_id, lead_id);",
+    "create index if not exists prospecting_campaigns_user_id_created_at_idx on public.prospecting_campaigns(user_id, created_at desc);",
+    "alter table public.tags enable row level security;",
+    "alter table public.lead_tags enable row level security;",
+    "alter table public.prospecting_campaigns enable row level security;",
+    "alter table public.prospecting_campaign_contacts enable row level security;",
   ].join("\n"),
 };
 
@@ -6165,7 +6390,7 @@ function SettingsView({
 
     const client = supabase;
     setChecking(true);
-    const [session, commercial, tasksResult, auditResult, conversationResult, webhookResult, evolutionResult] = await Promise.all([
+    const [session, commercial, tasksResult, auditResult, conversationResult, tagResult, campaignResult, webhookResult, evolutionResult] = await Promise.all([
       client.auth.getUser(),
       client
         .from("leads")
@@ -6182,6 +6407,14 @@ function SettingsView({
       client
         .from("whatsapp_conversations")
         .select("id,status,unread_count,last_read_at")
+        .limit(1),
+      client
+        .from("tags")
+        .select("id,name,color")
+        .limit(1),
+      client
+        .from("prospecting_campaigns")
+        .select("id,name,total_contacts,sent_count,failed_count")
         .limit(1),
       fetch("/api/webhooks/evolution", { cache: "no-store" }).then((response) => response.json()).catch(() => null),
       fetch("/api/evolution/status", { cache: "no-store" }).then(async (response) => ({ ok: response.ok, data: await response.json() })).catch(() => null),
@@ -6233,6 +6466,13 @@ function SettingsView({
         detail: conversationResult.error
           ? "Aplique supabase/conversations_operational_migration.sql"
           : "Status resolvida/arquivada e inbox operacional disponiveis",
+      },
+      {
+        label: "Tags e campanhas",
+        status: tagResult.error || campaignResult.error ? "missing" : "ok",
+        detail: tagResult.error || campaignResult.error
+          ? "Aplique supabase/tags_and_prospecting_campaigns_migration.sql"
+          : "Tags e historico de campanhas de prospeccao disponiveis",
       },
       {
         label: "Webhook WhatsApp",
@@ -7052,6 +7292,8 @@ type LeadDetailsTab = "summary" | "commercial" | "tasks" | "contact" | "history"
 
 function LeadDetails({
   columns,
+  availableTags,
+  leadTags,
   lead,
   templates,
   interactions,
@@ -7062,12 +7304,17 @@ function LeadDetails({
   onAddInteraction,
   onCreateTask,
   onCompleteTask,
+  onCreateTag,
+  onAssignTag,
+  onRemoveTag,
   onScheduleFollowup,
   onSaveLead,
   onUpdateTemperature,
   onDelete,
 }: {
   columns: PipelineStage[];
+  availableTags: CrmTag[];
+  leadTags: CrmTag[];
   lead: Lead;
   templates: MessageTemplate[];
   interactions: Interaction[];
@@ -7078,6 +7325,9 @@ function LeadDetails({
   onAddInteraction: (leadId: string, input: InteractionInput) => void;
   onCreateTask: (lead: Lead, input: TaskInput) => void;
   onCompleteTask: (task: Task, lead: Lead) => void;
+  onCreateTag: (name: string) => Promise<CrmTag | null>;
+  onAssignTag: (tagId: string) => void;
+  onRemoveTag: (tagId: string) => void;
   onScheduleFollowup: (lead: Lead, nextFollowupAt: string) => void;
   onSaveLead: (input: LeadInput) => void;
   onUpdateTemperature: (lead: Lead, temperature: NonNullable<Lead["temperature"]>) => void;
@@ -7098,6 +7348,7 @@ function LeadDetails({
   const [note, setNote] = useState("");
   const [interactionType, setInteractionType] = useState<NonNullable<Interaction["type"]>>("note");
   const [interactionChannel, setInteractionChannel] = useState<Interaction["channel"]>("whatsapp");
+  const [newTagName, setNewTagName] = useState("");
   const nextFollowupAt = fromDateTimeLocal(followupAt);
   const openTasks = tasks
     .filter((task) => task.status === "open")
@@ -7130,6 +7381,13 @@ function LeadDetails({
     if (template) setMessage(renderTemplate(template.body, lead));
   }
 
+  async function submitNewTag() {
+    const tag = await onCreateTag(newTagName);
+    if (!tag) return;
+    onAssignTag(tag.id);
+    setNewTagName("");
+  }
+
   return (
     <Modal onClose={onClose} title={lead.name} wide>
       <div className="space-y-5">
@@ -7146,6 +7404,18 @@ function LeadDetails({
                 <span className="rounded-full border border-white/10 px-2 py-0.5 text-xs text-zinc-400">
                   {lead?.owner_name || "Sem responsavel"}
                 </span>
+                {leadTags.map((tag) => (
+                  <button
+                    className="rounded-full border px-2 py-0.5 text-xs"
+                    key={tag.id}
+                    onClick={() => onRemoveTag(tag.id)}
+                    style={{ borderColor: `${tag.color}66`, backgroundColor: `${tag.color}18`, color: tag.color }}
+                    title="Remover tag"
+                    type="button"
+                  >
+                    {tag.name} x
+                  </button>
+                ))}
               </div>
               <div className="mt-2 truncate text-sm text-zinc-500">
                 {lead.company || "Sem empresa"} - {lead.phone}
@@ -7160,6 +7430,47 @@ function LeadDetails({
                 value={lead.next_followup_at ? new Date(lead.next_followup_at).toLocaleDateString("pt-BR") : "Sem data"}
               />
             </div>
+          </div>
+          <div className="mt-3 grid gap-2 lg:grid-cols-[1fr_auto_auto]">
+            <select
+              className="h-10 rounded-lg border border-white/10 bg-black/25 px-3 text-sm text-zinc-300 outline-none transition focus:border-[#8B5CF6]"
+              defaultValue=""
+              onChange={(event) => {
+                if (!event.target.value) return;
+                onAssignTag(event.target.value);
+                event.target.value = "";
+              }}
+            >
+              <option value="">Aplicar tag existente</option>
+              {availableTags
+                .filter((tag) => !leadTags.some((item) => item.id === tag.id))
+                .map((tag) => (
+                  <option key={tag.id} value={tag.id}>
+                    {tag.name}
+                  </option>
+                ))}
+            </select>
+            <input
+              className="h-10 rounded-lg border border-white/10 bg-black/25 px-3 text-sm text-zinc-200 outline-none transition placeholder:text-zinc-600 focus:border-[#8B5CF6]"
+              onChange={(event) => setNewTagName(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  void submitNewTag();
+                }
+              }}
+              placeholder="Nova tag"
+              value={newTagName}
+            />
+            <button
+              className="flex h-10 items-center justify-center gap-2 rounded-lg border border-[#8B5CF6]/35 bg-[#8B5CF6]/15 px-3 text-sm text-[#DDD6FE] transition hover:bg-[#8B5CF6]/25 disabled:opacity-50"
+              disabled={!newTagName.trim()}
+              onClick={() => void submitNewTag()}
+              type="button"
+            >
+              <Tag className="h-4 w-4" />
+              Criar tag
+            </button>
           </div>
           <div className="mt-4 flex gap-2 overflow-x-auto pb-1">
             {leadTabs.map((tab) => (

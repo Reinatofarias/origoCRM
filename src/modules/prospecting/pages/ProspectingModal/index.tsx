@@ -3,7 +3,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 
-import type { LeadInput, MessageTemplate } from "@/lib/types";
+import type { LeadInput, MessageTemplate, ProspectingCampaignInput } from "@/lib/types";
 
 import { useProspecting } from "../../hooks";
 import type {
@@ -24,12 +24,14 @@ export function ProspectingModal({
   onClose,
   onSendProspectingMessage,
   onValidateWhatsAppNumbers,
+  onCampaignCompleted,
   templates,
 }: {
   existingLeadPhones: Set<string>;
   onAddLead: (input: LeadInput) => Promise<void> | void;
   onClose: () => void;
   onSendProspectingMessage: (phoneNumber: string, message: string) => Promise<{ success: boolean; error?: string }>;
+  onCampaignCompleted?: (input: ProspectingCampaignInput) => Promise<void> | void;
   onValidateWhatsAppNumbers: (phoneNumbers: string[]) => Promise<{
     success: boolean;
     numbers?: Array<{ number: string; exists: boolean; jid?: string }>;
@@ -54,6 +56,7 @@ export function ProspectingModal({
         onAddLead={onAddLead}
         onClose={onClose}
         onSendProspectingMessage={onSendProspectingMessage}
+        onCampaignCompleted={onCampaignCompleted}
         onValidateWhatsAppNumbers={onValidateWhatsAppNumbers}
         templates={templates}
       />
@@ -66,6 +69,7 @@ function ProspectingModalContent({
   onAddLead,
   onClose,
   onSendProspectingMessage,
+  onCampaignCompleted,
   onValidateWhatsAppNumbers,
   templates,
 }: {
@@ -73,6 +77,7 @@ function ProspectingModalContent({
   onAddLead: (input: LeadInput) => Promise<void> | void;
   onClose: () => void;
   onSendProspectingMessage: (phoneNumber: string, message: string) => Promise<{ success: boolean; error?: string }>;
+  onCampaignCompleted?: (input: ProspectingCampaignInput) => Promise<void> | void;
   onValidateWhatsAppNumbers: (phoneNumbers: string[]) => Promise<{
     success: boolean;
     numbers?: Array<{ number: string; exists: boolean; jid?: string }>;
@@ -90,6 +95,7 @@ function ProspectingModalContent({
   const [onlyWhatsApp, setOnlyWhatsApp] = useState(false);
   const [validationStates, setValidationStates] = useState<Record<string, ProspectingWhatsAppValidationState>>({});
   const [campaignNotice, setCampaignNotice] = useState("");
+  const [lastSearchInput, setLastSearchInput] = useState<ProspectingSearchInput | null>(null);
 
   const selectedBusinesses = useMemo(
     () => prospecting.businesses.filter((business) => selectedBusinessIds.has(business.id)),
@@ -133,6 +139,7 @@ function ProspectingModalContent({
     setValidationStates({});
     setOnlyWhatsApp(false);
     setCampaignNotice("");
+    setLastSearchInput(input);
     prospecting.searchBusinesses.mutate(input, {
       onSuccess: () => {
         prospecting.setSelectedBusiness(null);
@@ -291,16 +298,31 @@ function ProspectingModalContent({
       return next;
     });
 
+    const campaignContacts: ProspectingCampaignInput["contacts"] = [];
+
     for (const [index, business] of campaignBusinesses.entries()) {
       const phone = business.phone ?? "";
       const message = renderProspectingTemplate(selectedTemplate.body, business);
 
       setDispatchStates((current) => ({ ...current, [business.id]: { status: "sending" } }));
       const result = await onSendProspectingMessage(normalizeProspectingWhatsAppPhone(phone), message);
+      const sentAt = result.success ? new Date().toISOString() : null;
+      campaignContacts.push({
+        business_name: business.name,
+        phone: normalizeProspectingWhatsAppPhone(phone),
+        category: business.category,
+        city: business.city,
+        state: business.state,
+        lead_score: business.leadScore ?? null,
+        dispatch_status: result.success ? "sent" : "failed",
+        message,
+        error: result.error ?? null,
+        sent_at: sentAt,
+      });
       setDispatchStates((current) => ({
         ...current,
         [business.id]: result.success
-          ? { status: "sent", sentAt: new Date().toISOString() }
+          ? { status: "sent", sentAt: sentAt ?? new Date().toISOString() }
           : { status: "failed", error: result.error ?? "Falha ao enviar" },
       }));
 
@@ -311,6 +333,24 @@ function ProspectingModalContent({
 
     setIsSendingCampaign(false);
     setSelectedBusinessIds(new Set());
+    if (onCampaignCompleted) {
+      const sent = campaignContacts.filter((contact) => contact.dispatch_status === "sent").length;
+      const failed = campaignContacts.filter((contact) => contact.dispatch_status === "failed").length;
+      await onCampaignCompleted({
+        name: `Prospeccao ${lastSearchInput?.niche ?? "Google"} - ${new Date().toLocaleDateString("pt-BR")}`,
+        niche: lastSearchInput?.niche ?? "",
+        state: lastSearchInput?.state ?? "",
+        city: lastSearchInput?.city ?? "",
+        template_id: selectedTemplate.id,
+        total_contacts: campaignContacts.length,
+        whatsapp_validated_count: campaignBusinesses.filter((business) => validationStates[business.id]?.status === "valid").length,
+        sent_count: sent,
+        failed_count: failed,
+        ignored_count: ignoredCount,
+        status: failed > 0 && sent === 0 ? "failed" : "completed",
+        contacts: campaignContacts,
+      });
+    }
     setCampaignNotice("Campanha finalizada. Use Selecionar proximos 20 para montar outro lote sem repetir enviados.");
   }
 

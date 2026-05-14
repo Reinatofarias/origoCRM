@@ -20,6 +20,21 @@ export type Lead = {
   updated_at: string;
 };
 
+export type Tag = {
+  id: string;
+  user_id?: string | null;
+  name: string;
+  color: string;
+  created_at: string;
+};
+
+export type LeadTag = {
+  user_id?: string | null;
+  lead_id: string;
+  tag_id: string;
+  created_at: string;
+};
+
 export type MessageTemplate = {
   id: string;
   user_id?: string | null;
@@ -70,6 +85,34 @@ export type AuditLogInput = {
   action: string;
   summary: string;
   metadata?: Record<string, unknown>;
+};
+
+export type ProspectingCampaignContactInput = {
+  business_name: string;
+  phone: string;
+  category?: string;
+  city?: string;
+  state?: string;
+  lead_score?: number | null;
+  dispatch_status: "new" | "queued" | "sending" | "sent" | "failed" | "ignored" | "lead_added";
+  message?: string | null;
+  error?: string | null;
+  sent_at?: string | null;
+};
+
+export type ProspectingCampaignInput = {
+  name: string;
+  niche?: string;
+  state?: string;
+  city?: string;
+  template_id?: string | null;
+  total_contacts: number;
+  whatsapp_validated_count: number;
+  sent_count: number;
+  failed_count: number;
+  ignored_count: number;
+  status?: "draft" | "running" | "completed" | "failed";
+  contacts: ProspectingCampaignContactInput[];
 };
 
 export type TaskInput = {
