@@ -1,6 +1,6 @@
 "use client";
 
-import { MapPin, Star, TrendingUp } from "lucide-react";
+import { MapPin, Phone, Star, TrendingUp } from "lucide-react";
 import Image from "next/image";
 
 import type { ProspectBusiness } from "../../../../types";
@@ -57,17 +57,24 @@ export function BusinessCard({
           </div>
           <div className="mt-3 flex items-start gap-2 text-xs leading-5 text-zinc-500">
             <MapPin className="mt-0.5 h-4 w-4 shrink-0 text-[#A78BFA]" />
-            <span>{business.address || "Endereço não informado"}</span>
+            <span>{business.state || business.city || "Estado não informado"}</span>
           </div>
+        </div>
+        <div className="rounded-xl border border-[#25D366]/20 bg-[#25D366]/10 p-3">
+          <div className="flex items-center gap-2 text-[11px] uppercase text-[#9AF0B8]">
+            <Phone className="h-3.5 w-3.5" />
+            Telefone capturado
+          </div>
+          <div className="mt-1 truncate text-base font-semibold text-white">{business.phone || "Não informado"}</div>
         </div>
         <div className="grid grid-cols-2 gap-2">
           <div className="rounded-xl border border-white/10 bg-black/25 p-3">
-            <div className="text-[11px] uppercase text-zinc-500">Telefone</div>
-            <div className="mt-1 truncate text-sm text-zinc-100">{business.phone || "Não informado"}</div>
+            <div className="text-[11px] uppercase text-zinc-500">Estado</div>
+            <div className="mt-1 truncate text-sm text-zinc-100">{business.state || "Não informado"}</div>
           </div>
           <div className="rounded-xl border border-white/10 bg-black/25 p-3">
-            <div className="text-[11px] uppercase text-zinc-500">Reviews</div>
-            <div className="mt-1 text-sm text-zinc-100">{business.reviewsCount ?? 0}</div>
+            <div className="text-[11px] uppercase text-zinc-500">Cidade</div>
+            <div className="mt-1 truncate text-sm text-zinc-100">{business.city || "Não informado"}</div>
           </div>
         </div>
         <div className="flex flex-wrap gap-2">

@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 
-import { useEnrichCompany, useGetCompanyByCnpj, useSearchGoogleBusinesses } from "./requests";
+import { useEnrichCompany, useGetCompanyByCnpj, useSearchCompaniesByCnae, useSearchGoogleBusinesses } from "./requests";
 import type { CompanyByCnpj, ProspectBusiness } from "../types";
 
 export function useProspecting() {
@@ -11,10 +11,14 @@ export function useProspecting() {
   const [addedLeadIds, setAddedLeadIds] = useState<Set<string>>(() => new Set());
   const searchBusinesses = useSearchGoogleBusinesses();
   const getCompanyByCnpj = useGetCompanyByCnpj();
+  const searchCompaniesByCnae = useSearchCompaniesByCnae();
   const enrichCompany = useEnrichCompany();
 
-  const businesses = useMemo(() => searchBusinesses.data?.businesses ?? [], [searchBusinesses.data?.businesses]);
-  const isLoading = searchBusinesses.isPending || getCompanyByCnpj.isPending || enrichCompany.isPending;
+  const businesses = useMemo(
+    () => [...(searchBusinesses.data?.businesses ?? []), ...(searchCompaniesByCnae.data?.businesses ?? [])],
+    [searchBusinesses.data?.businesses, searchCompaniesByCnae.data?.businesses],
+  );
+  const isLoading = searchBusinesses.isPending || getCompanyByCnpj.isPending || searchCompaniesByCnae.isPending || enrichCompany.isPending;
   const generatedApproach = enrichCompany.data && "approach" in enrichCompany.data ? enrichCompany.data.approach : "";
 
   const metrics = useMemo(() => {
@@ -45,6 +49,7 @@ export function useProspecting() {
     isLoading,
     markLeadAdded,
     metrics,
+    searchCompaniesByCnae,
     searchBusinesses,
     selectedBusiness,
     selectedCompany,

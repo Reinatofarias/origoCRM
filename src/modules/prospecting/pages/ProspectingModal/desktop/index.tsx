@@ -1,6 +1,6 @@
 "use client";
 
-import { BarChart3, Database, Flame, Globe2, X } from "lucide-react";
+import { BarChart3, Database, Download, Flame, Globe2, X } from "lucide-react";
 import type { ComponentType } from "react";
 
 import type { CompanyByCnpj, ProspectBusiness, ProspectingSearchInput } from "../../../types";
@@ -16,7 +16,9 @@ export function ProspectingDesktop({
   onAddBusinessLead,
   onClose,
   onGenerateApproach,
+  onExportBusinesses,
   onLookupCnpj,
+  onLookupCnae,
   onSearch,
   onSelectBusiness,
   selectedBusiness,
@@ -30,7 +32,9 @@ export function ProspectingDesktop({
   onAddBusinessLead: (business: ProspectBusiness) => void;
   onClose: () => void;
   onGenerateApproach: (business: ProspectBusiness) => void;
+  onExportBusinesses: () => void;
   onLookupCnpj: (cnpj: string) => void;
+  onLookupCnae: (input: { cnae: string; state: string }) => void;
   onSearch: (input: ProspectingSearchInput) => void;
   onSelectBusiness: (business: ProspectBusiness) => void;
   selectedBusiness: ProspectBusiness | null;
@@ -47,16 +51,27 @@ export function ProspectingDesktop({
               </div>
               <h2 className="mt-2 text-3xl font-semibold text-white">Encontre empresas e transforme em leads</h2>
               <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-400">
-                Integração server-side preparada para Outscraper agora, com espaço para Apify e Google Places em próximas fontes.
+                Prospecção por tipo de empresa/profissional e estado. Retorno focado em nome, UF e telefone para ação comercial.
               </p>
             </div>
-            <button
-              className="rounded-xl border border-white/10 bg-white/[0.04] p-2 text-zinc-400 transition hover:bg-white/[0.08] hover:text-white"
-              onClick={onClose}
-              type="button"
-            >
-              <X className="h-5 w-5" />
-            </button>
+            <div className="flex gap-2">
+              <button
+                className="flex h-10 items-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-3 text-xs text-zinc-300 transition hover:bg-white/[0.08] hover:text-white disabled:opacity-50"
+                disabled={businesses.length === 0 && !company}
+                onClick={onExportBusinesses}
+                type="button"
+              >
+                <Download className="h-4 w-4" />
+                Baixar lista
+              </button>
+              <button
+                className="rounded-xl border border-white/10 bg-white/[0.04] p-2 text-zinc-400 transition hover:bg-white/[0.08] hover:text-white"
+                onClick={onClose}
+                type="button"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
           </div>
           <div className="mt-5 grid gap-3 md:grid-cols-4">
             <Metric icon={Database} label="Empresas" value={metrics.total} />
@@ -71,7 +86,7 @@ export function ProspectingDesktop({
             {isLoading && <ProspectingSkeleton />}
             {!isLoading && businesses.length === 0 && (
               <div className="flex h-full min-h-80 items-center justify-center rounded-2xl border border-dashed border-white/10 bg-white/[0.03] text-sm text-zinc-500">
-                Configure OUTSCRAPER_API_KEY na Vercel e faça uma busca por nicho e cidade para iniciar a prospecção real.
+                Configure OUTSCRAPER_API_KEY na Vercel e busque por tipo de empresa/profissional e estado.
               </div>
             )}
             {!isLoading && businesses.length > 0 && (
@@ -93,7 +108,7 @@ export function ProspectingDesktop({
       </section>
       <div className="min-h-0 space-y-5 overflow-y-auto">
         <BusinessDetails approach={approach} business={selectedBusiness} />
-        <CnpjLookupCard company={company} isLoading={isLoading} onLookup={onLookupCnpj} />
+        <CnpjLookupCard company={company} isLoading={isLoading} onLookup={onLookupCnpj} onLookupCnae={onLookupCnae} />
       </div>
     </div>
   );

@@ -1,2 +1,2 @@
 export { enrichCompanyPhones } from "./enrichCompanyPhones";
-export { getCompanyByCnpj } from "./getCompanyByCnpj";
+export { getCompanyByCnpj, searchCompaniesByCnae } from "./getCompanyByCnpj";

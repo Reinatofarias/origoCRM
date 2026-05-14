@@ -13,12 +13,13 @@ export function ProspectingSearchForm({
   onSearch: (input: ProspectingSearchInput) => void;
 }) {
   const [niche, setNiche] = useState("Clínicas de estética");
-  const [city, setCity] = useState("Palmas");
+  const [state, setState] = useState("TO");
+  const [city, setCity] = useState("");
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!niche.trim() || !city.trim()) return;
-    onSearch({ niche, city, limit: 20, provider: "outscraper" });
+    if (!niche.trim() || !state.trim()) return;
+    onSearch({ niche, state, city: city.trim() || undefined, limit: 50, provider: "outscraper" });
   }
 
   return (
@@ -28,11 +29,11 @@ export function ProspectingSearchForm({
     >
       <div className="flex items-center gap-2 text-sm font-medium text-[#DDD6FE]">
         <Sparkles className="h-4 w-4" />
-        Busca Google Businesses
+        Buscar empresas no Google
       </div>
-      <div className="mt-4 grid gap-3 lg:grid-cols-[1fr_1fr_auto]">
+      <div className="mt-4 grid gap-3 lg:grid-cols-[1.1fr_0.7fr_0.9fr_auto]">
         <label className="block text-sm text-zinc-300">
-          Nicho
+          Tipo de empresa/profissional
           <input
             className="mt-2 h-12 w-full rounded-xl border border-white/10 bg-black/35 px-4 text-sm text-white outline-none transition placeholder:text-zinc-600 focus:border-[#A78BFA] focus:shadow-[0_0_0_3px_rgba(139,92,246,0.16)]"
             onChange={(event) => setNiche(event.target.value)}
@@ -41,11 +42,25 @@ export function ProspectingSearchForm({
           />
         </label>
         <label className="block text-sm text-zinc-300">
-          Cidade
+          Estado
+          <select
+            className="mt-2 h-12 w-full rounded-xl border border-white/10 bg-black/35 px-4 text-sm text-white outline-none transition focus:border-[#A78BFA] focus:shadow-[0_0_0_3px_rgba(139,92,246,0.16)]"
+            onChange={(event) => setState(event.target.value)}
+            value={state}
+          >
+            {BRAZIL_STATES.map((item) => (
+              <option key={item.uf} value={item.uf}>
+                {item.uf} - {item.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="block text-sm text-zinc-300">
+          Cidade opcional
           <input
             className="mt-2 h-12 w-full rounded-xl border border-white/10 bg-black/35 px-4 text-sm text-white outline-none transition placeholder:text-zinc-600 focus:border-[#A78BFA] focus:shadow-[0_0_0_3px_rgba(139,92,246,0.16)]"
             onChange={(event) => setCity(event.target.value)}
-            placeholder="Recife, Palmas, São Paulo..."
+            placeholder="Palmas, Recife..."
             value={city}
           />
         </label>
@@ -60,3 +75,33 @@ export function ProspectingSearchForm({
     </form>
   );
 }
+
+const BRAZIL_STATES = [
+  { uf: "AC", name: "Acre" },
+  { uf: "AL", name: "Alagoas" },
+  { uf: "AP", name: "Amapá" },
+  { uf: "AM", name: "Amazonas" },
+  { uf: "BA", name: "Bahia" },
+  { uf: "CE", name: "Ceará" },
+  { uf: "DF", name: "Distrito Federal" },
+  { uf: "ES", name: "Espírito Santo" },
+  { uf: "GO", name: "Goiás" },
+  { uf: "MA", name: "Maranhão" },
+  { uf: "MT", name: "Mato Grosso" },
+  { uf: "MS", name: "Mato Grosso do Sul" },
+  { uf: "MG", name: "Minas Gerais" },
+  { uf: "PA", name: "Pará" },
+  { uf: "PB", name: "Paraíba" },
+  { uf: "PR", name: "Paraná" },
+  { uf: "PE", name: "Pernambuco" },
+  { uf: "PI", name: "Piauí" },
+  { uf: "RJ", name: "Rio de Janeiro" },
+  { uf: "RN", name: "Rio Grande do Norte" },
+  { uf: "RS", name: "Rio Grande do Sul" },
+  { uf: "RO", name: "Rondônia" },
+  { uf: "RR", name: "Roraima" },
+  { uf: "SC", name: "Santa Catarina" },
+  { uf: "SP", name: "São Paulo" },
+  { uf: "SE", name: "Sergipe" },
+  { uf: "TO", name: "Tocantins" },
+];

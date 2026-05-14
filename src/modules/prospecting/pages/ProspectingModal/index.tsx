@@ -67,6 +67,14 @@ function ProspectingModalContent({
     else prospecting.setSelectedCompany(company);
   }
 
+  function lookupCnae(input: { cnae: string; state: string }) {
+    prospecting.searchCompaniesByCnae.mutate(input, {
+      onSuccess: (result) => {
+        prospecting.setSelectedBusiness(result.businesses[0] ?? null);
+      },
+    });
+  }
+
   async function addBusinessLead(business: ProspectBusiness) {
     await onAddLead({
       name: business.name,
@@ -88,6 +96,32 @@ function ProspectingModalContent({
     prospecting.enrichCompany.mutate({ business });
   }
 
+  function exportBusinessesCsv() {
+    const businessRows = prospecting.businesses.map((business) => ({
+      nome: business.name,
+      estado: business.state ?? "",
+      telefone: business.phone ?? "",
+      cidade: business.city ?? "",
+      categoria: business.category,
+      website: business.website ?? "",
+      google_maps: business.googleMapsUrl ?? "",
+    }));
+    const companyRow = prospecting.selectedCompany
+      ? [{
+          nome: prospecting.selectedCompany.tradeName || prospecting.selectedCompany.legalName,
+          estado: extractStateFromAddress(prospecting.selectedCompany.address),
+          telefone: prospecting.selectedCompany.phones.join(" | "),
+          cidade: "",
+          categoria: prospecting.selectedCompany.cnae,
+          website: "",
+          google_maps: "",
+        }]
+      : [];
+    const rows = [...businessRows, ...companyRow];
+
+    downloadProspectingCsv("origocrm-prospeccao.csv", rows);
+  }
+
   return (
     <div className="fixed inset-0 z-[70] overflow-hidden bg-black/70 backdrop-blur-2xl">
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(139,92,246,0.24),transparent_32%),radial-gradient(circle_at_bottom_right,rgba(37,211,102,0.12),transparent_28%)]" />
@@ -102,7 +136,9 @@ function ProspectingModalContent({
           onAddBusinessLead={(business) => void addBusinessLead(business)}
           onClose={onClose}
           onGenerateApproach={generateApproach}
+          onExportBusinesses={exportBusinessesCsv}
           onLookupCnpj={(cnpj) => void lookupCnpj(cnpj)}
+          onLookupCnae={lookupCnae}
           onSearch={search}
           onSelectBusiness={prospecting.setSelectedBusiness}
           selectedBusiness={prospecting.selectedBusiness}
@@ -117,7 +153,9 @@ function ProspectingModalContent({
           onAddBusinessLead={(business) => void addBusinessLead(business)}
           onClose={onClose}
           onGenerateApproach={generateApproach}
+          onExportBusinesses={exportBusinessesCsv}
           onLookupCnpj={(cnpj) => void lookupCnpj(cnpj)}
+          onLookupCnae={lookupCnae}
           onSearch={search}
           onSelectBusiness={prospecting.setSelectedBusiness}
           selectedBusiness={prospecting.selectedBusiness}
@@ -125,6 +163,29 @@ function ProspectingModalContent({
       </div>
     </div>
   );
+}
+
+function downloadProspectingCsv(filename: string, rows: Record<string, string>[]) {
+  if (rows.length === 0) return;
+
+  const headers = Object.keys(rows[0]);
+  const escape = (value: string) => `"${value.replaceAll("\"", "\"\"")}"`;
+  const csv = [
+    headers.join(","),
+    ...rows.map((row) => headers.map((header) => escape(row[header] ?? "")).join(",")),
+  ].join("\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+function extractStateFromAddress(address: string) {
+  const match = address.match(/\b(AC|AL|AP|AM|BA|CE|DF|ES|GO|MA|MT|MS|MG|PA|PB|PR|PE|PI|RJ|RN|RS|RO|RR|SC|SP|SE|TO)\b/);
+  return match?.[1] ?? "";
 }
 
 export default ProspectingModal;

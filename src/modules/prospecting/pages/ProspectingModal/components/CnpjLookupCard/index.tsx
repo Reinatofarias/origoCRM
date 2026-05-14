@@ -18,25 +18,38 @@ function maskCnpj(value: string) {
 export function CnpjLookupCard({
   company,
   isLoading,
+  onLookupCnae,
   onLookup,
 }: {
   company: CompanyByCnpj | null;
   isLoading: boolean;
+  onLookupCnae: (input: { cnae: string; state: string }) => void;
   onLookup: (cnpj: string) => void;
 }) {
-  const [cnpj, setCnpj] = useState("12.345.678/0001-90");
+  const [cnpj, setCnpj] = useState("");
+  const [cnae, setCnae] = useState("");
+  const [state, setState] = useState("TO");
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     onLookup(cnpj);
   }
 
+  function submitCnae(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!cnae.trim() || !state.trim()) return;
+    onLookupCnae({ cnae, state });
+  }
+
   return (
     <section className="rounded-2xl border border-white/10 bg-white/[0.045] p-4 backdrop-blur-xl">
       <div className="flex items-center gap-2 text-sm font-medium text-[#DDD6FE]">
         <Building2 className="h-4 w-4" />
-        Consultar Empresa por CNPJ
+        Receita Federal
       </div>
+      <p className="mt-1 text-xs leading-5 text-zinc-500">
+        Consulte um CNPJ especifico via BrasilAPI ou pesquise empresas por CNAE/UF usando provedor comercial.
+      </p>
       <form className="mt-4 flex flex-col gap-2 sm:flex-row" onSubmit={submit}>
         <input
           className="h-11 flex-1 rounded-xl border border-white/10 bg-black/35 px-4 text-sm text-white outline-none transition focus:border-[#A78BFA]"
@@ -50,6 +63,30 @@ export function CnpjLookupCard({
         >
           <Search className="h-4 w-4" />
           Consultar
+        </button>
+      </form>
+      <form className="mt-3 grid gap-2 sm:grid-cols-[1fr_0.7fr_auto]" onSubmit={submitCnae}>
+        <input
+          className="h-11 rounded-xl border border-white/10 bg-black/35 px-4 text-sm text-white outline-none transition focus:border-[#A78BFA]"
+          onChange={(event) => setCnae(event.target.value.replace(/\D/g, "").slice(0, 7))}
+          placeholder="CNAE. Ex.: 8630503"
+          value={cnae}
+        />
+        <select
+          className="h-11 rounded-xl border border-white/10 bg-black/35 px-3 text-sm text-white outline-none transition focus:border-[#A78BFA]"
+          onChange={(event) => setState(event.target.value)}
+          value={state}
+        >
+          {BRAZIL_STATES.map((item) => (
+            <option key={item} value={item}>{item}</option>
+          ))}
+        </select>
+        <button
+          className="flex h-11 items-center justify-center gap-2 rounded-xl border border-[#25D366]/25 bg-[#25D366]/10 px-4 text-sm text-[#9AF0B8] transition hover:bg-[#25D366]/20 disabled:opacity-60"
+          disabled={isLoading}
+        >
+          <Search className="h-4 w-4" />
+          Buscar CNAE
         </button>
       </form>
       {company && (
@@ -84,6 +121,11 @@ export function CnpjLookupCard({
     </section>
   );
 }
+
+const BRAZIL_STATES = [
+  "AC", "AL", "AP", "AM", "BA", "CE", "DF", "ES", "GO", "MA", "MT", "MS", "MG",
+  "PA", "PB", "PR", "PE", "PI", "RJ", "RN", "RS", "RO", "RR", "SC", "SP", "SE", "TO",
+];
 
 function Info({ label, value }: { label: string; value: string }) {
   return (

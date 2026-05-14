@@ -1,5 +1,7 @@
 export type {
   CnpjLookupInput,
+  CnaeCompanySearchResult,
+  CnaeLookupInput,
   CompanyByCnpj,
   CompanyPartner,
   EnrichedCompany,

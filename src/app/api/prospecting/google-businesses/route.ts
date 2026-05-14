@@ -32,10 +32,11 @@ type OutscraperPlace = {
 export async function POST(request: NextRequest) {
   const body = (await request.json()) as Partial<ProspectingSearchInput>;
   const niche = body.niche?.trim();
+  const state = body.state?.trim().toUpperCase();
   const city = body.city?.trim();
 
-  if (!niche || !city) {
-    return NextResponse.json({ error: "Informe nicho e cidade" }, { status: 400 });
+  if (!niche || !state) {
+    return NextResponse.json({ error: "Informe tipo de empresa/profissional e estado" }, { status: 400 });
   }
 
   const apiKey = process.env.OUTSCRAPER_API_KEY;
@@ -45,7 +46,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(
       {
         error: "OUTSCRAPER_API_KEY nao configurada na Vercel",
-        query: `${niche} em ${city}`,
+        query: buildSearchQuery(niche, state, city),
         provider: "outscraper",
         page: body.page ?? 1,
         hasNextPage: false,
@@ -55,8 +56,8 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const limit = Math.min(Math.max(Number(body.limit ?? 20), 1), 50);
-  const query = `${niche}, ${city}, Brasil`;
+  const limit = Math.min(Math.max(Number(body.limit ?? 50), 1), 100);
+  const query = buildSearchQuery(niche, state, city);
   const response = await fetch(endpoint, {
     method: "POST",
     headers: {
@@ -113,6 +114,10 @@ export async function POST(request: NextRequest) {
     hasNextPage: false,
     businesses: places.map(mapOutscraperPlaceToBusiness),
   });
+}
+
+function buildSearchQuery(niche: string, state: string, city?: string) {
+  return [niche, city, state, "Brasil"].filter(Boolean).join(", ");
 }
 
 function extractPlaces(payload: unknown): OutscraperPlace[] {

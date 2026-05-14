@@ -1,6 +1,6 @@
 "use client";
 
-import { Flame, X } from "lucide-react";
+import { Download, Flame, X } from "lucide-react";
 
 import type { CompanyByCnpj, ProspectBusiness, ProspectingSearchInput } from "../../../types";
 import { BusinessCard, BusinessDetails, CnpjLookupCard, ProspectingSearchForm, ProspectingSkeleton } from "../components";
@@ -15,7 +15,9 @@ export function ProspectingMobile({
   onAddBusinessLead,
   onClose,
   onGenerateApproach,
+  onExportBusinesses,
   onLookupCnpj,
+  onLookupCnae,
   onSearch,
   onSelectBusiness,
   selectedBusiness,
@@ -29,7 +31,9 @@ export function ProspectingMobile({
   onAddBusinessLead: (business: ProspectBusiness) => void;
   onClose: () => void;
   onGenerateApproach: (business: ProspectBusiness) => void;
+  onExportBusinesses: () => void;
   onLookupCnpj: (cnpj: string) => void;
+  onLookupCnae: (input: { cnae: string; state: string }) => void;
   onSearch: (input: ProspectingSearchInput) => void;
   onSelectBusiness: (business: ProspectBusiness) => void;
   selectedBusiness: ProspectBusiness | null;
@@ -46,13 +50,23 @@ export function ProspectingMobile({
             <h2 className="mt-2 text-2xl font-semibold text-white">Buscar empresas</h2>
             <p className="mt-2 text-sm leading-6 text-zinc-400">Google Maps, CNPJ e qualificação comercial em uma experiência única.</p>
           </div>
-          <button
-            className="rounded-xl border border-white/10 bg-white/[0.04] p-2 text-zinc-400"
-            onClick={onClose}
-            type="button"
-          >
-            <X className="h-5 w-5" />
-          </button>
+          <div className="flex gap-2">
+            <button
+              className="rounded-xl border border-white/10 bg-white/[0.04] p-2 text-zinc-400 disabled:opacity-50"
+              disabled={businesses.length === 0 && !company}
+              onClick={onExportBusinesses}
+              type="button"
+            >
+              <Download className="h-5 w-5" />
+            </button>
+            <button
+              className="rounded-xl border border-white/10 bg-white/[0.04] p-2 text-zinc-400"
+              onClick={onClose}
+              type="button"
+            >
+              <X className="h-5 w-5" />
+            </button>
+          </div>
         </div>
         <div className="mt-4 grid grid-cols-2 gap-2">
           <Metric label="Empresas" value={metrics.total} />
@@ -75,7 +89,7 @@ export function ProspectingMobile({
           />
         ))}
         <BusinessDetails approach={approach} business={selectedBusiness} />
-        <CnpjLookupCard company={company} isLoading={isLoading} onLookup={onLookupCnpj} />
+        <CnpjLookupCard company={company} isLoading={isLoading} onLookup={onLookupCnpj} onLookupCnae={onLookupCnae} />
       </div>
     </div>
   );
