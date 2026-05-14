@@ -17,6 +17,8 @@ export function ProspectingMobile({
   addedLeadIds,
   approach,
   businesses,
+  batchLimit,
+  campaignNotice,
   dispatchStates,
   existingLeadPhones,
   intervalSeconds,
@@ -32,6 +34,7 @@ export function ProspectingMobile({
   onExportBusinesses,
   onIntervalChange,
   onSearch,
+  onSelectFailedProspects,
   onSelectPhoneProspects,
   onSelectBusiness,
   onStartCampaign,
@@ -45,6 +48,9 @@ export function ProspectingMobile({
   selectedTemplateId,
   selectedBusiness,
   sendableCount,
+  sentCount,
+  ignoredCount,
+  failedCount,
   templates,
   validationStates,
   validWhatsAppCount,
@@ -52,6 +58,8 @@ export function ProspectingMobile({
   addedLeadIds: Set<string>;
   approach: string;
   businesses: ProspectBusiness[];
+  batchLimit: number;
+  campaignNotice: string;
   dispatchStates: Record<string, ProspectingDispatchState>;
   existingLeadPhones: Set<string>;
   intervalSeconds: number;
@@ -67,6 +75,7 @@ export function ProspectingMobile({
   onExportBusinesses: () => void;
   onIntervalChange: (value: number) => void;
   onSearch: (input: ProspectingSearchInput) => void;
+  onSelectFailedProspects: () => void;
   onSelectPhoneProspects: () => void;
   onSelectBusiness: (business: ProspectBusiness) => void;
   onStartCampaign: () => void;
@@ -80,6 +89,9 @@ export function ProspectingMobile({
   selectedTemplateId: string;
   selectedBusiness: ProspectBusiness | null;
   sendableCount: number;
+  sentCount: number;
+  ignoredCount: number;
+  failedCount: number;
   templates: MessageTemplate[];
   validationStates: Record<string, ProspectingWhatsAppValidationState>;
   validWhatsAppCount: number;
@@ -124,13 +136,18 @@ export function ProspectingMobile({
       <div className="mt-4 space-y-4">
         <ProspectingSearchForm isLoading={isLoading} onSearch={onSearch} />
         <CampaignPanel
+          batchLimit={batchLimit}
+          failedCount={failedCount}
+          ignoredCount={ignoredCount}
           dispatchStates={dispatchStates}
           intervalSeconds={intervalSeconds}
           isValidatingWhatsApp={isValidatingWhatsApp}
           isRunning={isSendingCampaign}
+          notice={campaignNotice}
           onClearSelection={onClearSelection}
           onIgnoreSelected={onIgnoreSelected}
           onIntervalChange={onIntervalChange}
+          onSelectFailedProspects={onSelectFailedProspects}
           onSelectPhoneProspects={onSelectPhoneProspects}
           onStartCampaign={onStartCampaign}
           onTemplateChange={onTemplateChange}
@@ -141,6 +158,7 @@ export function ProspectingMobile({
           selectedCount={selectedBusinessIds.size}
           selectedTemplateId={selectedTemplateId}
           sendableCount={sendableCount}
+          sentCount={sentCount}
           templates={templates}
           validWhatsAppCount={validWhatsAppCount}
         />
@@ -152,15 +170,24 @@ export function ProspectingMobile({
           const unavailable = !normalizedPhone || existingLeadPhones.has(normalizedPhone) || addedLeadIds.has(business.id);
           const dispatchStatus = dispatchStates[business.id]?.status;
           const validationStatus = validationStates[business.id]?.status ?? "unknown";
+          const isFinished = dispatchStatus === "sent" || dispatchStatus === "lead_added" || dispatchStatus === "ignored";
+          const isSelected = selectedBusinessIds.has(business.id);
 
           return (
             <div className="space-y-2" key={business.id}>
               <label className="flex items-center justify-between rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-zinc-300">
-                <span>{dispatchStatus ? `Status: ${dispatchStatus}` : `WhatsApp: ${validationStatus}`}</span>
+                <span>{isSelected ? "No lote atual" : dispatchStatus ? `Status: ${dispatchStatus}` : `WhatsApp: ${validationStatus}`}</span>
                 <input
-                  checked={selectedBusinessIds.has(business.id)}
+                  checked={isSelected}
                   className="h-4 w-4 rounded border-white/20 bg-black accent-[#8B5CF6]"
-                  disabled={unavailable || validationStatus === "invalid" || validationStatus === "error" || validationStatus === "checking"}
+                  disabled={
+                    unavailable ||
+                    isFinished ||
+                    validationStatus === "invalid" ||
+                    validationStatus === "error" ||
+                    validationStatus === "checking" ||
+                    (!isSelected && selectedBusinessIds.size >= batchLimit)
+                  }
                   onChange={() => onToggleBusiness(business)}
                   type="checkbox"
                 />

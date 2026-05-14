@@ -15,11 +15,12 @@ export function ProspectingSearchForm({
   const [niche, setNiche] = useState("Clínicas de estética");
   const [state, setState] = useState("TO");
   const [city, setCity] = useState("");
+  const [limit, setLimit] = useState(60);
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!niche.trim() || !state.trim()) return;
-    onSearch({ niche, state, city: city.trim() || undefined, limit: 20, provider: "serpapi" });
+    onSearch({ niche, state, city: city.trim() || undefined, limit, provider: "serpapi" });
   }
 
   return (
@@ -31,7 +32,7 @@ export function ProspectingSearchForm({
         <Sparkles className="h-4 w-4" />
         Buscar empresas no Google
       </div>
-      <div className="mt-4 grid gap-3 lg:grid-cols-[1.1fr_0.7fr_0.9fr_auto]">
+      <div className="mt-4 grid gap-3 lg:grid-cols-[1.1fr_0.7fr_0.9fr_0.55fr_auto]">
         <label className="block text-sm text-zinc-300">
           Tipo de empresa/profissional
           <input
@@ -63,6 +64,18 @@ export function ProspectingSearchForm({
             placeholder="Palmas, Recife..."
             value={city}
           />
+        </label>
+        <label className="block text-sm text-zinc-300">
+          Quantidade
+          <select
+            className="mt-2 h-12 w-full rounded-xl border border-white/10 bg-black/35 px-4 text-sm text-white outline-none transition focus:border-[#A78BFA] focus:shadow-[0_0_0_3px_rgba(139,92,246,0.16)]"
+            onChange={(event) => setLimit(Number(event.target.value))}
+            value={limit}
+          >
+            <option value={20}>20</option>
+            <option value={40}>40</option>
+            <option value={60}>60</option>
+          </select>
         </label>
         <button
           className="mt-0 flex h-12 items-center justify-center gap-2 rounded-xl bg-[#8B5CF6] px-5 text-sm font-semibold text-white shadow-lg shadow-[#8B5CF6]/25 transition hover:bg-[#7C3AED] disabled:cursor-not-allowed disabled:opacity-60 lg:mt-7"

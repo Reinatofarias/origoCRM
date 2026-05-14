@@ -12,6 +12,7 @@ export interface ProspectingSearchInput {
   city?: string;
   page?: number;
   limit?: number;
+  start?: number;
   provider?: ProspectingProvider;
 }
 
@@ -44,6 +45,7 @@ export interface ProspectingSearchResult {
   query: string;
   provider: ProspectingProvider;
   page: number;
+  start?: number;
   hasNextPage: boolean;
   businesses: ProspectBusiness[];
 }

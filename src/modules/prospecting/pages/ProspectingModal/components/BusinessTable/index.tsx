@@ -5,9 +5,10 @@ import { CheckCircle2, ExternalLink, MessageCircle, Phone, Plus, Star, XCircle }
 import type { ProspectBusiness, ProspectingDispatchState, ProspectingWhatsAppValidationState } from "../../../../types";
 import { normalizeProspectingWhatsAppPhone } from "../../../../utils/phone";
 
-function statusLabel(state?: ProspectingDispatchState, isAdded?: boolean, isDuplicate?: boolean) {
+function statusLabel(state?: ProspectingDispatchState, isAdded?: boolean, isDuplicate?: boolean, isSelected?: boolean) {
   if (isAdded) return { label: "Lead criado", className: "border-[#25D366]/25 bg-[#25D366]/10 text-[#9AF0B8]" };
   if (isDuplicate) return { label: "Ja esta no CRM", className: "border-amber-400/25 bg-amber-500/10 text-amber-100" };
+  if (isSelected && !state) return { label: "No lote", className: "border-[#8B5CF6]/25 bg-[#8B5CF6]/10 text-[#DDD6FE]" };
   if (!state) return { label: "Novo", className: "border-white/10 bg-white/[0.04] text-zinc-300" };
   if (state.status === "queued") return { label: "Na fila", className: "border-[#8B5CF6]/25 bg-[#8B5CF6]/10 text-[#DDD6FE]" };
   if (state.status === "sending") return { label: "Enviando", className: "border-[#8B5CF6]/25 bg-[#8B5CF6]/10 text-[#DDD6FE]" };
@@ -42,6 +43,7 @@ export function BusinessTable({
   onAddLead,
   onSelectBusiness,
   onToggleBusiness,
+  selectionLimit,
   selectedIds,
   validationStates,
 }: {
@@ -53,6 +55,7 @@ export function BusinessTable({
   onAddLead: (business: ProspectBusiness) => void;
   onSelectBusiness: (business: ProspectBusiness) => void;
   onToggleBusiness: (business: ProspectBusiness) => void;
+  selectionLimit: number;
   selectedIds: Set<string>;
   validationStates: Record<string, ProspectingWhatsAppValidationState>;
 }) {
@@ -76,7 +79,10 @@ export function BusinessTable({
           const normalizedPhone = normalizeProspectingWhatsAppPhone(business.phone);
           const isDuplicate = Boolean(normalizedPhone && existingLeadPhones.has(normalizedPhone));
           const isAdded = addedLeadIds.has(business.id);
-          const label = statusLabel(dispatchStates[business.id], isAdded, isDuplicate);
+          const isSelected = selectedIds.has(business.id);
+          const dispatchStatus = dispatchStates[business.id]?.status;
+          const isFinished = dispatchStatus === "sent" || dispatchStatus === "lead_added" || dispatchStatus === "ignored";
+          const label = statusLabel(dispatchStates[business.id], isAdded, isDuplicate, isSelected);
           const validation = validationStates[business.id]?.status ?? "unknown";
 
           return (
@@ -86,9 +92,18 @@ export function BusinessTable({
             >
               <input
                 aria-label={`Selecionar ${business.name}`}
-                checked={selectedIds.has(business.id)}
+                checked={isSelected}
                 className="h-4 w-4 rounded border-white/20 bg-black accent-[#8B5CF6]"
-                disabled={!business.phone || isDuplicate || isAdded || validation === "invalid" || validation === "error" || validation === "checking"}
+                disabled={
+                  !business.phone ||
+                  isDuplicate ||
+                  isAdded ||
+                  isFinished ||
+                  validation === "invalid" ||
+                  validation === "error" ||
+                  validation === "checking" ||
+                  (!isSelected && selectedIds.size >= selectionLimit)
+                }
                 onChange={() => onToggleBusiness(business)}
                 type="checkbox"
               />

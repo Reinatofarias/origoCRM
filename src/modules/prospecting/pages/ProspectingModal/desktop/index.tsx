@@ -17,6 +17,8 @@ export function ProspectingDesktop({
   addedLeadIds,
   approach,
   businesses,
+  batchLimit,
+  campaignNotice,
   dispatchStates,
   existingLeadPhones,
   intervalSeconds,
@@ -32,6 +34,7 @@ export function ProspectingDesktop({
   onExportBusinesses,
   onIntervalChange,
   onSearch,
+  onSelectFailedProspects,
   onSelectPhoneProspects,
   onSelectBusiness,
   onStartCampaign,
@@ -45,6 +48,9 @@ export function ProspectingDesktop({
   selectedTemplateId,
   selectedBusiness,
   sendableCount,
+  sentCount,
+  ignoredCount,
+  failedCount,
   templates,
   validationStates,
   validWhatsAppCount,
@@ -52,6 +58,8 @@ export function ProspectingDesktop({
   addedLeadIds: Set<string>;
   approach: string;
   businesses: ProspectBusiness[];
+  batchLimit: number;
+  campaignNotice: string;
   dispatchStates: Record<string, ProspectingDispatchState>;
   existingLeadPhones: Set<string>;
   intervalSeconds: number;
@@ -67,6 +75,7 @@ export function ProspectingDesktop({
   onExportBusinesses: () => void;
   onIntervalChange: (value: number) => void;
   onSearch: (input: ProspectingSearchInput) => void;
+  onSelectFailedProspects: () => void;
   onSelectPhoneProspects: () => void;
   onSelectBusiness: (business: ProspectBusiness) => void;
   onStartCampaign: () => void;
@@ -80,6 +89,9 @@ export function ProspectingDesktop({
   selectedTemplateId: string;
   selectedBusiness: ProspectBusiness | null;
   sendableCount: number;
+  sentCount: number;
+  ignoredCount: number;
+  failedCount: number;
   templates: MessageTemplate[];
   validationStates: Record<string, ProspectingWhatsAppValidationState>;
   validWhatsAppCount: number;
@@ -144,6 +156,7 @@ export function ProspectingDesktop({
                 onAddLead={onAddBusinessLead}
                 onSelectBusiness={onSelectBusiness}
                 onToggleBusiness={onToggleBusiness}
+                selectionLimit={batchLimit}
                 selectedIds={selectedBusinessIds}
                 validationStates={validationStates}
               />
@@ -154,12 +167,17 @@ export function ProspectingDesktop({
       <div className="min-h-0 space-y-5 overflow-y-auto">
         <CampaignPanel
           dispatchStates={dispatchStates}
+          failedCount={failedCount}
+          ignoredCount={ignoredCount}
           intervalSeconds={intervalSeconds}
           isValidatingWhatsApp={isValidatingWhatsApp}
           isRunning={isSendingCampaign}
+          batchLimit={batchLimit}
+          notice={campaignNotice}
           onClearSelection={onClearSelection}
           onIgnoreSelected={onIgnoreSelected}
           onIntervalChange={onIntervalChange}
+          onSelectFailedProspects={onSelectFailedProspects}
           onSelectPhoneProspects={onSelectPhoneProspects}
           onStartCampaign={onStartCampaign}
           onTemplateChange={onTemplateChange}
@@ -170,6 +188,7 @@ export function ProspectingDesktop({
           selectedCount={selectedBusinessIds.size}
           selectedTemplateId={selectedTemplateId}
           sendableCount={sendableCount}
+          sentCount={sentCount}
           templates={templates}
           validWhatsAppCount={validWhatsAppCount}
         />

@@ -1,19 +1,24 @@
 "use client";
 
-import { CheckCircle2, Loader2, MessageCircle, PauseCircle, Send, ShieldCheck, Trash2 } from "lucide-react";
+import { CheckCircle2, Loader2, MessageCircle, PauseCircle, RotateCcw, Send, ShieldCheck, Trash2 } from "lucide-react";
 
 import type { MessageTemplate } from "@/lib/types";
 
 import type { ProspectingDispatchState } from "../../../../types";
 
 export function CampaignPanel({
+  batchLimit,
   dispatchStates,
+  failedCount,
+  ignoredCount,
   intervalSeconds,
   isValidatingWhatsApp,
   isRunning,
+  notice,
   onClearSelection,
   onIgnoreSelected,
   onIntervalChange,
+  onSelectFailedProspects,
   onSelectPhoneProspects,
   onStartCampaign,
   onTemplateChange,
@@ -23,17 +28,23 @@ export function CampaignPanel({
   selectedCount,
   selectedTemplateId,
   sendableCount,
+  sentCount,
   templates,
   onlyWhatsApp,
   validWhatsAppCount,
 }: {
+  batchLimit: number;
   dispatchStates: Record<string, ProspectingDispatchState>;
+  failedCount: number;
+  ignoredCount: number;
   intervalSeconds: number;
   isValidatingWhatsApp: boolean;
   isRunning: boolean;
+  notice: string;
   onClearSelection: () => void;
   onIgnoreSelected: () => void;
   onIntervalChange: (value: number) => void;
+  onSelectFailedProspects: () => void;
   onSelectPhoneProspects: () => void;
   onStartCampaign: () => void;
   onTemplateChange: (templateId: string) => void;
@@ -43,12 +54,11 @@ export function CampaignPanel({
   selectedCount: number;
   selectedTemplateId: string;
   sendableCount: number;
+  sentCount: number;
   templates: MessageTemplate[];
   onlyWhatsApp: boolean;
   validWhatsAppCount: number;
 }) {
-  const sent = Object.values(dispatchStates).filter((item) => item.status === "sent").length;
-  const failed = Object.values(dispatchStates).filter((item) => item.status === "failed").length;
   const queued = Object.values(dispatchStates).filter((item) => item.status === "queued" || item.status === "sending").length;
 
   return (
@@ -60,22 +70,30 @@ export function CampaignPanel({
             Campanha WhatsApp
           </div>
           <h3 className="mt-2 text-lg font-semibold text-white">Disparo para prospects</h3>
-          <p className="mt-1 text-sm leading-6 text-zinc-400">Envia sem criar lead. Quem responder aparece em Conversas.</p>
+          <p className="mt-1 text-sm leading-6 text-zinc-400">Trabalhe por lotes de {batchLimit}. Enviados e ignorados nao entram no proximo lote.</p>
         </div>
         <ShieldCheck className="h-5 w-5 text-[#25D366]" />
       </div>
 
       <div className="mt-5 grid grid-cols-3 gap-2">
-        <Metric label="Selecionados" value={selectedCount} />
+        <Metric label={`Lote / ${batchLimit}`} value={selectedCount} />
         <Metric label="Enviaveis" value={sendableCount} />
-        <Metric label="Enviados" value={sent} />
+        <Metric label="Enviados" value={sentCount} />
       </div>
       <div className="mt-2 grid grid-cols-2 gap-2">
         <Metric label="Na fila" value={queued} />
-        <Metric label="Falhas" value={failed} />
+        <Metric label="Falhas" value={failedCount} />
+      </div>
+      <div className="mt-2 rounded-xl border border-white/10 bg-black/25 px-3 py-2 text-xs text-zinc-400">
+        <span className="text-zinc-300">{ignoredCount}</span> ignorados ficam bloqueados para novas campanhas.
       </div>
 
       <div className="mt-5 space-y-3">
+        {notice && (
+          <div className="rounded-xl border border-[#8B5CF6]/25 bg-[#8B5CF6]/10 px-3 py-2 text-xs leading-5 text-[#DDD6FE]">
+            {notice}
+          </div>
+        )}
         <div className="rounded-xl border border-white/10 bg-black/25 p-3">
           <div className="flex items-center justify-between gap-3">
             <div>
@@ -158,7 +176,7 @@ export function CampaignPanel({
             type="button"
           >
             <MessageCircle className="h-4 w-4" />
-            Selecionar telefones
+            Selecionar proximos {batchLimit}
           </button>
           <button
             className="flex h-10 items-center justify-center gap-2 rounded-xl border border-white/10 px-3 text-xs text-zinc-300 transition hover:bg-white/[0.06]"
@@ -168,6 +186,15 @@ export function CampaignPanel({
           >
             <PauseCircle className="h-4 w-4" />
             Limpar
+          </button>
+          <button
+            className="col-span-2 flex h-10 items-center justify-center gap-2 rounded-xl border border-amber-400/20 bg-amber-500/10 px-3 text-xs text-amber-100 transition hover:bg-amber-500/20"
+            disabled={isRunning || failedCount === 0}
+            onClick={onSelectFailedProspects}
+            type="button"
+          >
+            <RotateCcw className="h-4 w-4" />
+            Selecionar falhas para reenvio
           </button>
           <button
             className="col-span-2 flex h-10 items-center justify-center gap-2 rounded-xl border border-red-400/20 bg-red-500/10 px-3 text-xs text-red-200 transition hover:bg-red-500/20"

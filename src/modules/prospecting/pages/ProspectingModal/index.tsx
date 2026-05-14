@@ -16,6 +16,8 @@ import { normalizeProspectingWhatsAppPhone } from "../../utils/phone";
 import { ProspectingDesktop } from "./desktop";
 import { ProspectingMobile } from "./mobile";
 
+const CAMPAIGN_BATCH_LIMIT = 20;
+
 export function ProspectingModal({
   existingLeadPhones,
   onAddLead,
@@ -87,6 +89,7 @@ function ProspectingModalContent({
   const [isValidatingWhatsApp, setIsValidatingWhatsApp] = useState(false);
   const [onlyWhatsApp, setOnlyWhatsApp] = useState(false);
   const [validationStates, setValidationStates] = useState<Record<string, ProspectingWhatsAppValidationState>>({});
+  const [campaignNotice, setCampaignNotice] = useState("");
 
   const selectedBusinesses = useMemo(
     () => prospecting.businesses.filter((business) => selectedBusinessIds.has(business.id)),
@@ -107,6 +110,9 @@ function ProspectingModalContent({
       state !== "ignored"
     );
   });
+  const sentCount = Object.values(dispatchStates).filter((item) => item.status === "sent").length;
+  const ignoredCount = Object.values(dispatchStates).filter((item) => item.status === "ignored").length;
+  const failedCount = Object.values(dispatchStates).filter((item) => item.status === "failed").length;
   const validWhatsAppCount = Object.values(validationStates).filter((item) => item.status === "valid").length;
   const previewMessage = selectedTemplate && selectedBusinesses[0]
     ? renderProspectingTemplate(selectedTemplate.body, selectedBusinesses[0])
@@ -126,9 +132,10 @@ function ProspectingModalContent({
     setDispatchStates({});
     setValidationStates({});
     setOnlyWhatsApp(false);
+    setCampaignNotice("");
     prospecting.searchBusinesses.mutate(input, {
-      onSuccess: (result) => {
-        prospecting.setSelectedBusiness(result.businesses[0] ?? null);
+      onSuccess: () => {
+        prospecting.setSelectedBusiness(null);
       },
     });
   }
@@ -172,26 +179,50 @@ function ProspectingModalContent({
   function toggleBusiness(business: ProspectBusiness) {
     const phone = normalizeProspectingWhatsAppPhone(business.phone);
     if (!phone || existingLeadPhones.has(phone) || prospecting.addedLeadIds.has(business.id)) return;
+    if (isFinishedDispatch(dispatchStates[business.id]?.status)) return;
     setSelectedBusinessIds((current) => {
       const next = new Set(current);
       if (next.has(business.id)) next.delete(business.id);
-      else next.add(business.id);
+      else {
+        if (next.size >= CAMPAIGN_BATCH_LIMIT) {
+          setCampaignNotice(`Lote limitado a ${CAMPAIGN_BATCH_LIMIT} contatos. Envie ou limpe para selecionar novos.`);
+          return current;
+        }
+        next.add(business.id);
+        setCampaignNotice("");
+      }
       return next;
     });
     prospecting.setSelectedBusiness(business);
   }
 
   function selectPhoneProspects() {
-    setSelectedBusinessIds(
-      new Set(
-        prospecting.businesses
-          .filter((business) => {
-            const phone = normalizeProspectingWhatsAppPhone(business.phone);
-            return Boolean(phone) && !existingLeadPhones.has(phone) && !prospecting.addedLeadIds.has(business.id);
-          })
-          .map((business) => business.id),
-      ),
+    const selected = prospecting.businesses
+      .filter((business) => canEnterCampaignBatch({
+        business,
+        dispatchState: dispatchStates[business.id],
+        existingLeadPhones,
+        isAdded: prospecting.addedLeadIds.has(business.id),
+        onlyWhatsApp,
+        validationState: validationStates[business.id],
+      }))
+      .slice(0, CAMPAIGN_BATCH_LIMIT);
+
+    setSelectedBusinessIds(new Set(selected.map((business) => business.id)));
+    setCampaignNotice(
+      selected.length === 0
+        ? "Nenhum contato elegivel para o proximo lote."
+        : `Lote preparado com ${selected.length}/${CAMPAIGN_BATCH_LIMIT} contatos elegiveis.`,
     );
+  }
+
+  function selectFailedProspects() {
+    const selected = prospecting.businesses
+      .filter((business) => dispatchStates[business.id]?.status === "failed")
+      .slice(0, CAMPAIGN_BATCH_LIMIT);
+
+    setSelectedBusinessIds(new Set(selected.map((business) => business.id)));
+    setCampaignNotice(selected.length === 0 ? "Nenhuma falha disponivel para reenviar." : `${selected.length} falhas selecionadas para reenvio.`);
   }
 
   async function validateSelectedWhatsApp() {
@@ -232,8 +263,9 @@ function ProspectingModalContent({
     setSelectedBusinessIds(new Set(toValidate.filter((business) => {
       const item = checked.get(normalizeProspectingWhatsAppPhone(business.phone));
       return item?.exists;
-    }).map((business) => business.id)));
+    }).slice(0, CAMPAIGN_BATCH_LIMIT).map((business) => business.id)));
     setOnlyWhatsApp(true);
+    setCampaignNotice(`Validacao concluida. ${validWhatsAppCountAfterCheck(toValidate, checked)} contatos com WhatsApp encontrados.`);
     setIsValidatingWhatsApp(false);
   }
 
@@ -244,19 +276,22 @@ function ProspectingModalContent({
       return next;
     });
     setSelectedBusinessIds(new Set());
+    setCampaignNotice("Contatos ignorados nao entram nos proximos lotes.");
   }
 
   async function startCampaign() {
     if (!selectedTemplate || sendableBusinesses.length === 0 || isSendingCampaign) return;
+    const campaignBusinesses = sendableBusinesses.slice(0, CAMPAIGN_BATCH_LIMIT);
 
     setIsSendingCampaign(true);
+    setCampaignNotice(`Campanha iniciada para ${campaignBusinesses.length} contatos validados.`);
     setDispatchStates((current) => {
       const next = { ...current };
-      for (const business of sendableBusinesses) next[business.id] = { status: "queued" };
+      for (const business of campaignBusinesses) next[business.id] = { status: "queued" };
       return next;
     });
 
-    for (const [index, business] of sendableBusinesses.entries()) {
+    for (const [index, business] of campaignBusinesses.entries()) {
       const phone = business.phone ?? "";
       const message = renderProspectingTemplate(selectedTemplate.body, business);
 
@@ -269,12 +304,14 @@ function ProspectingModalContent({
           : { status: "failed", error: result.error ?? "Falha ao enviar" },
       }));
 
-      if (index < sendableBusinesses.length - 1) {
+      if (index < campaignBusinesses.length - 1) {
         await sleep(Math.max(intervalSeconds, 5) * 1000);
       }
     }
 
     setIsSendingCampaign(false);
+    setSelectedBusinessIds(new Set());
+    setCampaignNotice("Campanha finalizada. Use Selecionar proximos 20 para montar outro lote sem repetir enviados.");
   }
 
   return (
@@ -285,6 +322,8 @@ function ProspectingModalContent({
           addedLeadIds={prospecting.addedLeadIds}
           approach={prospecting.generatedApproach}
           businesses={prospecting.businesses}
+          batchLimit={CAMPAIGN_BATCH_LIMIT}
+          campaignNotice={campaignNotice}
           dispatchStates={dispatchStates}
           existingLeadPhones={existingLeadPhones}
           intervalSeconds={intervalSeconds}
@@ -300,6 +339,7 @@ function ProspectingModalContent({
           onExportBusinesses={exportBusinessesCsv}
           onIntervalChange={setIntervalSeconds}
           onSearch={search}
+          onSelectFailedProspects={selectFailedProspects}
           onSelectPhoneProspects={selectPhoneProspects}
           onSelectBusiness={prospecting.setSelectedBusiness}
           onStartCampaign={() => void startCampaign()}
@@ -313,6 +353,9 @@ function ProspectingModalContent({
           selectedTemplateId={selectedTemplateIdForUi}
           selectedBusiness={prospecting.selectedBusiness}
           sendableCount={sendableBusinesses.length}
+          sentCount={sentCount}
+          ignoredCount={ignoredCount}
+          failedCount={failedCount}
           templates={templates}
           validationStates={validationStates}
           validWhatsAppCount={validWhatsAppCount}
@@ -321,6 +364,8 @@ function ProspectingModalContent({
           addedLeadIds={prospecting.addedLeadIds}
           approach={prospecting.generatedApproach}
           businesses={prospecting.businesses}
+          batchLimit={CAMPAIGN_BATCH_LIMIT}
+          campaignNotice={campaignNotice}
           dispatchStates={dispatchStates}
           existingLeadPhones={existingLeadPhones}
           intervalSeconds={intervalSeconds}
@@ -336,6 +381,7 @@ function ProspectingModalContent({
           onExportBusinesses={exportBusinessesCsv}
           onIntervalChange={setIntervalSeconds}
           onSearch={search}
+          onSelectFailedProspects={selectFailedProspects}
           onSelectPhoneProspects={selectPhoneProspects}
           onSelectBusiness={prospecting.setSelectedBusiness}
           onStartCampaign={() => void startCampaign()}
@@ -349,6 +395,9 @@ function ProspectingModalContent({
           selectedTemplateId={selectedTemplateIdForUi}
           selectedBusiness={prospecting.selectedBusiness}
           sendableCount={sendableBusinesses.length}
+          sentCount={sentCount}
+          ignoredCount={ignoredCount}
+          failedCount={failedCount}
           templates={templates}
           validationStates={validationStates}
           validWhatsAppCount={validWhatsAppCount}
@@ -384,6 +433,40 @@ function renderProspectingTemplate(template: string, business: ProspectBusiness)
     .replaceAll("{{origem}}", "Prospeccao Inteligente")
     .replaceAll("{{cidade}}", business.city ?? "")
     .replaceAll("{{estado}}", business.state ?? "");
+}
+
+function isFinishedDispatch(status?: ProspectingDispatchState["status"]) {
+  return status === "sent" || status === "lead_added" || status === "ignored";
+}
+
+function canEnterCampaignBatch({
+  business,
+  dispatchState,
+  existingLeadPhones,
+  isAdded,
+  onlyWhatsApp,
+  validationState,
+}: {
+  business: ProspectBusiness;
+  dispatchState?: ProspectingDispatchState;
+  existingLeadPhones: Set<string>;
+  isAdded: boolean;
+  onlyWhatsApp: boolean;
+  validationState?: ProspectingWhatsAppValidationState;
+}) {
+  const phone = normalizeProspectingWhatsAppPhone(business.phone);
+  if (!phone || existingLeadPhones.has(phone) || isAdded) return false;
+  if (isFinishedDispatch(dispatchState?.status)) return false;
+  if (validationState?.status === "invalid" || validationState?.status === "error" || validationState?.status === "checking") return false;
+  if (onlyWhatsApp) return validationState?.status === "valid";
+  return true;
+}
+
+function validWhatsAppCountAfterCheck(
+  businesses: ProspectBusiness[],
+  checked: Map<string, { number: string; exists: boolean; jid?: string }>,
+) {
+  return businesses.filter((business) => checked.get(normalizeProspectingWhatsAppPhone(business.phone))?.exists).length;
 }
 
 function sleep(ms: number) {

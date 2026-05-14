@@ -60,10 +60,11 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const limit = Math.min(Math.max(Number(body.limit ?? 20), 1), 20);
-  const firstSearch = await searchSerpApi({
+  const limit = Math.min(Math.max(Number(body.limit ?? 20), 1), 60);
+  const firstSearch = await collectSerpApiPlaces({
     apiKey,
     endpoint,
+    limit,
     location: buildSearchLocation(state, city),
     q: niche,
   });
@@ -75,12 +76,13 @@ export async function POST(request: NextRequest) {
   }
 
   let payload = firstSearch.payload;
-  let places = extractPlaces(payload);
+  let places = firstSearch.places;
 
   if (places.length === 0) {
-    const fallbackSearch = await searchSerpApi({
+    const fallbackSearch = await collectSerpApiPlaces({
       apiKey,
       endpoint,
+      limit,
       q: query,
     });
     const fallbackError = extractSerpApiError(fallbackSearch.payload);
@@ -89,14 +91,15 @@ export async function POST(request: NextRequest) {
     }
 
     payload = fallbackSearch.payload;
-    places = extractPlaces(payload);
+    places = fallbackSearch.places;
   }
 
   if (places.length === 0) {
-    const localFallbackSearch = await searchSerpApi({
+    const localFallbackSearch = await collectSerpApiPlaces({
       apiKey,
       endpoint,
       engine: "google_local",
+      limit,
       q: query,
     });
     const localFallbackError = extractSerpApiError(localFallbackSearch.payload);
@@ -108,7 +111,7 @@ export async function POST(request: NextRequest) {
     }
 
     payload = localFallbackSearch.payload;
-    places = extractPlaces(payload);
+    places = localFallbackSearch.places;
   }
 
   places = places.slice(0, limit);
@@ -126,6 +129,7 @@ async function searchSerpApi(input: {
   apiKey: string;
   endpoint: string;
   engine?: "google_maps" | "google_local";
+  start?: number;
   q: string;
   location?: string;
 }) {
@@ -137,6 +141,7 @@ async function searchSerpApi(input: {
   url.searchParams.set("hl", "pt");
   url.searchParams.set("gl", "br");
   url.searchParams.set("api_key", input.apiKey);
+  if (input.start && input.start > 0) url.searchParams.set("start", String(input.start));
   if (input.location) {
     url.searchParams.set("location", input.location);
     url.searchParams.set("z", "14");
@@ -145,6 +150,45 @@ async function searchSerpApi(input: {
   const response = await fetch(url, { cache: "no-store" });
   const payload = await response.json().catch(() => null);
   return { payload, response };
+}
+
+async function collectSerpApiPlaces(input: {
+  apiKey: string;
+  endpoint: string;
+  engine?: "google_maps" | "google_local";
+  limit: number;
+  q: string;
+  location?: string;
+}) {
+  const places: SerpApiLocalResult[] = [];
+  const seen = new Set<string>();
+  let lastPayload: unknown = null;
+  let lastResponse: Response | null = null;
+
+  for (const start of [0, 20, 40]) {
+    if (places.length >= input.limit) break;
+    const result = await searchSerpApi({ ...input, start });
+    lastPayload = result.payload;
+    lastResponse = result.response;
+
+    if (!result.response.ok) break;
+
+    for (const place of extractPlaces(result.payload)) {
+      const key = place.place_id ?? place.data_id ?? place.data_cid ?? `${place.title ?? ""}-${place.phone ?? ""}`;
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      places.push(place);
+      if (places.length >= input.limit) break;
+    }
+
+    if (!extractPaginationNext(result.payload)) break;
+  }
+
+  return {
+    payload: lastPayload,
+    response: lastResponse ?? new Response(null, { status: 502 }),
+    places,
+  };
 }
 
 function buildSearchQuery(niche: string, state: string, city?: string) {
