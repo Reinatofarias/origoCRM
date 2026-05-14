@@ -61,31 +61,36 @@ export async function POST(request: NextRequest) {
   }
 
   const limit = Math.min(Math.max(Number(body.limit ?? 20), 1), 20);
-  const url = new URL(endpoint);
-  url.searchParams.set("engine", "google_maps");
-  url.searchParams.set("type", "search");
-  url.searchParams.set("q", query);
-  url.searchParams.set("hl", "pt");
-  url.searchParams.set("gl", "br");
-  url.searchParams.set("google_domain", "google.com.br");
-  url.searchParams.set("api_key", apiKey);
-
-  const response = await fetch(url, { cache: "no-store" });
-  const payload = await response.json().catch(() => null);
-
-  if (!response.ok) {
-    return NextResponse.json(
-      { error: extractSerpApiError(payload) ?? "Falha ao consultar SerpAPI" },
-      { status: response.status },
-    );
+  const firstSearch = await searchSerpApi({
+    apiKey,
+    endpoint,
+    location: buildSearchLocation(state, city),
+    q: niche,
+  });
+  const firstError = extractSerpApiError(firstSearch.payload);
+  if (!firstSearch.response.ok && !isNoResultsError(firstError)) {
+    return NextResponse.json({ error: firstError ?? "Falha ao consultar SerpAPI" }, { status: firstSearch.response.status });
   }
 
-  const apiError = extractSerpApiError(payload);
-  if (apiError) {
-    return NextResponse.json({ error: apiError }, { status: 502 });
+  let payload = firstSearch.payload;
+  let places = extractPlaces(payload);
+
+  if (places.length === 0) {
+    const fallbackSearch = await searchSerpApi({
+      apiKey,
+      endpoint,
+      q: query,
+    });
+    const fallbackError = extractSerpApiError(fallbackSearch.payload);
+    if (!fallbackSearch.response.ok && !isNoResultsError(fallbackError)) {
+      return NextResponse.json({ error: fallbackError ?? "Falha ao consultar SerpAPI" }, { status: fallbackSearch.response.status });
+    }
+
+    payload = fallbackSearch.payload;
+    places = extractPlaces(payload);
   }
 
-  const places = extractPlaces(payload).slice(0, limit);
+  places = places.slice(0, limit);
 
   return NextResponse.json({
     query,
@@ -96,8 +101,30 @@ export async function POST(request: NextRequest) {
   });
 }
 
+async function searchSerpApi(input: { apiKey: string; endpoint: string; q: string; location?: string }) {
+  const url = new URL(input.endpoint);
+  url.searchParams.set("engine", "google_maps");
+  url.searchParams.set("type", "search");
+  url.searchParams.set("q", input.q);
+  url.searchParams.set("hl", "pt");
+  url.searchParams.set("gl", "br");
+  url.searchParams.set("api_key", input.apiKey);
+  if (input.location) {
+    url.searchParams.set("location", input.location);
+    url.searchParams.set("z", "14");
+  }
+
+  const response = await fetch(url, { cache: "no-store" });
+  const payload = await response.json().catch(() => null);
+  return { payload, response };
+}
+
 function buildSearchQuery(niche: string, state: string, city?: string) {
-  return [niche, city, state, "Brasil"].filter(Boolean).join(" ");
+  return [niche, city, state, "Brasil"].filter(Boolean).join(", ");
+}
+
+function buildSearchLocation(state: string, city?: string) {
+  return [city, state, "Brazil"].filter(Boolean).join(", ");
 }
 
 function extractPlaces(payload: unknown): SerpApiLocalResult[] {
@@ -210,4 +237,8 @@ function extractSerpApiError(payload: unknown) {
   if (!payload || typeof payload !== "object") return null;
   const record = payload as Record<string, unknown>;
   return String(record.error ?? record.message ?? "") || null;
+}
+
+function isNoResultsError(error: string | null) {
+  return Boolean(error?.toLowerCase().includes("hasn't returned any results"));
 }
