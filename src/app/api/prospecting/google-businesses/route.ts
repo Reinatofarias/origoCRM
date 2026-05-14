@@ -69,7 +69,9 @@ export async function POST(request: NextRequest) {
   });
   const firstError = extractSerpApiError(firstSearch.payload);
   if (!firstSearch.response.ok && !isNoResultsError(firstError)) {
-    return NextResponse.json({ error: firstError ?? "Falha ao consultar SerpAPI" }, { status: firstSearch.response.status });
+    if (!isUnsupportedLocationError(firstError)) {
+      return NextResponse.json({ error: firstError ?? "Falha ao consultar SerpAPI" }, { status: firstSearch.response.status });
+    }
   }
 
   let payload = firstSearch.payload;
@@ -90,6 +92,25 @@ export async function POST(request: NextRequest) {
     places = extractPlaces(payload);
   }
 
+  if (places.length === 0) {
+    const localFallbackSearch = await searchSerpApi({
+      apiKey,
+      endpoint,
+      engine: "google_local",
+      q: query,
+    });
+    const localFallbackError = extractSerpApiError(localFallbackSearch.payload);
+    if (!localFallbackSearch.response.ok && !isNoResultsError(localFallbackError)) {
+      return NextResponse.json(
+        { error: localFallbackError ?? "Falha ao consultar SerpAPI" },
+        { status: localFallbackSearch.response.status },
+      );
+    }
+
+    payload = localFallbackSearch.payload;
+    places = extractPlaces(payload);
+  }
+
   places = places.slice(0, limit);
 
   return NextResponse.json({
@@ -101,10 +122,17 @@ export async function POST(request: NextRequest) {
   });
 }
 
-async function searchSerpApi(input: { apiKey: string; endpoint: string; q: string; location?: string }) {
+async function searchSerpApi(input: {
+  apiKey: string;
+  endpoint: string;
+  engine?: "google_maps" | "google_local";
+  q: string;
+  location?: string;
+}) {
   const url = new URL(input.endpoint);
-  url.searchParams.set("engine", "google_maps");
-  url.searchParams.set("type", "search");
+  const engine = input.engine ?? "google_maps";
+  url.searchParams.set("engine", engine);
+  if (engine === "google_maps") url.searchParams.set("type", "search");
   url.searchParams.set("q", input.q);
   url.searchParams.set("hl", "pt");
   url.searchParams.set("gl", "br");
@@ -241,4 +269,8 @@ function extractSerpApiError(payload: unknown) {
 
 function isNoResultsError(error: string | null) {
   return Boolean(error?.toLowerCase().includes("hasn't returned any results"));
+}
+
+function isUnsupportedLocationError(error: string | null) {
+  return Boolean(error?.toLowerCase().includes("unsupported") && error.toLowerCase().includes("location"));
 }
