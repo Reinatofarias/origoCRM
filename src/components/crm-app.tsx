@@ -71,6 +71,7 @@ import {
   updateTask as updateTaskAction,
 } from "@/actions/tasks";
 import {
+  checkWhatsAppNumbers,
   saveWhatsAppConversationAsLead,
   sendWhatsAppConversationMessage,
   sendWhatsAppMessage,
@@ -92,6 +93,7 @@ import type {
 } from "@/lib/types";
 import { getViewSubtitle, pathViews, type View, viewPaths, viewTitles } from "@/lib/navigation";
 import { ProspectingModal } from "@/modules/prospecting";
+import { normalizeProspectingWhatsAppPhone } from "@/modules/prospecting/utils/phone";
 import {
   newId,
   normalizePhone,
@@ -560,7 +562,7 @@ function Workspace({
   const auditLogs = remoteAuditLogs;
   const priorityLeads = useMemo(() => getPriorityLeads(leads), [leads]);
   const existingLeadPhones = useMemo(
-    () => new Set([...leads, ...archivedLeads].map((lead) => normalizePhone(lead.phone)).filter(Boolean)),
+    () => new Set([...leads, ...archivedLeads].map((lead) => normalizeProspectingWhatsAppPhone(lead.phone)).filter(Boolean)),
     [archivedLeads, leads],
   );
 
@@ -1935,6 +1937,7 @@ function Workspace({
             }
             return { success: result.success, error: result.error };
           }}
+          onValidateWhatsAppNumbers={checkWhatsAppNumbers}
           templates={templates}
         />
       )}
@@ -2131,7 +2134,7 @@ function Dashboard({
     [operationalLeads],
   );
   const recentInboundMessages = useMemo(
-    () => whatsappMessages.filter((message) => message.direction === "inbound").slice(0, 5),
+    () => whatsappMessages.filter((message) => message.direction === "inbound").slice(0, 3),
     [whatsappMessages],
   );
   const recentErrors = useMemo(
@@ -2263,7 +2266,7 @@ function Dashboard({
         <DashboardPriorityCard description="Sem proximo passo" label="Quentes sem acao" value={hotLeadsWithoutAction.length} tone="warning" />
       </div>
 
-      <div className="grid gap-5 xl:grid-cols-[1.15fr_0.85fr]">
+      <div className="grid items-start gap-5 xl:grid-cols-[1.15fr_0.85fr]">
         <section className="self-start rounded-lg border border-white/10 bg-white/[0.03] p-5">
           <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
             <div>
@@ -2313,7 +2316,7 @@ function Dashboard({
         </section>
       </div>
 
-      <div className="grid gap-5 xl:grid-cols-[1.35fr_0.85fr]">
+      <div className="grid items-start gap-5 xl:grid-cols-[1.35fr_0.85fr]">
         <section className="self-start rounded-lg border border-white/10 bg-white/[0.03] p-5">
           <div className="flex items-center justify-between gap-3">
             <div>
@@ -2378,7 +2381,7 @@ function Dashboard({
         />
       </div>
 
-      <div className="grid gap-5 xl:grid-cols-[1fr_1fr]">
+      <div className="grid items-start gap-5 xl:grid-cols-[1fr_1fr]">
         <section className="rounded-lg border border-amber-400/20 bg-amber-500/[0.04] p-5">
           <h2 className="flex items-center gap-2 text-lg font-semibold">
             <AlertTriangle className="h-5 w-5 text-amber-300" />
@@ -2577,7 +2580,7 @@ function DashboardStageChart({
           <div className="mt-1 text-xs text-zinc-500">Volume, valor aberto e temperatura.</div>
         </div>
       </div>
-      <div className="mt-4 space-y-3">
+      <div className="mt-4 max-h-72 space-y-3 overflow-y-auto pr-1">
         {stages.map((stage) => (
           <div key={stage.id}>
             <div className="mb-1 flex items-center justify-between gap-3 text-xs">

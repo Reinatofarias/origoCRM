@@ -2,9 +2,8 @@
 
 import { CheckCircle2, ExternalLink, MessageCircle, Phone, Plus, Star, XCircle } from "lucide-react";
 
-import { normalizePhone } from "@/lib/utils";
-
-import type { ProspectBusiness, ProspectingDispatchState } from "../../../../types";
+import type { ProspectBusiness, ProspectingDispatchState, ProspectingWhatsAppValidationState } from "../../../../types";
+import { normalizeProspectingWhatsAppPhone } from "../../../../utils/phone";
 
 function statusLabel(state?: ProspectingDispatchState, isAdded?: boolean, isDuplicate?: boolean) {
   if (isAdded) return { label: "Lead criado", className: "border-[#25D366]/25 bg-[#25D366]/10 text-[#9AF0B8]" };
@@ -19,25 +18,48 @@ function statusLabel(state?: ProspectingDispatchState, isAdded?: boolean, isDupl
   return { label: "Novo", className: "border-white/10 bg-white/[0.04] text-zinc-300" };
 }
 
+function validationLabel(status: string) {
+  if (status === "valid") return "WhatsApp validado";
+  if (status === "invalid") return "Nao tem WhatsApp";
+  if (status === "checking") return "Validando WhatsApp";
+  if (status === "error") return "Erro na validacao";
+  return "WhatsApp nao validado";
+}
+
+function validationClass(status: string) {
+  if (status === "valid") return "text-[#9AF0B8]";
+  if (status === "invalid" || status === "error") return "text-red-200";
+  if (status === "checking") return "text-[#DDD6FE]";
+  return "text-zinc-500";
+}
+
 export function BusinessTable({
   addedLeadIds,
   businesses,
   dispatchStates,
   existingLeadPhones,
+  onlyWhatsApp,
   onAddLead,
   onSelectBusiness,
   onToggleBusiness,
   selectedIds,
+  validationStates,
 }: {
   addedLeadIds: Set<string>;
   businesses: ProspectBusiness[];
   dispatchStates: Record<string, ProspectingDispatchState>;
   existingLeadPhones: Set<string>;
+  onlyWhatsApp: boolean;
   onAddLead: (business: ProspectBusiness) => void;
   onSelectBusiness: (business: ProspectBusiness) => void;
   onToggleBusiness: (business: ProspectBusiness) => void;
   selectedIds: Set<string>;
+  validationStates: Record<string, ProspectingWhatsAppValidationState>;
 }) {
+  const visibleBusinesses = onlyWhatsApp
+    ? businesses.filter((business) => validationStates[business.id]?.status === "valid")
+    : businesses;
+
   return (
     <div className="overflow-hidden rounded-2xl border border-white/10 bg-black/20">
       <div className="grid grid-cols-[2.5rem_minmax(15rem,1.5fr)_11rem_10rem_7rem_8rem_8rem] border-b border-white/10 bg-white/[0.035] px-3 py-3 text-xs uppercase text-zinc-500">
@@ -50,11 +72,12 @@ export function BusinessTable({
         <span>Acoes</span>
       </div>
       <div className="max-h-[52vh] overflow-y-auto">
-        {businesses.map((business) => {
-          const normalizedPhone = normalizePhone(business.phone ?? "");
+        {visibleBusinesses.map((business) => {
+          const normalizedPhone = normalizeProspectingWhatsAppPhone(business.phone);
           const isDuplicate = Boolean(normalizedPhone && existingLeadPhones.has(normalizedPhone));
           const isAdded = addedLeadIds.has(business.id);
           const label = statusLabel(dispatchStates[business.id], isAdded, isDuplicate);
+          const validation = validationStates[business.id]?.status ?? "unknown";
 
           return (
             <div
@@ -65,7 +88,7 @@ export function BusinessTable({
                 aria-label={`Selecionar ${business.name}`}
                 checked={selectedIds.has(business.id)}
                 className="h-4 w-4 rounded border-white/20 bg-black accent-[#8B5CF6]"
-                disabled={!business.phone || isDuplicate || isAdded}
+                disabled={!business.phone || isDuplicate || isAdded || validation === "invalid" || validation === "error" || validation === "checking"}
                 onChange={() => onToggleBusiness(business)}
                 type="checkbox"
               />
@@ -89,7 +112,10 @@ export function BusinessTable({
                 <Star className="h-3.5 w-3.5 fill-amber-300 text-amber-300" />
                 {business.leadScore ?? 0}
               </div>
-              <span className={`w-fit rounded-full border px-2 py-1 text-xs ${label.className}`}>{label.label}</span>
+              <div className="space-y-1">
+                <span className={`inline-flex w-fit rounded-full border px-2 py-1 text-xs ${label.className}`}>{label.label}</span>
+                <span className={`block text-[11px] ${validationClass(validation)}`}>{validationLabel(validation)}</span>
+              </div>
               <div className="flex items-center gap-2">
                 <button
                   className="rounded-lg border border-white/10 p-2 text-zinc-300 transition hover:bg-white/[0.08] hover:text-white disabled:opacity-40"
@@ -103,7 +129,7 @@ export function BusinessTable({
                 {business.phone && (
                   <a
                     className="rounded-lg border border-[#25D366]/20 p-2 text-[#9AF0B8] transition hover:bg-[#25D366]/10"
-                    href={`https://wa.me/55${normalizedPhone}`}
+                    href={`https://wa.me/${normalizedPhone}`}
                     rel="noreferrer"
                     target="_blank"
                     title="Abrir WhatsApp"

@@ -60,9 +60,16 @@ export interface ProspectingLeadPayload {
 }
 
 export type ProspectingDispatchStatus = "new" | "queued" | "sending" | "sent" | "failed" | "ignored" | "lead_added";
+export type ProspectingWhatsAppValidationStatus = "unknown" | "checking" | "valid" | "invalid" | "error";
 
 export type ProspectingDispatchState = {
   status: ProspectingDispatchStatus;
   error?: string;
   sentAt?: string;
+};
+
+export type ProspectingWhatsAppValidationState = {
+  status: ProspectingWhatsAppValidationStatus;
+  jid?: string;
+  error?: string;
 };

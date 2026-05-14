@@ -10,4 +10,6 @@ export type {
   ProspectingSearchResult,
   ProspectingSignalTone,
   ProspectingStatus,
+  ProspectingWhatsAppValidationState,
+  ProspectingWhatsAppValidationStatus,
 } from "./prospecting";

@@ -1,6 +1,6 @@
 "use client";
 
-import { Building2, Globe2, MapPin, Phone, Star } from "lucide-react";
+import { Bot, Building2, Globe2, MapPin, Phone, Star } from "lucide-react";
 import type { ComponentType } from "react";
 
 import type { ProspectBusiness } from "../../../../types";
@@ -8,9 +8,11 @@ import type { ProspectBusiness } from "../../../../types";
 export function BusinessDetails({
   approach,
   business,
+  onGenerateApproach,
 }: {
   approach: string;
   business: ProspectBusiness | null;
+  onGenerateApproach?: (business: ProspectBusiness) => void;
 }) {
   if (!business) {
     return (
@@ -39,9 +41,21 @@ export function BusinessDetails({
         <DetailRow icon={Building2} label="Status" value={business.businessStatus ?? "operational"} />
       </div>
       <div className="mt-5 rounded-xl border border-white/10 bg-black/25 p-4">
-        <div className="text-xs uppercase text-zinc-500">Abordagem IA</div>
+        <div className="flex items-center justify-between gap-3">
+          <div className="text-xs uppercase text-zinc-500">Abordagem IA</div>
+          {onGenerateApproach && (
+            <button
+              className="flex h-8 items-center gap-2 rounded-lg border border-white/10 px-2 text-xs text-zinc-200 transition hover:bg-white/[0.06]"
+              onClick={() => onGenerateApproach(business)}
+              type="button"
+            >
+              <Bot className="h-3.5 w-3.5" />
+              Gerar
+            </button>
+          )}
+        </div>
         <p className="mt-2 text-sm leading-6 text-zinc-200">
-          {approach || "Clique em Gerar abordagem IA para criar uma mensagem consultiva para este lead."}
+          {approach || "Clique em Gerar para criar uma mensagem consultiva para este contato."}
         </p>
       </div>
     </aside>

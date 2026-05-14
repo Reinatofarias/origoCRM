@@ -1,6 +1,6 @@
 "use client";
 
-import { Loader2, MessageCircle, PauseCircle, Send, ShieldCheck, Trash2 } from "lucide-react";
+import { CheckCircle2, Loader2, MessageCircle, PauseCircle, Send, ShieldCheck, Trash2 } from "lucide-react";
 
 import type { MessageTemplate } from "@/lib/types";
 
@@ -9,6 +9,7 @@ import type { ProspectingDispatchState } from "../../../../types";
 export function CampaignPanel({
   dispatchStates,
   intervalSeconds,
+  isValidatingWhatsApp,
   isRunning,
   onClearSelection,
   onIgnoreSelected,
@@ -16,14 +17,19 @@ export function CampaignPanel({
   onSelectPhoneProspects,
   onStartCampaign,
   onTemplateChange,
+  onToggleOnlyWhatsApp,
+  onValidateWhatsApp,
   previewMessage,
   selectedCount,
   selectedTemplateId,
   sendableCount,
   templates,
+  onlyWhatsApp,
+  validWhatsAppCount,
 }: {
   dispatchStates: Record<string, ProspectingDispatchState>;
   intervalSeconds: number;
+  isValidatingWhatsApp: boolean;
   isRunning: boolean;
   onClearSelection: () => void;
   onIgnoreSelected: () => void;
@@ -31,11 +37,15 @@ export function CampaignPanel({
   onSelectPhoneProspects: () => void;
   onStartCampaign: () => void;
   onTemplateChange: (templateId: string) => void;
+  onToggleOnlyWhatsApp: () => void;
+  onValidateWhatsApp: () => void;
   previewMessage: string;
   selectedCount: number;
   selectedTemplateId: string;
   sendableCount: number;
   templates: MessageTemplate[];
+  onlyWhatsApp: boolean;
+  validWhatsAppCount: number;
 }) {
   const sent = Object.values(dispatchStates).filter((item) => item.status === "sent").length;
   const failed = Object.values(dispatchStates).filter((item) => item.status === "failed").length;
@@ -66,6 +76,33 @@ export function CampaignPanel({
       </div>
 
       <div className="mt-5 space-y-3">
+        <div className="rounded-xl border border-white/10 bg-black/25 p-3">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <div className="text-xs uppercase text-zinc-500">WhatsApp validado</div>
+              <div className="mt-1 text-lg font-semibold text-white">{validWhatsAppCount}</div>
+            </div>
+            <button
+              className="flex h-9 items-center justify-center gap-2 rounded-lg border border-[#25D366]/25 bg-[#25D366]/10 px-3 text-xs text-[#9AF0B8] transition hover:bg-[#25D366]/20 disabled:opacity-50"
+              disabled={isRunning || isValidatingWhatsApp || selectedCount === 0}
+              onClick={onValidateWhatsApp}
+              type="button"
+            >
+              {isValidatingWhatsApp ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
+              Validar selecionados
+            </button>
+          </div>
+          <label className="mt-3 flex items-center gap-2 text-xs text-zinc-300">
+            <input
+              checked={onlyWhatsApp}
+              className="h-4 w-4 rounded border-white/20 bg-black accent-[#25D366]"
+              onChange={onToggleOnlyWhatsApp}
+              type="checkbox"
+            />
+            Mostrar apenas contatos com WhatsApp validado
+          </label>
+        </div>
+
         <label className="block text-sm text-zinc-300">
           Mensagem pronta
           <select
@@ -121,7 +158,7 @@ export function CampaignPanel({
             type="button"
           >
             <MessageCircle className="h-4 w-4" />
-            Selecionar com telefone
+            Selecionar telefones
           </button>
           <button
             className="flex h-10 items-center justify-center gap-2 rounded-xl border border-white/10 px-3 text-xs text-zinc-300 transition hover:bg-white/[0.06]"

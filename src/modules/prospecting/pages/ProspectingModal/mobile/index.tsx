@@ -3,9 +3,14 @@
 import { Download, Flame, X } from "lucide-react";
 
 import type { MessageTemplate } from "@/lib/types";
-import { normalizePhone } from "@/lib/utils";
 
-import type { ProspectBusiness, ProspectingDispatchState, ProspectingSearchInput } from "../../../types";
+import type {
+  ProspectBusiness,
+  ProspectingDispatchState,
+  ProspectingSearchInput,
+  ProspectingWhatsAppValidationState,
+} from "../../../types";
+import { normalizeProspectingWhatsAppPhone } from "../../../utils/phone";
 import { BusinessCard, BusinessDetails, CampaignPanel, ProspectingSearchForm, ProspectingSkeleton } from "../components";
 
 export function ProspectingMobile({
@@ -17,6 +22,7 @@ export function ProspectingMobile({
   intervalSeconds,
   isLoading,
   isSendingCampaign,
+  isValidatingWhatsApp,
   metrics,
   onAddBusinessLead,
   onClearSelection,
@@ -30,13 +36,18 @@ export function ProspectingMobile({
   onSelectBusiness,
   onStartCampaign,
   onTemplateChange,
+  onToggleOnlyWhatsApp,
   onToggleBusiness,
+  onValidateWhatsApp,
+  onlyWhatsApp,
   previewMessage,
   selectedBusinessIds,
   selectedTemplateId,
   selectedBusiness,
   sendableCount,
   templates,
+  validationStates,
+  validWhatsAppCount,
 }: {
   addedLeadIds: Set<string>;
   approach: string;
@@ -46,6 +57,7 @@ export function ProspectingMobile({
   intervalSeconds: number;
   isLoading: boolean;
   isSendingCampaign: boolean;
+  isValidatingWhatsApp: boolean;
   metrics: { total: number; hot: number; withoutSite: number; weakProfiles: number };
   onAddBusinessLead: (business: ProspectBusiness) => void;
   onClearSelection: () => void;
@@ -59,13 +71,18 @@ export function ProspectingMobile({
   onSelectBusiness: (business: ProspectBusiness) => void;
   onStartCampaign: () => void;
   onTemplateChange: (templateId: string) => void;
+  onToggleOnlyWhatsApp: () => void;
   onToggleBusiness: (business: ProspectBusiness) => void;
+  onValidateWhatsApp: () => void;
+  onlyWhatsApp: boolean;
   previewMessage: string;
   selectedBusinessIds: Set<string>;
   selectedTemplateId: string;
   selectedBusiness: ProspectBusiness | null;
   sendableCount: number;
   templates: MessageTemplate[];
+  validationStates: Record<string, ProspectingWhatsAppValidationState>;
+  validWhatsAppCount: number;
 }) {
   return (
     <div className="h-full overflow-y-auto p-4 xl:hidden">
@@ -109,6 +126,7 @@ export function ProspectingMobile({
         <CampaignPanel
           dispatchStates={dispatchStates}
           intervalSeconds={intervalSeconds}
+          isValidatingWhatsApp={isValidatingWhatsApp}
           isRunning={isSendingCampaign}
           onClearSelection={onClearSelection}
           onIgnoreSelected={onIgnoreSelected}
@@ -116,26 +134,33 @@ export function ProspectingMobile({
           onSelectPhoneProspects={onSelectPhoneProspects}
           onStartCampaign={onStartCampaign}
           onTemplateChange={onTemplateChange}
+          onToggleOnlyWhatsApp={onToggleOnlyWhatsApp}
+          onValidateWhatsApp={onValidateWhatsApp}
+          onlyWhatsApp={onlyWhatsApp}
           previewMessage={previewMessage}
           selectedCount={selectedBusinessIds.size}
           selectedTemplateId={selectedTemplateId}
           sendableCount={sendableCount}
           templates={templates}
+          validWhatsAppCount={validWhatsAppCount}
         />
         {isLoading && <ProspectingSkeleton />}
-        {!isLoading && businesses.map((business) => {
-          const normalizedPhone = normalizePhone(business.phone ?? "");
+        {!isLoading && businesses
+          .filter((business) => !onlyWhatsApp || validationStates[business.id]?.status === "valid")
+          .map((business) => {
+          const normalizedPhone = normalizeProspectingWhatsAppPhone(business.phone);
           const unavailable = !normalizedPhone || existingLeadPhones.has(normalizedPhone) || addedLeadIds.has(business.id);
           const dispatchStatus = dispatchStates[business.id]?.status;
+          const validationStatus = validationStates[business.id]?.status ?? "unknown";
 
           return (
             <div className="space-y-2" key={business.id}>
               <label className="flex items-center justify-between rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-zinc-300">
-                <span>{dispatchStatus ? `Status: ${dispatchStatus}` : "Selecionar para campanha"}</span>
+                <span>{dispatchStatus ? `Status: ${dispatchStatus}` : `WhatsApp: ${validationStatus}`}</span>
                 <input
                   checked={selectedBusinessIds.has(business.id)}
                   className="h-4 w-4 rounded border-white/20 bg-black accent-[#8B5CF6]"
-                  disabled={unavailable}
+                  disabled={unavailable || validationStatus === "invalid" || validationStatus === "error" || validationStatus === "checking"}
                   onChange={() => onToggleBusiness(business)}
                   type="checkbox"
                 />
@@ -150,7 +175,7 @@ export function ProspectingMobile({
             </div>
           );
         })}
-        <BusinessDetails approach={approach} business={selectedBusiness} />
+        <BusinessDetails approach={approach} business={selectedBusiness} onGenerateApproach={onGenerateApproach} />
       </div>
     </div>
   );

@@ -4,10 +4,15 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 
 import type { LeadInput, MessageTemplate } from "@/lib/types";
-import { normalizePhone } from "@/lib/utils";
 
 import { useProspecting } from "../../hooks";
-import type { ProspectBusiness, ProspectingDispatchState, ProspectingSearchInput } from "../../types";
+import type {
+  ProspectBusiness,
+  ProspectingDispatchState,
+  ProspectingSearchInput,
+  ProspectingWhatsAppValidationState,
+} from "../../types";
+import { normalizeProspectingWhatsAppPhone } from "../../utils/phone";
 import { ProspectingDesktop } from "./desktop";
 import { ProspectingMobile } from "./mobile";
 
@@ -16,12 +21,18 @@ export function ProspectingModal({
   onAddLead,
   onClose,
   onSendProspectingMessage,
+  onValidateWhatsAppNumbers,
   templates,
 }: {
   existingLeadPhones: Set<string>;
   onAddLead: (input: LeadInput) => Promise<void> | void;
   onClose: () => void;
   onSendProspectingMessage: (phoneNumber: string, message: string) => Promise<{ success: boolean; error?: string }>;
+  onValidateWhatsAppNumbers: (phoneNumbers: string[]) => Promise<{
+    success: boolean;
+    numbers?: Array<{ number: string; exists: boolean; jid?: string }>;
+    error?: string;
+  }>;
   templates: MessageTemplate[];
 }) {
   const [queryClient] = useState(
@@ -41,6 +52,7 @@ export function ProspectingModal({
         onAddLead={onAddLead}
         onClose={onClose}
         onSendProspectingMessage={onSendProspectingMessage}
+        onValidateWhatsAppNumbers={onValidateWhatsAppNumbers}
         templates={templates}
       />
     </QueryClientProvider>
@@ -52,12 +64,18 @@ function ProspectingModalContent({
   onAddLead,
   onClose,
   onSendProspectingMessage,
+  onValidateWhatsAppNumbers,
   templates,
 }: {
   existingLeadPhones: Set<string>;
   onAddLead: (input: LeadInput) => Promise<void> | void;
   onClose: () => void;
   onSendProspectingMessage: (phoneNumber: string, message: string) => Promise<{ success: boolean; error?: string }>;
+  onValidateWhatsAppNumbers: (phoneNumbers: string[]) => Promise<{
+    success: boolean;
+    numbers?: Array<{ number: string; exists: boolean; jid?: string }>;
+    error?: string;
+  }>;
   templates: MessageTemplate[];
 }) {
   const prospecting = useProspecting();
@@ -66,6 +84,9 @@ function ProspectingModalContent({
   const [selectedTemplateId, setSelectedTemplateId] = useState(() => templates[0]?.id ?? "");
   const [intervalSeconds, setIntervalSeconds] = useState(12);
   const [isSendingCampaign, setIsSendingCampaign] = useState(false);
+  const [isValidatingWhatsApp, setIsValidatingWhatsApp] = useState(false);
+  const [onlyWhatsApp, setOnlyWhatsApp] = useState(false);
+  const [validationStates, setValidationStates] = useState<Record<string, ProspectingWhatsAppValidationState>>({});
 
   const selectedBusinesses = useMemo(
     () => prospecting.businesses.filter((business) => selectedBusinessIds.has(business.id)),
@@ -74,10 +95,19 @@ function ProspectingModalContent({
   const selectedTemplateIdForUi = selectedTemplateId || templates[0]?.id || "";
   const selectedTemplate = templates.find((template) => template.id === selectedTemplateIdForUi) ?? null;
   const sendableBusinesses = selectedBusinesses.filter((business) => {
-    const phone = normalizePhone(business.phone ?? "");
+    const phone = normalizeProspectingWhatsAppPhone(business.phone);
     const state = dispatchStates[business.id]?.status;
-    return Boolean(phone) && !existingLeadPhones.has(phone) && state !== "sent" && state !== "lead_added" && state !== "ignored";
+    const validation = validationStates[business.id]?.status;
+    return (
+      Boolean(phone) &&
+      validation === "valid" &&
+      !existingLeadPhones.has(phone) &&
+      state !== "sent" &&
+      state !== "lead_added" &&
+      state !== "ignored"
+    );
   });
+  const validWhatsAppCount = Object.values(validationStates).filter((item) => item.status === "valid").length;
   const previewMessage = selectedTemplate && selectedBusinesses[0]
     ? renderProspectingTemplate(selectedTemplate.body, selectedBusinesses[0])
     : "";
@@ -94,6 +124,8 @@ function ProspectingModalContent({
   function search(input: ProspectingSearchInput) {
     setSelectedBusinessIds(new Set());
     setDispatchStates({});
+    setValidationStates({});
+    setOnlyWhatsApp(false);
     prospecting.searchBusinesses.mutate(input, {
       onSuccess: (result) => {
         prospecting.setSelectedBusiness(result.businesses[0] ?? null);
@@ -138,7 +170,7 @@ function ProspectingModalContent({
   }
 
   function toggleBusiness(business: ProspectBusiness) {
-    const phone = normalizePhone(business.phone ?? "");
+    const phone = normalizeProspectingWhatsAppPhone(business.phone);
     if (!phone || existingLeadPhones.has(phone) || prospecting.addedLeadIds.has(business.id)) return;
     setSelectedBusinessIds((current) => {
       const next = new Set(current);
@@ -154,12 +186,55 @@ function ProspectingModalContent({
       new Set(
         prospecting.businesses
           .filter((business) => {
-            const phone = normalizePhone(business.phone ?? "");
+            const phone = normalizeProspectingWhatsAppPhone(business.phone);
             return Boolean(phone) && !existingLeadPhones.has(phone) && !prospecting.addedLeadIds.has(business.id);
           })
           .map((business) => business.id),
       ),
     );
+  }
+
+  async function validateSelectedWhatsApp() {
+    const toValidate = selectedBusinesses.filter((business) => {
+      const phone = normalizeProspectingWhatsAppPhone(business.phone);
+      return Boolean(phone) && !existingLeadPhones.has(phone);
+    });
+    if (toValidate.length === 0 || isValidatingWhatsApp) return;
+
+    setIsValidatingWhatsApp(true);
+    setValidationStates((current) => {
+      const next = { ...current };
+      for (const business of toValidate) next[business.id] = { status: "checking" };
+      return next;
+    });
+
+    const result = await onValidateWhatsAppNumbers(toValidate.map((business) => normalizeProspectingWhatsAppPhone(business.phone)));
+    if (!result.success) {
+      setValidationStates((current) => {
+        const next = { ...current };
+        for (const business of toValidate) next[business.id] = { status: "error", error: result.error };
+        return next;
+      });
+      setIsValidatingWhatsApp(false);
+      return;
+    }
+
+    const checked = new Map((result.numbers ?? []).map((item) => [normalizeProspectingWhatsAppPhone(item.number), item]));
+    setValidationStates((current) => {
+      const next = { ...current };
+      for (const business of toValidate) {
+        const phone = normalizeProspectingWhatsAppPhone(business.phone);
+        const item = checked.get(phone);
+        next[business.id] = item?.exists ? { status: "valid", jid: item.jid } : { status: "invalid" };
+      }
+      return next;
+    });
+    setSelectedBusinessIds(new Set(toValidate.filter((business) => {
+      const item = checked.get(normalizeProspectingWhatsAppPhone(business.phone));
+      return item?.exists;
+    }).map((business) => business.id)));
+    setOnlyWhatsApp(true);
+    setIsValidatingWhatsApp(false);
   }
 
   function ignoreSelected() {
@@ -186,7 +261,7 @@ function ProspectingModalContent({
       const message = renderProspectingTemplate(selectedTemplate.body, business);
 
       setDispatchStates((current) => ({ ...current, [business.id]: { status: "sending" } }));
-      const result = await onSendProspectingMessage(phone, message);
+      const result = await onSendProspectingMessage(normalizeProspectingWhatsAppPhone(phone), message);
       setDispatchStates((current) => ({
         ...current,
         [business.id]: result.success
@@ -215,35 +290,7 @@ function ProspectingModalContent({
           intervalSeconds={intervalSeconds}
           isLoading={prospecting.isLoading}
           isSendingCampaign={isSendingCampaign}
-          metrics={prospecting.metrics}
-          onAddBusinessLead={(business) => void addBusinessLead(business)}
-          onClearSelection={() => setSelectedBusinessIds(new Set())}
-          onClose={onClose}
-          onIgnoreSelected={ignoreSelected}
-          onExportBusinesses={exportBusinessesCsv}
-          onIntervalChange={setIntervalSeconds}
-          onSearch={search}
-          onSelectPhoneProspects={selectPhoneProspects}
-          onSelectBusiness={prospecting.setSelectedBusiness}
-          onStartCampaign={() => void startCampaign()}
-          onTemplateChange={setSelectedTemplateId}
-          onToggleBusiness={toggleBusiness}
-          previewMessage={previewMessage}
-          selectedBusinessIds={selectedBusinessIds}
-          selectedTemplateId={selectedTemplateIdForUi}
-          selectedBusiness={prospecting.selectedBusiness}
-          sendableCount={sendableBusinesses.length}
-          templates={templates}
-        />
-        <ProspectingMobile
-          addedLeadIds={prospecting.addedLeadIds}
-          approach={prospecting.generatedApproach}
-          businesses={prospecting.businesses}
-          dispatchStates={dispatchStates}
-          existingLeadPhones={existingLeadPhones}
-          intervalSeconds={intervalSeconds}
-          isLoading={prospecting.isLoading}
-          isSendingCampaign={isSendingCampaign}
+          isValidatingWhatsApp={isValidatingWhatsApp}
           metrics={prospecting.metrics}
           onAddBusinessLead={(business) => void addBusinessLead(business)}
           onClearSelection={() => setSelectedBusinessIds(new Set())}
@@ -257,13 +304,54 @@ function ProspectingModalContent({
           onSelectBusiness={prospecting.setSelectedBusiness}
           onStartCampaign={() => void startCampaign()}
           onTemplateChange={setSelectedTemplateId}
+          onToggleOnlyWhatsApp={() => setOnlyWhatsApp((value) => !value)}
           onToggleBusiness={toggleBusiness}
+          onValidateWhatsApp={() => void validateSelectedWhatsApp()}
+          onlyWhatsApp={onlyWhatsApp}
           previewMessage={previewMessage}
           selectedBusinessIds={selectedBusinessIds}
           selectedTemplateId={selectedTemplateIdForUi}
           selectedBusiness={prospecting.selectedBusiness}
           sendableCount={sendableBusinesses.length}
           templates={templates}
+          validationStates={validationStates}
+          validWhatsAppCount={validWhatsAppCount}
+        />
+        <ProspectingMobile
+          addedLeadIds={prospecting.addedLeadIds}
+          approach={prospecting.generatedApproach}
+          businesses={prospecting.businesses}
+          dispatchStates={dispatchStates}
+          existingLeadPhones={existingLeadPhones}
+          intervalSeconds={intervalSeconds}
+          isLoading={prospecting.isLoading}
+          isSendingCampaign={isSendingCampaign}
+          isValidatingWhatsApp={isValidatingWhatsApp}
+          metrics={prospecting.metrics}
+          onAddBusinessLead={(business) => void addBusinessLead(business)}
+          onClearSelection={() => setSelectedBusinessIds(new Set())}
+          onClose={onClose}
+          onIgnoreSelected={ignoreSelected}
+          onGenerateApproach={generateApproach}
+          onExportBusinesses={exportBusinessesCsv}
+          onIntervalChange={setIntervalSeconds}
+          onSearch={search}
+          onSelectPhoneProspects={selectPhoneProspects}
+          onSelectBusiness={prospecting.setSelectedBusiness}
+          onStartCampaign={() => void startCampaign()}
+          onTemplateChange={setSelectedTemplateId}
+          onToggleOnlyWhatsApp={() => setOnlyWhatsApp((value) => !value)}
+          onToggleBusiness={toggleBusiness}
+          onValidateWhatsApp={() => void validateSelectedWhatsApp()}
+          onlyWhatsApp={onlyWhatsApp}
+          previewMessage={previewMessage}
+          selectedBusinessIds={selectedBusinessIds}
+          selectedTemplateId={selectedTemplateIdForUi}
+          selectedBusiness={prospecting.selectedBusiness}
+          sendableCount={sendableBusinesses.length}
+          templates={templates}
+          validationStates={validationStates}
+          validWhatsAppCount={validWhatsAppCount}
         />
       </div>
     </div>
@@ -291,7 +379,7 @@ function downloadProspectingCsv(filename: string, rows: Record<string, string>[]
 function renderProspectingTemplate(template: string, business: ProspectBusiness) {
   return template
     .replaceAll("{{nome}}", business.name)
-    .replaceAll("{{telefone}}", business.phone ?? "")
+    .replaceAll("{{telefone}}", normalizeProspectingWhatsAppPhone(business.phone))
     .replaceAll("{{empresa}}", business.name)
     .replaceAll("{{origem}}", "Prospeccao Inteligente")
     .replaceAll("{{cidade}}", business.city ?? "")

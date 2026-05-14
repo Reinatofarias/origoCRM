@@ -5,7 +5,12 @@ import type { ComponentType } from "react";
 
 import type { MessageTemplate } from "@/lib/types";
 
-import type { ProspectBusiness, ProspectingDispatchState, ProspectingSearchInput } from "../../../types";
+import type {
+  ProspectBusiness,
+  ProspectingDispatchState,
+  ProspectingSearchInput,
+  ProspectingWhatsAppValidationState,
+} from "../../../types";
 import { BusinessDetails, BusinessTable, CampaignPanel, ProspectingSearchForm, ProspectingSkeleton } from "../components";
 
 export function ProspectingDesktop({
@@ -17,11 +22,13 @@ export function ProspectingDesktop({
   intervalSeconds,
   isLoading,
   isSendingCampaign,
+  isValidatingWhatsApp,
   metrics,
   onAddBusinessLead,
   onClearSelection,
   onClose,
   onIgnoreSelected,
+  onGenerateApproach,
   onExportBusinesses,
   onIntervalChange,
   onSearch,
@@ -29,13 +36,18 @@ export function ProspectingDesktop({
   onSelectBusiness,
   onStartCampaign,
   onTemplateChange,
+  onToggleOnlyWhatsApp,
   onToggleBusiness,
+  onValidateWhatsApp,
+  onlyWhatsApp,
   previewMessage,
   selectedBusinessIds,
   selectedTemplateId,
   selectedBusiness,
   sendableCount,
   templates,
+  validationStates,
+  validWhatsAppCount,
 }: {
   addedLeadIds: Set<string>;
   approach: string;
@@ -45,11 +57,13 @@ export function ProspectingDesktop({
   intervalSeconds: number;
   isLoading: boolean;
   isSendingCampaign: boolean;
+  isValidatingWhatsApp: boolean;
   metrics: { total: number; hot: number; withoutSite: number; weakProfiles: number };
   onAddBusinessLead: (business: ProspectBusiness) => void;
   onClearSelection: () => void;
   onClose: () => void;
   onIgnoreSelected: () => void;
+  onGenerateApproach: (business: ProspectBusiness) => void;
   onExportBusinesses: () => void;
   onIntervalChange: (value: number) => void;
   onSearch: (input: ProspectingSearchInput) => void;
@@ -57,13 +71,18 @@ export function ProspectingDesktop({
   onSelectBusiness: (business: ProspectBusiness) => void;
   onStartCampaign: () => void;
   onTemplateChange: (templateId: string) => void;
+  onToggleOnlyWhatsApp: () => void;
   onToggleBusiness: (business: ProspectBusiness) => void;
+  onValidateWhatsApp: () => void;
+  onlyWhatsApp: boolean;
   previewMessage: string;
   selectedBusinessIds: Set<string>;
   selectedTemplateId: string;
   selectedBusiness: ProspectBusiness | null;
   sendableCount: number;
   templates: MessageTemplate[];
+  validationStates: Record<string, ProspectingWhatsAppValidationState>;
+  validWhatsAppCount: number;
 }) {
   return (
     <div className="hidden h-full min-h-0 grid-cols-[minmax(0,1fr)_25rem] gap-5 p-5 xl:grid">
@@ -121,10 +140,12 @@ export function ProspectingDesktop({
                 businesses={businesses}
                 dispatchStates={dispatchStates}
                 existingLeadPhones={existingLeadPhones}
+                onlyWhatsApp={onlyWhatsApp}
                 onAddLead={onAddBusinessLead}
                 onSelectBusiness={onSelectBusiness}
                 onToggleBusiness={onToggleBusiness}
                 selectedIds={selectedBusinessIds}
+                validationStates={validationStates}
               />
             )}
           </div>
@@ -134,6 +155,7 @@ export function ProspectingDesktop({
         <CampaignPanel
           dispatchStates={dispatchStates}
           intervalSeconds={intervalSeconds}
+          isValidatingWhatsApp={isValidatingWhatsApp}
           isRunning={isSendingCampaign}
           onClearSelection={onClearSelection}
           onIgnoreSelected={onIgnoreSelected}
@@ -141,13 +163,17 @@ export function ProspectingDesktop({
           onSelectPhoneProspects={onSelectPhoneProspects}
           onStartCampaign={onStartCampaign}
           onTemplateChange={onTemplateChange}
+          onToggleOnlyWhatsApp={onToggleOnlyWhatsApp}
+          onValidateWhatsApp={onValidateWhatsApp}
+          onlyWhatsApp={onlyWhatsApp}
           previewMessage={previewMessage}
           selectedCount={selectedBusinessIds.size}
           selectedTemplateId={selectedTemplateId}
           sendableCount={sendableCount}
           templates={templates}
+          validWhatsAppCount={validWhatsAppCount}
         />
-        <BusinessDetails approach={approach} business={selectedBusiness} />
+        <BusinessDetails approach={approach} business={selectedBusiness} onGenerateApproach={onGenerateApproach} />
       </div>
     </div>
   );

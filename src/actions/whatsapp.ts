@@ -247,6 +247,41 @@ export async function sendWhatsAppConversationMessage(
   return { success: true, message: data as WhatsAppMessage, lead: updatedLead ?? undefined };
 }
 
+type WhatsAppNumberCheckResponse =
+  | Array<{ number?: string; exists?: boolean; jid?: string }>
+  | { numbers?: Array<{ number?: string; exists?: boolean; jid?: string }> };
+
+export async function checkWhatsAppNumbers(phoneNumbers: string[]): Promise<{
+  success: boolean;
+  numbers?: Array<{ number: string; exists: boolean; jid?: string }>;
+  error?: string;
+}> {
+  const auth = await getAuthenticatedSupabase();
+  if ("error" in auth) return { success: false, error: auth.error };
+
+  const numbers = Array.from(new Set(phoneNumbers.map(normalizePhone).filter(Boolean))).slice(0, 30);
+  if (numbers.length === 0) return { success: false, error: "Nenhum numero para validar" };
+
+  const endpoint = getEvolutionInstanceEndpoint("/chat/whatsappNumbers");
+  if (!endpoint) return { success: false, error: "Instancia da Evolution nao configurada" };
+
+  const response = await callEvolutionApi<WhatsAppNumberCheckResponse>(endpoint, { numbers }, "POST");
+
+  if (response.error || response.status >= 400 || !response.data) {
+    return { success: false, error: response.error || "Erro ao validar numeros no WhatsApp" };
+  }
+
+  const rawNumbers = Array.isArray(response.data) ? response.data : response.data.numbers ?? [];
+  return {
+    success: true,
+    numbers: rawNumbers.map((item) => ({
+      number: normalizePhone(item.number ?? ""),
+      exists: Boolean(item.exists),
+      jid: item.jid,
+    })),
+  };
+}
+
 export async function saveWhatsAppConversationAsLead(input: {
   phoneNumber: string;
   leadId?: string | null;
