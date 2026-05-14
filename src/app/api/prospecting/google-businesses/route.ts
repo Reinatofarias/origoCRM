@@ -227,7 +227,7 @@ function buildSignals(input: { leadScore: number; reviewsCount: number; website:
 
 function normalizeBusinessStatus(status?: string): ProspectBusiness["businessStatus"] {
   const normalized = status?.toLowerCase() ?? "";
-  if (normalized.includes("closed") || normalized.includes("fechado")) return "closed";
+  if (normalized.includes("permanently closed") || normalized.includes("permanentemente fechado")) return "closed";
   if (normalized.includes("temporary") || normalized.includes("temporariamente")) return "limited";
   return "operational";
 }
