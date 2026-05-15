@@ -69,6 +69,38 @@ const offerStack = [
   "Segmentacao, registros e indicadores para controle diario",
 ];
 
+const proofMetrics = [
+  { value: "38", label: "respostas novas para priorizar" },
+  { value: "12", label: "follow-ups que nao ficam na memoria" },
+  { value: "20", label: "contatos validados por campanha" },
+  { value: "1", label: "rotina diaria para vendas e atendimento" },
+];
+
+const beforeAfter = [
+  {
+    before: "WhatsApp cheio de conversas soltas",
+    after: "Cada conversa vira oportunidade acompanhada",
+  },
+  {
+    before: "Follow-up depende da memoria do vendedor",
+    after: "Tarefas mostram quem precisa ser acionado hoje",
+  },
+  {
+    before: "Prospecao manual em planilhas",
+    after: "Lista de empresas com telefone pronta para abordagem",
+  },
+  {
+    before: "Sem clareza do que trouxe retorno",
+    after: "Campanhas mostram contatos, envios e respostas",
+  },
+];
+
+const prospectingHighlights = [
+  { title: "Encontre empresas", text: "Digite nicho, estado e cidade para montar uma lista comercial a partir do Google." },
+  { title: "Filtre contatos uteis", text: "Priorize empresas com telefone, WhatsApp e maior chance de resposta." },
+  { title: "Aborde em lotes", text: "Selecione contatos, escolha uma mensagem pronta e acompanhe o retorno." },
+];
+
 export function LandingPage() {
   return (
     <main className="min-h-screen overflow-hidden bg-[#08080C] text-white">
@@ -80,6 +112,7 @@ export function LandingPage() {
           </Link>
           <nav className="hidden items-center gap-6 text-sm text-zinc-400 md:flex">
             <a className="transition hover:text-white" href="#solucao">Solucao</a>
+            <a className="transition hover:text-white" href="#prova">Prova</a>
             <a className="transition hover:text-white" href="#prospeccao">Prospeccao</a>
             <a className="transition hover:text-white" href="#planos">Planos</a>
           </nav>
@@ -88,7 +121,7 @@ export function LandingPage() {
               Entrar
             </Link>
             <Link className="hidden h-10 rounded-lg bg-[#8B5CF6] px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-[#8B5CF6]/25 transition hover:bg-[#7C3AED] sm:block" href="/checkout">
-              Cadastrar-se
+              Solicitar acesso
             </Link>
           </div>
         </div>
@@ -108,7 +141,7 @@ export function LandingPage() {
           </p>
           <div className="mt-8 flex flex-col gap-3 sm:flex-row">
             <Link className="flex h-12 items-center justify-center gap-2 rounded-lg bg-[#8B5CF6] px-5 text-sm font-semibold shadow-xl shadow-[#8B5CF6]/25 transition hover:bg-[#7C3AED]" href="/checkout">
-              Quero organizar minhas vendas
+              Solicitar meu acesso
               <ArrowRight className="h-4 w-4" />
             </Link>
           </div>
@@ -154,6 +187,43 @@ export function LandingPage() {
         </div>
       </section>
 
+      <section className="mx-auto max-w-7xl px-5 pb-20" id="prova">
+        <div className="grid gap-6 lg:grid-cols-[0.85fr_1.15fr]">
+          <div className="rounded-2xl border border-[#25D366]/20 bg-[#07130D]/70 p-6">
+            <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[#9AF0B8]">Como fica na pratica</div>
+            <h2 className="mt-4 text-3xl font-semibold tracking-[-0.01em] text-white">
+              Uma rotina diaria para vender sem deixar oportunidade escapar.
+            </h2>
+            <p className="mt-4 text-sm leading-6 text-zinc-400">
+              Ao entrar no CRM, a equipe enxerga respostas novas, follow-ups, contatos prospectados e campanhas em andamento. A decisao deixa de ser onde eu parei e vira quem precisa de acao agora.
+            </p>
+            <div className="mt-6 grid gap-3 sm:grid-cols-2">
+              {proofMetrics.map((metric) => (
+                <div className="rounded-xl border border-white/10 bg-black/25 p-4" key={metric.label}>
+                  <div className="text-3xl font-semibold text-white">{metric.value}</div>
+                  <div className="mt-2 text-sm leading-5 text-zinc-400">{metric.label}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-white/10 bg-white/[0.035] p-6">
+            <div className="grid gap-3 md:grid-cols-2">
+              {beforeAfter.map((item) => (
+                <div className="rounded-xl border border-white/10 bg-black/25 p-4" key={item.before}>
+                  <div className="text-xs font-semibold uppercase tracking-[0.14em] text-red-200">Antes</div>
+                  <p className="mt-2 min-h-12 text-sm leading-6 text-zinc-400">{item.before}</p>
+                  <div className="mt-4 border-t border-white/10 pt-4">
+                    <div className="text-xs font-semibold uppercase tracking-[0.14em] text-[#9AF0B8]">Com OrigoCRM</div>
+                    <p className="mt-2 text-sm font-medium leading-6 text-white">{item.after}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </section>
+
       <section className="border-y border-white/10 bg-[#0D0D13] px-5 py-20" id="prospeccao">
         <div className="mx-auto grid max-w-7xl gap-10 lg:grid-cols-[0.9fr_1.1fr]">
           <div>
@@ -167,6 +237,14 @@ export function LandingPage() {
                 <div className="flex items-center gap-3 rounded-lg border border-white/10 bg-white/[0.035] p-3 text-sm text-zinc-300" key={item}>
                   <Check className="h-4 w-4 text-[#25D366]" />
                   {item}
+                </div>
+              ))}
+            </div>
+            <div className="mt-6 grid gap-3">
+              {prospectingHighlights.map((item) => (
+                <div className="rounded-xl border border-[#25D366]/20 bg-[#25D366]/10 p-4" key={item.title}>
+                  <h3 className="text-sm font-semibold text-[#9AF0B8]">{item.title}</h3>
+                  <p className="mt-2 text-sm leading-6 text-zinc-300">{item.text}</p>
                 </div>
               ))}
             </div>
@@ -214,7 +292,7 @@ export function LandingPage() {
             </div>
             <div className="flex flex-col gap-3 sm:flex-row">
               <Link className="flex h-12 items-center justify-center gap-2 rounded-lg bg-[#8B5CF6] px-5 text-sm font-semibold transition hover:bg-[#7C3AED]" href="/checkout">
-                Quero comecar
+                Solicitar ativacao
                 <ArrowRight className="h-4 w-4" />
               </Link>
             </div>
