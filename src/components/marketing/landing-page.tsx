@@ -20,7 +20,7 @@ const plans = [
     name: "CRM Base",
     price: "R$ 197",
     description: "Pare de perder leads por falta de organizacao.",
-    features: ["Funil visual", "Lead 360", "Tarefas do dia", "Tags comerciais", "Mensagens prontas"],
+    features: ["Funil de vendas", "Visao completa do cliente", "Tarefas do dia", "Segmentacao por interesse", "Mensagens prontas"],
     highlight: false,
     href: "/checkout?plan=base",
   },
@@ -28,7 +28,7 @@ const plans = [
     name: "CRM Pro",
     price: "R$ 297",
     description: "Transforme conversas do WhatsApp em rotina comercial.",
-    features: ["Inbox WhatsApp", "Historico por lead", "Dashboard executivo", "Exportacao CSV", "Auditoria"],
+    features: ["Atendimento pelo WhatsApp", "Historico do cliente", "Indicadores de venda", "Relatorios para decisao", "Registro de atividades"],
     highlight: false,
     href: "/checkout?plan=pro",
   },
@@ -36,7 +36,7 @@ const plans = [
     name: "CRM + Prospeccao",
     price: "R$ 497",
     description: "Encontre empresas, valide contatos e inicie conversas.",
-    features: ["Busca no Google", "Validacao WhatsApp", "Disparo por lote", "Historico de campanha", "Tags automaticas"],
+    features: ["Busca no Google", "Contatos com WhatsApp", "Envios em lote", "Acompanhamento de respostas", "Segmentacao automatica"],
     highlight: true,
     href: "/checkout?plan=prospecting",
   },
@@ -51,22 +51,22 @@ const plans = [
 ];
 
 const capabilities = [
-  { icon: Workflow, title: "Venda sem depender da memoria", text: "Cada lead tem etapa, responsavel, temperatura, proxima acao e historico em um so lugar." },
-  { icon: MessageCircle, title: "WhatsApp vira operacao", text: "Conversas deixam de ficar soltas e passam a alimentar CRM, tarefas, tags e historico comercial." },
-  { icon: Search, title: "Prospeccao sem planilha", text: "Busque empresas por nicho, estado e cidade, capture telefones e monte campanhas em lotes." },
+  { icon: Workflow, title: "Venda sem depender da memoria", text: "Cada oportunidade mostra responsavel, momento da negociacao, prioridade e proxima acao." },
+  { icon: MessageCircle, title: "Atendimento com contexto", text: "As conversas do WhatsApp ficam conectadas ao cliente, ao retorno esperado e ao historico de atendimento." },
+  { icon: Search, title: "Prospeccao sem planilha", text: "Busque empresas por nicho, estado e cidade, capture telefones e monte listas prontas para abordagem." },
   { icon: CalendarClock, title: "Follow-up que aparece", text: "Tarefas vencidas, proximas acoes e agenda do dia ficam na frente do vendedor." },
-  { icon: Tags, title: "Segmentacao simples", text: "Use tags para separar campanha, origem, prioridade, interesse e nivel de oportunidade." },
+  { icon: Tags, title: "Segmentacao simples", text: "Separe contatos por origem, interesse, prioridade, campanha e nivel de oportunidade." },
   { icon: BarChart3, title: "Decisao diaria", text: "Veja respostas novas, riscos comerciais, tarefas e performance antes de perder vendas." },
 ];
 
 const segments = ["Agencias", "Clinicas", "Energia solar", "Estetica", "Imobiliarias", "Servicos locais"];
 const offerStack = [
-  "CRM visual para organizar oportunidades",
-  "Inbox WhatsApp conectada ao historico do lead",
+  "Funil comercial para organizar oportunidades",
+  "Atendimento WhatsApp conectado ao cliente",
   "Tarefas e follow-ups para nao deixar venda esfriar",
-  "Prospeccao por Google com telefone e score",
-  "Campanhas por lote com rastreio de envio",
-  "Tags, auditoria e dashboard para controle diario",
+  "Prospeccao por Google com telefone e prioridade",
+  "Envios em lote com acompanhamento de retorno",
+  "Segmentacao, registros e indicadores para controle diario",
 ];
 
 export function LandingPage() {
@@ -138,7 +138,7 @@ export function LandingPage() {
         <SectionHeader
           eyebrow="O custo invisivel"
           title="O problema nao e falta de lead. E falta de controle depois que o lead aparece."
-          text="Quando o vendedor atende pelo WhatsApp, anota em planilha e tenta lembrar do proximo contato, a venda depende de sorte. O OrigoCRM tira a operacao da memoria e coloca tudo em um processo visivel."
+          text="Quando o vendedor atende pelo WhatsApp, anota em planilha e tenta lembrar do proximo contato, a venda depende de sorte. O OrigoCRM tira a rotina da memoria e mostra exatamente o que precisa acontecer em seguida."
         />
         <div className="mt-8 grid gap-3 md:grid-cols-3">
           {["Quem respondeu e nao foi atendido?", "Qual lead quente esta sem proxima acao?", "Qual campanha gerou conversa de verdade?"].map((question) => (
@@ -160,10 +160,10 @@ export function LandingPage() {
             <SectionHeader
               eyebrow="Mecanismo de crescimento"
               title="Prospecte empresas, valide WhatsApp e comece conversas antes do concorrente."
-              text="Em vez de comprar lista fria ou montar planilha manualmente, busque empresas no Google, filtre contatos com WhatsApp e rode campanhas por lote com historico dentro do CRM."
+              text="Em vez de comprar lista fria ou montar planilha manualmente, busque empresas no Google, filtre contatos com WhatsApp e inicie abordagens em escala acompanhando quem respondeu."
             />
             <div className="mt-8 space-y-3">
-              {["Digite o nicho, estado e cidade que quer atacar", "Receba empresas com nome, telefone, cidade, UF e score", "Valide quais contatos realmente tem WhatsApp", "Envie em lotes e acompanhe quem respondeu"].map((item) => (
+              {["Digite o nicho, estado e cidade que quer atacar", "Receba empresas com nome, telefone, cidade e UF", "Valide quais contatos realmente tem WhatsApp", "Envie em lotes e acompanhe quem respondeu"].map((item) => (
                 <div className="flex items-center gap-3 rounded-lg border border-white/10 bg-white/[0.035] p-3 text-sm text-zinc-300" key={item}>
                   <Check className="h-4 w-4 text-[#25D366]" />
                   {item}
@@ -216,9 +216,6 @@ export function LandingPage() {
               <Link className="flex h-12 items-center justify-center gap-2 rounded-lg bg-[#8B5CF6] px-5 text-sm font-semibold transition hover:bg-[#7C3AED]" href="/checkout">
                 Quero comecar
                 <ArrowRight className="h-4 w-4" />
-              </Link>
-              <Link className="flex h-12 items-center justify-center rounded-lg border border-white/10 px-5 text-sm font-semibold text-zinc-200 transition hover:bg-white/[0.06]" href="/login">
-                Entrar
               </Link>
             </div>
           </div>
@@ -300,7 +297,7 @@ function ProductMockup() {
           <span className="h-3 w-3 rounded-full bg-[#F59E0B]" />
           <span className="h-3 w-3 rounded-full bg-[#25D366]" />
         </div>
-        <span className="text-xs text-zinc-500">Dashboard OrigoCRM</span>
+        <span className="text-xs text-zinc-500">Painel OrigoCRM</span>
       </div>
       <div className="mt-4 grid gap-3 sm:grid-cols-3">
         <MockMetric label="Respostas novas" value="38" tone="green" />
@@ -326,7 +323,7 @@ function ProductMockup() {
           ))}
         </div>
         <div className="rounded-xl border border-white/10 bg-black/25 p-4">
-          <div className="text-sm font-semibold">Inbox WhatsApp</div>
+          <div className="text-sm font-semibold">Atendimento WhatsApp</div>
           {["Lead respondeu", "Campanha enviada", "Follow-up hoje"].map((item, index) => (
             <div className="mt-3 rounded-lg border border-white/10 bg-white/[0.035] p-3" key={item}>
               <div className="text-sm text-white">{item}</div>

@@ -24,9 +24,6 @@ export default function CheckoutPage() {
           <Link className="relative block h-12 w-44" href="/">
             <Image alt="OrigoCRM" className="object-contain object-left" fill priority sizes="176px" src="/origocrm-logo.png" />
           </Link>
-          <Link className="h-10 rounded-lg border border-white/10 px-4 py-2 text-sm text-zinc-200 transition hover:bg-white/[0.06]" href="/login">
-            Entrar
-          </Link>
         </header>
 
         <section className="mt-14 rounded-2xl border border-white/10 bg-[#111018]/90 p-6 shadow-2xl shadow-[#8B5CF6]/10 md:p-8">
@@ -34,14 +31,14 @@ export default function CheckoutPage() {
             <div>
               <div className="inline-flex items-center gap-2 rounded-full border border-[#8B5CF6]/35 bg-[#8B5CF6]/12 px-3 py-1.5 text-xs font-medium uppercase tracking-[0.16em] text-[#DDD6FE]">
                 <CreditCard className="h-3.5 w-3.5" />
-                Cadastro assistido
+                Ativacao assistida
               </div>
-              <h1 className="mt-5 text-4xl font-semibold tracking-[-0.02em]">Escolha o plano e libere seu acesso.</h1>
+              <h1 className="mt-5 text-4xl font-semibold tracking-[-0.02em]">Escolha o plano ideal para sua operacao.</h1>
               <p className="mt-4 text-base leading-7 text-zinc-400">
-                Esta etapa esta preparada para receber checkout automatico. No MVP, o cadastro e liberado apos confirmacao do plano e pagamento.
+                A contratacao e assistida para confirmar quantidade de usuarios, modulo de prospeccao e melhor forma de ativacao antes da liberacao do acesso.
               </p>
               <div className="mt-6 space-y-3">
-                {["Escolha o plano", "Finalize o pagamento com o comercial", "Receba ou ative seu usuario no Supabase", "Entre pelo botao Entrar"].map((step) => (
+                {["Escolha o plano mais adequado", "Envie sua solicitacao de contratacao", "Receba as instrucoes de pagamento", "Tenha o acesso liberado apos a confirmacao"].map((step) => (
                   <div className="flex items-center gap-3 rounded-lg border border-white/10 bg-white/[0.035] p-3 text-sm text-zinc-300" key={step}>
                     <Check className="h-4 w-4 text-[#25D366]" />
                     {step}
@@ -68,10 +65,10 @@ export default function CheckoutPage() {
               <div className="mt-3 rounded-xl border border-[#25D366]/25 bg-[#25D366]/10 p-4">
                 <div className="flex items-center gap-2 text-sm font-semibold text-[#9AF0B8]">
                   <MessageCircle className="h-4 w-4" />
-                  Proximo passo comercial
+                  Como funciona a ativacao
                 </div>
                 <p className="mt-2 text-sm leading-6 text-zinc-300">
-                  Depois de conectar um provedor de pagamento, este botao pode criar assinatura automaticamente e liberar acesso conforme o plano.
+                  Clique no plano desejado para enviar sua solicitacao. Em seguida, retornamos com pagamento, dados de acesso e orientacao inicial para colocar a operacao no ar.
                 </p>
               </div>
             </div>
@@ -80,7 +77,7 @@ export default function CheckoutPage() {
 
         <div className="mt-6 flex items-center gap-2 text-sm text-zinc-500">
           <ShieldCheck className="h-4 w-4 text-[#A78BFA]" />
-          O acesso ao sistema permanece protegido pelo login atual do Supabase.
+          A liberacao acontece em ambiente protegido, com acesso individual para cada usuario autorizado.
         </div>
       </div>
     </main>
