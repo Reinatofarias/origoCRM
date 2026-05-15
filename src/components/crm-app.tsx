@@ -1718,16 +1718,22 @@ function Workspace({
   }
 
   return (
-    <main className="min-h-screen bg-[#09090D] text-white">
+    <main className="crm-shell relative min-h-screen overflow-hidden bg-[#09090D] text-white">
+      <div className="glow-breathe pointer-events-none absolute inset-x-0 top-0 h-[34rem] bg-[radial-gradient(ellipse_at_14%_0%,rgba(139,92,246,0.28),transparent_42%),radial-gradient(ellipse_at_88%_12%,rgba(37,211,102,0.12),transparent_34%)]" />
+      <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.022)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.016)_1px,transparent_1px)] bg-[size:72px_72px] opacity-25" />
       {toast && (
-        <div className="fixed right-4 top-4 z-[60] rounded-lg border border-[#8B5CF6]/40 bg-[#17111f] px-4 py-3 text-sm shadow-2xl shadow-[#8B5CF6]/30">
+        <div className="fixed right-4 top-4 z-[60] rounded-lg border border-[#8B5CF6]/40 bg-[#17111f]/95 px-4 py-3 text-sm shadow-2xl shadow-[#8B5CF6]/30 backdrop-blur-xl">
           {toast.text}
         </div>
       )}
 
-      <div className="flex min-h-screen flex-col lg:flex-row">
-        <aside className="border-b border-white/10 bg-black/25 px-4 py-4 lg:w-72 lg:border-b-0 lg:border-r">
-          <div className="flex items-center justify-between gap-3 lg:block">
+      <div className="relative flex min-h-screen flex-col lg:flex-row">
+        <aside className="relative overflow-hidden border-b border-white/10 bg-black/35 px-4 py-4 shadow-2xl shadow-black/30 backdrop-blur-xl lg:w-72 lg:border-b-0 lg:border-r">
+          <div className="pointer-events-none absolute -left-16 top-10 h-52 w-52 opacity-[0.05]">
+            <Image alt="" className="object-contain" fill sizes="208px" src="/origocrm-icon.png" />
+          </div>
+          <div className="absolute inset-y-0 right-0 hidden w-px bg-[linear-gradient(180deg,transparent,rgba(139,92,246,0.7),rgba(37,211,102,0.22),transparent)] lg:block" />
+          <div className="relative flex items-center justify-between gap-3 lg:block">
             <div>
               <BrandLogo compact className="aspect-[3.13/1] w-56 max-w-full" />
               <div className="mt-3 max-w-full truncate text-xs text-zinc-500">{user.email}</div>
@@ -1740,7 +1746,7 @@ function Workspace({
               <LogOut className="h-4 w-4" />
             </button>
           </div>
-          <nav className="mt-4 grid grid-cols-4 gap-2 lg:grid-cols-1">
+          <nav className="relative mt-4 grid grid-cols-4 gap-2 lg:grid-cols-1">
             {[
               ["dashboard", "Dashboard", BarChart3],
               ["pipeline", "CRM", Sparkles],
@@ -1752,7 +1758,7 @@ function Workspace({
               <button
                 className={`flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm transition lg:justify-start ${
                   view === key
-                    ? "bg-[#8B5CF6] text-white"
+                    ? "bg-[#8B5CF6] text-white shadow-lg shadow-[#8B5CF6]/25"
                     : "text-zinc-400 hover:bg-white/[0.06] hover:text-white"
                 }`}
                 key={key as string}
@@ -1764,7 +1770,7 @@ function Workspace({
             ))}
           </nav>
           <button
-            className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg border border-[#8B5CF6]/35 bg-[#8B5CF6]/10 px-3 py-2 text-sm text-[#DDD6FE] shadow-lg shadow-[#8B5CF6]/10 transition hover:bg-[#8B5CF6]/20"
+            className="shine-cta relative mt-3 flex w-full items-center justify-center gap-2 rounded-lg border border-[#8B5CF6]/35 bg-[#8B5CF6]/10 px-3 py-2 text-sm text-[#DDD6FE] shadow-lg shadow-[#8B5CF6]/10 transition hover:bg-[#8B5CF6]/20"
             onClick={() => setProspectingOpen(true)}
             type="button"
           >
@@ -1780,8 +1786,9 @@ function Workspace({
           </button>
         </aside>
 
-        <section className="flex-1 overflow-hidden">
-          <header className="flex flex-col gap-4 border-b border-white/10 px-5 py-4 xl:flex-row xl:items-center xl:justify-between">
+        <section className="relative flex-1 overflow-hidden">
+          <header className="relative flex flex-col gap-4 border-b border-white/10 bg-black/20 px-5 py-4 shadow-xl shadow-black/10 backdrop-blur-xl xl:flex-row xl:items-center xl:justify-between">
+            <div className="absolute inset-x-0 bottom-0 h-px bg-[linear-gradient(90deg,transparent,rgba(139,92,246,0.55),rgba(37,211,102,0.18),transparent)]" />
             <div>
               <h1 className="text-2xl font-semibold">{viewTitles[view]}</h1>
               <p className="mt-1 text-sm text-zinc-500">{getViewSubtitle(view)}</p>
@@ -1888,7 +1895,7 @@ function Workspace({
               )}
               {view !== "settings" && (
                 <button
-                  className="flex h-11 items-center justify-center gap-2 rounded-lg bg-[#8B5CF6] px-4 text-sm font-medium transition hover:bg-[#7C3AED]"
+                  className="shine-cta flex h-11 items-center justify-center gap-2 rounded-lg bg-[#8B5CF6] px-4 text-sm font-medium shadow-lg shadow-[#8B5CF6]/20 transition hover:bg-[#7C3AED]"
                   onClick={() => {
                     setEditingLead(null);
                     setLeadFormOpen(true);
@@ -1901,7 +1908,7 @@ function Workspace({
             </div>
           </header>
 
-          <div className="p-5">
+          <div className="reveal-up relative p-5">
             {loading ? (
               <div className="flex h-96 items-center justify-center">
                 <Loader2 className="h-6 w-6 animate-spin text-[#8B5CF6]" />
@@ -8394,11 +8401,15 @@ function Modal({
   wide?: boolean;
 }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
-      <div className={`max-h-[90vh] w-full overflow-y-auto rounded-xl border border-white/10 bg-[#0F0F16] p-5 shadow-2xl shadow-black ${
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm">
+      <div className={`reveal-up relative max-h-[90vh] w-full overflow-y-auto rounded-xl border border-[#8B5CF6]/25 bg-[#0F0F16]/95 p-5 shadow-2xl shadow-[#8B5CF6]/15 ${
         wide ? "max-w-6xl" : "max-w-xl"
       }`}>
-        <div className="mb-5 flex items-center justify-between gap-4">
+        <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(139,92,246,0.85),rgba(37,211,102,0.3),transparent)]" />
+        <div className="pointer-events-none absolute -right-20 -top-24 h-64 w-64 opacity-[0.04]">
+          <Image alt="" className="object-contain" fill sizes="256px" src="/origocrm-icon.png" />
+        </div>
+        <div className="relative mb-5 flex items-center justify-between gap-4">
           <h2 className="text-xl font-semibold">{title}</h2>
           <button
             className="rounded-lg border border-white/10 px-3 py-2 text-sm text-zinc-400 transition hover:bg-white/[0.06] hover:text-white"
@@ -8407,7 +8418,7 @@ function Modal({
             Fechar
           </button>
         </div>
-        {children}
+        <div className="relative">{children}</div>
       </div>
     </div>
   );

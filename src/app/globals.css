@@ -147,3 +147,33 @@ body {
     animation: none !important;
   }
 }
+
+.crm-shell :is(section, article).rounded-lg,
+.crm-shell :is(section, article).rounded-xl,
+.crm-shell :is(section, article).rounded-2xl {
+  backdrop-filter: blur(16px);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.18);
+}
+
+.crm-shell :is(section, article).rounded-lg:hover,
+.crm-shell :is(section, article).rounded-xl:hover,
+.crm-shell :is(section, article).rounded-2xl:hover {
+  border-color: rgba(139, 92, 246, 0.22);
+}
+
+.crm-shell input,
+.crm-shell select,
+.crm-shell textarea {
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.025);
+}
+
+.crm-shell button,
+.crm-shell a {
+  -webkit-tap-highlight-color: transparent;
+}
+
+.crm-shell [class*="bg-white/[0.03]"],
+.crm-shell [class*="bg-white/[0.035]"],
+.crm-shell [class*="bg-white/[0.04]"] {
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.018), rgba(255, 255, 255, 0));
+}
