@@ -15,40 +15,7 @@ import Image from "next/image";
 import Link from "next/link";
 import type { ComponentType, CSSProperties } from "react";
 
-const plans = [
-  {
-    name: "CRM Base",
-    price: "R$ 197",
-    description: "Pare de perder leads por falta de organizacao.",
-    features: ["Funil de vendas", "Visao completa do cliente", "Tarefas do dia", "Segmentacao por interesse", "Mensagens prontas"],
-    highlight: false,
-    href: "/checkout?plan=base",
-  },
-  {
-    name: "CRM Pro",
-    price: "R$ 297",
-    description: "Transforme conversas do WhatsApp em rotina comercial.",
-    features: ["Atendimento pelo WhatsApp", "Historico do cliente", "Indicadores de venda", "Relatorios para decisao", "Registro de atividades"],
-    highlight: false,
-    href: "/checkout?plan=pro",
-  },
-  {
-    name: "CRM + Prospeccao",
-    price: "R$ 497",
-    description: "Encontre empresas, valide contatos e inicie conversas.",
-    features: ["Busca no Google", "Contatos com WhatsApp", "Envios em lote", "Acompanhamento de respostas", "Segmentacao automatica"],
-    highlight: true,
-    href: "/checkout?plan=prospecting",
-  },
-  {
-    name: "Premium",
-    price: "R$ 797",
-    description: "Para operacoes que precisam de volume, controle e acompanhamento.",
-    features: ["Mais volume", "Suporte prioritario", "Onboarding guiado", "Campanhas avancadas", "Diagnostico WhatsApp"],
-    highlight: false,
-    href: "/checkout?plan=premium",
-  },
-];
+import { PricingSection } from "./pricing-section";
 
 const capabilities = [
   { icon: Workflow, title: "Venda sem depender da memoria", text: "Cada oportunidade mostra responsavel, momento da negociacao, prioridade e proxima acao." },
@@ -270,7 +237,7 @@ export function LandingPage() {
         <SectionHeader
           eyebrow="Oferta"
           title="Escolha o quanto da sua operacao comercial voce quer controlar."
-          text="Comece com CRM para organizar vendas ou adicione prospeccao para gerar novas conversas todos os meses. Valores por usuario."
+          text="Comece com CRM para organizar vendas ou adicione prospeccao para gerar novas conversas todos os meses. Escolha entre mensal, semestral ou anual."
         />
         <div className="mt-8 rounded-2xl border border-[#25D366]/20 bg-[#25D366]/10 p-5">
           <div className="text-sm font-semibold text-[#9AF0B8]">O que voce leva na estrutura completa</div>
@@ -283,11 +250,7 @@ export function LandingPage() {
             ))}
           </div>
         </div>
-        <div className="relative mt-10 grid gap-4 lg:grid-cols-4">
-          {plans.map((plan) => (
-            <PlanCard key={plan.name} {...plan} />
-          ))}
-        </div>
+        <PricingSection />
       </section>
 
       <section className="relative mx-auto max-w-7xl px-5 pb-20">
@@ -346,50 +309,6 @@ function FeatureCard({ icon: Icon, title, text }: { icon: ComponentType<{ classN
       </div>
       <h3 className="mt-4 font-semibold text-white">{title}</h3>
       <p className="mt-2 text-sm leading-6 text-zinc-400">{text}</p>
-    </article>
-  );
-}
-
-function PlanCard({
-  name,
-  price,
-  description,
-  features,
-  highlight,
-  href,
-}: {
-  name: string;
-  price: string;
-  description: string;
-  features: string[];
-  highlight: boolean;
-  href: string;
-}) {
-  return (
-    <article className={`relative overflow-hidden rounded-xl border p-5 transition hover:-translate-y-0.5 ${highlight ? "border-[#8B5CF6]/65 bg-[linear-gradient(180deg,rgba(139,92,246,0.18),rgba(139,92,246,0.07))] shadow-2xl shadow-[#8B5CF6]/20" : "border-white/10 bg-white/[0.035] hover:border-white/20"}`}>
-      {highlight && <div className="absolute inset-x-0 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(139,92,246,0.9),rgba(37,211,102,0.45),transparent)]" />}
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <h3 className="font-semibold text-white">{name}</h3>
-          <p className="mt-2 min-h-12 text-sm leading-6 text-zinc-400">{description}</p>
-        </div>
-        {highlight && <span className="rounded-full border border-[#25D366]/25 bg-[#25D366]/15 px-2 py-1 text-xs text-[#9AF0B8]">Mais vendido</span>}
-      </div>
-      <div className="mt-5">
-        <span className="text-3xl font-semibold">{price}</span>
-        <span className="text-sm text-zinc-500"> / usuario</span>
-      </div>
-      <ul className="mt-5 space-y-2">
-        {features.map((feature) => (
-          <li className="flex items-center gap-2 text-sm text-zinc-300" key={feature}>
-            <Check className="h-4 w-4 text-[#25D366]" />
-            {feature}
-          </li>
-        ))}
-      </ul>
-      <Link className={`mt-6 flex h-11 items-center justify-center rounded-lg text-sm font-semibold transition ${highlight ? "bg-[#8B5CF6] text-white hover:bg-[#7C3AED]" : "border border-white/10 text-zinc-200 hover:bg-white/[0.06]"}`} href={href}>
-        Escolher plano
-      </Link>
     </article>
   );
 }
