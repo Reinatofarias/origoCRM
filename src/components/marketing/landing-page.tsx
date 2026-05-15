@@ -111,9 +111,6 @@ export function LandingPage() {
               Quero organizar minhas vendas
               <ArrowRight className="h-4 w-4" />
             </Link>
-            <Link className="flex h-12 items-center justify-center gap-2 rounded-lg border border-white/10 px-5 text-sm font-semibold text-zinc-200 transition hover:bg-white/[0.06]" href="/login">
-              Entrar no CRM
-            </Link>
           </div>
           <div className="mt-8 grid grid-cols-2 gap-3 text-sm text-zinc-400 sm:grid-cols-4">
             {["Sem planilhas", "Sem lead perdido", "Sem follow-up esquecido", "Com campanha rastreada"].map((item) => (
