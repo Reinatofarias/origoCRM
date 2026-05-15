@@ -103,8 +103,10 @@ const prospectingHighlights = [
 
 export function LandingPage() {
   return (
-    <main className="min-h-screen overflow-hidden bg-[#08080C] text-white">
-      <div className="absolute inset-x-0 top-0 h-[34rem] bg-[radial-gradient(circle_at_30%_0%,rgba(139,92,246,0.28),transparent_35%),radial-gradient(circle_at_85%_12%,rgba(37,211,102,0.12),transparent_32%)]" />
+    <main className="relative min-h-screen overflow-hidden bg-[#08080C] text-white">
+      <div className="absolute inset-x-0 top-0 h-[42rem] bg-[radial-gradient(ellipse_at_28%_0%,rgba(139,92,246,0.34),transparent_44%),radial-gradient(ellipse_at_86%_10%,rgba(37,211,102,0.16),transparent_38%)]" />
+      <div className="absolute inset-x-0 top-[34rem] h-40 bg-[linear-gradient(90deg,transparent,rgba(139,92,246,0.16),rgba(37,211,102,0.08),transparent)] blur-3xl" />
+      <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.025)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.018)_1px,transparent_1px)] bg-[size:72px_72px] opacity-30" />
       <header className="relative z-10 border-b border-white/10 bg-black/20 backdrop-blur-xl">
         <div className="mx-auto flex h-20 max-w-7xl items-center justify-between gap-4 px-5">
           <Link className="relative block h-12 w-44 shrink-0" href="/">
@@ -128,7 +130,8 @@ export function LandingPage() {
       </header>
 
       <section className="relative z-10 mx-auto grid min-h-[calc(100vh-5rem)] max-w-7xl items-center gap-12 px-5 py-14 lg:grid-cols-[0.95fr_1.05fr]">
-        <div>
+        <BrandWatermark className="-left-24 top-16 h-64 w-64 opacity-[0.08]" />
+        <div className="relative">
           <div className="inline-flex items-center gap-2 rounded-full border border-[#8B5CF6]/35 bg-[#8B5CF6]/12 px-3 py-1.5 text-xs font-medium uppercase tracking-[0.16em] text-[#DDD6FE]">
             <Sparkles className="h-3.5 w-3.5" />
             Para empresas que vendem pelo WhatsApp
@@ -154,7 +157,10 @@ export function LandingPage() {
             ))}
           </div>
         </div>
-        <ProductMockup />
+        <div className="relative">
+          <div className="absolute -inset-6 bg-[linear-gradient(135deg,rgba(139,92,246,0.24),rgba(37,211,102,0.08),transparent)] blur-3xl" />
+          <ProductMockup />
+        </div>
       </section>
 
       <section className="relative z-10 border-y border-white/10 bg-white/[0.025]">
@@ -167,7 +173,8 @@ export function LandingPage() {
         </div>
       </section>
 
-      <section className="mx-auto max-w-7xl px-5 py-20" id="solucao">
+      <section className="relative mx-auto max-w-7xl px-5 py-20" id="solucao">
+        <div className="absolute inset-x-5 top-8 h-px bg-[linear-gradient(90deg,transparent,rgba(139,92,246,0.55),rgba(37,211,102,0.25),transparent)]" />
         <SectionHeader
           eyebrow="O custo invisivel"
           title="O problema nao e falta de lead. E falta de controle depois que o lead aparece."
@@ -187,9 +194,11 @@ export function LandingPage() {
         </div>
       </section>
 
-      <section className="mx-auto max-w-7xl px-5 pb-20" id="prova">
+      <section className="relative mx-auto max-w-7xl px-5 pb-20" id="prova">
+        <BrandWatermark className="-right-28 top-0 h-72 w-72 opacity-[0.06]" />
         <div className="grid gap-6 lg:grid-cols-[0.85fr_1.15fr]">
-          <div className="rounded-2xl border border-[#25D366]/20 bg-[#07130D]/70 p-6">
+          <div className="relative overflow-hidden rounded-2xl border border-[#25D366]/20 bg-[#07130D]/70 p-6 shadow-2xl shadow-[#25D366]/10">
+            <div className="absolute inset-x-0 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(37,211,102,0.7),rgba(139,92,246,0.35),transparent)]" />
             <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[#9AF0B8]">Como fica na pratica</div>
             <h2 className="mt-4 text-3xl font-semibold tracking-[-0.01em] text-white">
               Uma rotina diaria para vender sem deixar oportunidade escapar.
@@ -207,7 +216,8 @@ export function LandingPage() {
             </div>
           </div>
 
-          <div className="rounded-2xl border border-white/10 bg-white/[0.035] p-6">
+          <div className="relative overflow-hidden rounded-2xl border border-white/10 bg-white/[0.035] p-6 shadow-2xl shadow-[#8B5CF6]/10">
+            <div className="absolute inset-x-0 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(139,92,246,0.75),transparent)]" />
             <div className="grid gap-3 md:grid-cols-2">
               {beforeAfter.map((item) => (
                 <div className="rounded-xl border border-white/10 bg-black/25 p-4" key={item.before}>
@@ -224,7 +234,9 @@ export function LandingPage() {
         </div>
       </section>
 
-      <section className="border-y border-white/10 bg-[#0D0D13] px-5 py-20" id="prospeccao">
+      <section className="relative border-y border-white/10 bg-[#0D0D13] px-5 py-20" id="prospeccao">
+        <div className="absolute inset-x-0 top-0 h-52 bg-[linear-gradient(180deg,rgba(37,211,102,0.08),transparent)]" />
+        <div className="absolute inset-x-0 bottom-0 h-48 bg-[linear-gradient(90deg,transparent,rgba(139,92,246,0.12),transparent)] blur-3xl" />
         <div className="mx-auto grid max-w-7xl gap-10 lg:grid-cols-[0.9fr_1.1fr]">
           <div>
             <SectionHeader
@@ -253,7 +265,8 @@ export function LandingPage() {
         </div>
       </section>
 
-      <section className="mx-auto max-w-7xl px-5 py-20" id="planos">
+      <section className="relative mx-auto max-w-7xl px-5 py-20" id="planos">
+        <div className="absolute inset-x-5 top-12 h-40 bg-[linear-gradient(90deg,rgba(139,92,246,0.08),rgba(37,211,102,0.06),transparent)] blur-3xl" />
         <SectionHeader
           eyebrow="Oferta"
           title="Escolha o quanto da sua operacao comercial voce quer controlar."
@@ -270,15 +283,18 @@ export function LandingPage() {
             ))}
           </div>
         </div>
-        <div className="mt-10 grid gap-4 lg:grid-cols-4">
+        <div className="relative mt-10 grid gap-4 lg:grid-cols-4">
           {plans.map((plan) => (
             <PlanCard key={plan.name} {...plan} />
           ))}
         </div>
       </section>
 
-      <section className="mx-auto max-w-7xl px-5 pb-20">
-        <div className="rounded-2xl border border-[#8B5CF6]/25 bg-[#111018] p-8 shadow-2xl shadow-[#8B5CF6]/10 md:p-10">
+      <section className="relative mx-auto max-w-7xl px-5 pb-20">
+        <div className="absolute inset-x-8 bottom-12 h-40 bg-[linear-gradient(90deg,transparent,rgba(139,92,246,0.22),rgba(37,211,102,0.1),transparent)] blur-3xl" />
+        <div className="relative overflow-hidden rounded-2xl border border-[#8B5CF6]/25 bg-[#111018] p-8 shadow-2xl shadow-[#8B5CF6]/15 md:p-10">
+          <BrandWatermark className="-right-16 -top-20 h-56 w-56 opacity-[0.06]" />
+          <div className="absolute inset-x-0 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(139,92,246,0.85),rgba(37,211,102,0.35),transparent)]" />
           <div className="grid gap-8 lg:grid-cols-[1fr_auto] lg:items-center">
             <div>
               <div className="flex items-center gap-2 text-sm font-medium text-[#DDD6FE]">
@@ -313,10 +329,21 @@ function SectionHeader({ eyebrow, title, text }: { eyebrow: string; title: strin
   );
 }
 
+function BrandWatermark({ className }: { className: string }) {
+  return (
+    <div className={`pointer-events-none absolute ${className}`}>
+      <Image alt="" className="object-contain" fill sizes="288px" src="/origocrm-icon.png" />
+    </div>
+  );
+}
+
 function FeatureCard({ icon: Icon, title, text }: { icon: ComponentType<{ className?: string }>; title: string; text: string }) {
   return (
-    <article className="rounded-xl border border-white/10 bg-white/[0.035] p-5">
-      <Icon className="h-5 w-5 text-[#A78BFA]" />
+    <article className="group relative overflow-hidden rounded-xl border border-white/10 bg-white/[0.035] p-5 shadow-xl shadow-black/20 transition hover:border-[#8B5CF6]/35 hover:bg-white/[0.055]">
+      <div className="absolute inset-x-0 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(139,92,246,0.58),transparent)] opacity-0 transition group-hover:opacity-100" />
+      <div className="flex h-10 w-10 items-center justify-center rounded-lg border border-[#8B5CF6]/20 bg-[#8B5CF6]/10">
+        <Icon className="h-5 w-5 text-[#C4B5FD]" />
+      </div>
       <h3 className="mt-4 font-semibold text-white">{title}</h3>
       <p className="mt-2 text-sm leading-6 text-zinc-400">{text}</p>
     </article>
@@ -339,13 +366,14 @@ function PlanCard({
   href: string;
 }) {
   return (
-    <article className={`rounded-xl border p-5 ${highlight ? "border-[#8B5CF6]/55 bg-[#8B5CF6]/12 shadow-2xl shadow-[#8B5CF6]/10" : "border-white/10 bg-white/[0.035]"}`}>
+    <article className={`relative overflow-hidden rounded-xl border p-5 transition hover:-translate-y-0.5 ${highlight ? "border-[#8B5CF6]/65 bg-[linear-gradient(180deg,rgba(139,92,246,0.18),rgba(139,92,246,0.07))] shadow-2xl shadow-[#8B5CF6]/20" : "border-white/10 bg-white/[0.035] hover:border-white/20"}`}>
+      {highlight && <div className="absolute inset-x-0 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(139,92,246,0.9),rgba(37,211,102,0.45),transparent)]" />}
       <div className="flex items-start justify-between gap-3">
         <div>
           <h3 className="font-semibold text-white">{name}</h3>
           <p className="mt-2 min-h-12 text-sm leading-6 text-zinc-400">{description}</p>
         </div>
-        {highlight && <span className="rounded-full bg-[#25D366]/15 px-2 py-1 text-xs text-[#9AF0B8]">Mais vendido</span>}
+        {highlight && <span className="rounded-full border border-[#25D366]/25 bg-[#25D366]/15 px-2 py-1 text-xs text-[#9AF0B8]">Mais vendido</span>}
       </div>
       <div className="mt-5">
         <span className="text-3xl font-semibold">{price}</span>
@@ -368,8 +396,10 @@ function PlanCard({
 
 function ProductMockup() {
   return (
-    <div className="rounded-2xl border border-white/10 bg-[#111018]/90 p-4 shadow-2xl shadow-[#8B5CF6]/15 backdrop-blur-xl">
-      <div className="flex items-center justify-between border-b border-white/10 pb-3">
+    <div className="relative overflow-hidden rounded-2xl border border-white/10 bg-[#111018]/90 p-4 shadow-2xl shadow-[#8B5CF6]/20 backdrop-blur-xl">
+      <BrandWatermark className="-right-14 -top-16 h-52 w-52 opacity-[0.055]" />
+      <div className="absolute inset-x-0 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(139,92,246,0.9),rgba(37,211,102,0.35),transparent)]" />
+      <div className="relative flex items-center justify-between border-b border-white/10 pb-3">
         <div className="flex items-center gap-2">
           <span className="h-3 w-3 rounded-full bg-[#F43F5E]" />
           <span className="h-3 w-3 rounded-full bg-[#F59E0B]" />
@@ -377,12 +407,12 @@ function ProductMockup() {
         </div>
         <span className="text-xs text-zinc-500">Painel OrigoCRM</span>
       </div>
-      <div className="mt-4 grid gap-3 sm:grid-cols-3">
+      <div className="relative mt-4 grid gap-3 sm:grid-cols-3">
         <MockMetric label="Respostas novas" value="38" tone="green" />
         <MockMetric label="Follow-ups" value="12" tone="amber" />
         <MockMetric label="Leads quentes" value="9" tone="purple" />
       </div>
-      <div className="mt-4 grid gap-3 lg:grid-cols-[1.1fr_0.9fr]">
+      <div className="relative mt-4 grid gap-3 lg:grid-cols-[1.1fr_0.9fr]">
         <div className="rounded-xl border border-white/10 bg-black/25 p-4">
           <div className="mb-4 flex items-center justify-between">
             <span className="text-sm font-semibold">CRM</span>
@@ -416,13 +446,15 @@ function ProductMockup() {
 
 function ProspectingMockup() {
   return (
-    <div className="rounded-2xl border border-[#25D366]/20 bg-[#07130D]/70 p-4 shadow-2xl shadow-[#25D366]/10">
-      <div className="grid gap-3 md:grid-cols-[1fr_0.7fr_auto]">
+    <div className="relative overflow-hidden rounded-2xl border border-[#25D366]/20 bg-[#07130D]/70 p-4 shadow-2xl shadow-[#25D366]/15">
+      <BrandWatermark className="-right-20 -bottom-24 h-64 w-64 opacity-[0.045]" />
+      <div className="absolute inset-x-0 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(37,211,102,0.75),rgba(139,92,246,0.45),transparent)]" />
+      <div className="relative grid gap-3 md:grid-cols-[1fr_0.7fr_auto]">
         <div className="rounded-lg border border-white/10 bg-black/30 px-4 py-3 text-sm text-zinc-300">Pizzarias</div>
         <div className="rounded-lg border border-white/10 bg-black/30 px-4 py-3 text-sm text-zinc-300">PE</div>
         <div className="rounded-lg bg-[#8B5CF6] px-4 py-3 text-sm font-semibold">Buscar</div>
       </div>
-      <div className="mt-4 overflow-hidden rounded-xl border border-white/10">
+      <div className="relative mt-4 overflow-hidden rounded-xl border border-white/10">
         {["Ricco Pizzaria", "Real Pizza Igarassu", "Forno Nobre", "Bella Massa"].map((name, index) => (
           <div className="grid grid-cols-[1fr_auto_auto] items-center gap-3 border-b border-white/10 bg-black/20 p-3 last:border-b-0" key={name}>
             <div>
@@ -434,7 +466,7 @@ function ProspectingMockup() {
           </div>
         ))}
       </div>
-      <div className="mt-4 rounded-xl border border-[#25D366]/25 bg-[#25D366]/10 p-4">
+      <div className="relative mt-4 rounded-xl border border-[#25D366]/25 bg-[#25D366]/10 p-4">
         <div className="flex items-center gap-2 text-sm font-semibold text-[#9AF0B8]">
           <Bot className="h-4 w-4" />
           Campanha pronta
