@@ -13,7 +13,7 @@ import {
 } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
-import type { ComponentType } from "react";
+import type { ComponentType, CSSProperties } from "react";
 
 const plans = [
   {
@@ -104,8 +104,8 @@ const prospectingHighlights = [
 export function LandingPage() {
   return (
     <main className="relative min-h-screen overflow-hidden bg-[#08080C] text-white">
-      <div className="absolute inset-x-0 top-0 h-[42rem] bg-[radial-gradient(ellipse_at_28%_0%,rgba(139,92,246,0.34),transparent_44%),radial-gradient(ellipse_at_86%_10%,rgba(37,211,102,0.16),transparent_38%)]" />
-      <div className="absolute inset-x-0 top-[34rem] h-40 bg-[linear-gradient(90deg,transparent,rgba(139,92,246,0.16),rgba(37,211,102,0.08),transparent)] blur-3xl" />
+      <div className="glow-breathe absolute inset-x-0 top-0 h-[42rem] bg-[radial-gradient(ellipse_at_28%_0%,rgba(139,92,246,0.34),transparent_44%),radial-gradient(ellipse_at_86%_10%,rgba(37,211,102,0.16),transparent_38%)]" />
+      <div className="glow-breathe absolute inset-x-0 top-[34rem] h-40 bg-[linear-gradient(90deg,transparent,rgba(139,92,246,0.16),rgba(37,211,102,0.08),transparent)] blur-3xl" />
       <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.025)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.018)_1px,transparent_1px)] bg-[size:72px_72px] opacity-30" />
       <header className="relative z-10 border-b border-white/10 bg-black/20 backdrop-blur-xl">
         <div className="mx-auto flex h-20 max-w-7xl items-center justify-between gap-4 px-5">
@@ -122,7 +122,7 @@ export function LandingPage() {
             <Link className="h-10 rounded-lg border border-white/10 px-4 py-2 text-sm text-zinc-200 transition hover:bg-white/[0.06]" href="/login">
               Entrar
             </Link>
-            <Link className="hidden h-10 rounded-lg bg-[#8B5CF6] px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-[#8B5CF6]/25 transition hover:bg-[#7C3AED] sm:block" href="/checkout">
+            <Link className="shine-cta hidden h-10 rounded-lg bg-[#8B5CF6] px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-[#8B5CF6]/25 transition hover:bg-[#7C3AED] sm:block" href="/checkout">
               Solicitar acesso
             </Link>
           </div>
@@ -132,23 +132,23 @@ export function LandingPage() {
       <section className="relative z-10 mx-auto grid min-h-[calc(100vh-5rem)] max-w-7xl items-center gap-12 px-5 py-14 lg:grid-cols-[0.95fr_1.05fr]">
         <BrandWatermark className="-left-24 top-16 h-64 w-64 opacity-[0.08]" />
         <div className="relative">
-          <div className="inline-flex items-center gap-2 rounded-full border border-[#8B5CF6]/35 bg-[#8B5CF6]/12 px-3 py-1.5 text-xs font-medium uppercase tracking-[0.16em] text-[#DDD6FE]">
+          <div className="reveal-up inline-flex items-center gap-2 rounded-full border border-[#8B5CF6]/35 bg-[#8B5CF6]/12 px-3 py-1.5 text-xs font-medium uppercase tracking-[0.16em] text-[#DDD6FE]">
             <Sparkles className="h-3.5 w-3.5" />
             Para empresas que vendem pelo WhatsApp
           </div>
-          <h1 className="mt-6 max-w-3xl text-5xl font-semibold leading-[1.02] tracking-[-0.02em] text-white md:text-6xl">
+          <h1 className="reveal-up mt-6 max-w-3xl text-5xl font-semibold leading-[1.02] tracking-[-0.02em] text-white md:text-6xl" style={{ "--delay": "90ms" } as CSSProperties}>
             Pare de perder leads no WhatsApp e transforme conversas em vendas acompanhadas.
           </h1>
-          <p className="mt-6 max-w-2xl text-lg leading-8 text-zinc-300">
+          <p className="reveal-up mt-6 max-w-2xl text-lg leading-8 text-zinc-300" style={{ "--delay": "170ms" } as CSSProperties}>
             O OrigoCRM junta CRM, WhatsApp, tarefas, prospeccao e campanhas em uma unica central para voce saber quem responder, quem cobrar e qual oportunidade nao pode esfriar.
           </p>
-          <div className="mt-8 flex flex-col gap-3 sm:flex-row">
-            <Link className="flex h-12 items-center justify-center gap-2 rounded-lg bg-[#8B5CF6] px-5 text-sm font-semibold shadow-xl shadow-[#8B5CF6]/25 transition hover:bg-[#7C3AED]" href="/checkout">
+          <div className="reveal-up mt-8 flex flex-col gap-3 sm:flex-row" style={{ "--delay": "250ms" } as CSSProperties}>
+            <Link className="shine-cta flex h-12 items-center justify-center gap-2 rounded-lg bg-[#8B5CF6] px-5 text-sm font-semibold shadow-xl shadow-[#8B5CF6]/25 transition hover:bg-[#7C3AED]" href="/checkout">
               Solicitar meu acesso
               <ArrowRight className="h-4 w-4" />
             </Link>
           </div>
-          <div className="mt-8 grid grid-cols-2 gap-3 text-sm text-zinc-400 sm:grid-cols-4">
+          <div className="reveal-up mt-8 grid grid-cols-2 gap-3 text-sm text-zinc-400 sm:grid-cols-4" style={{ "--delay": "330ms" } as CSSProperties}>
             {["Sem planilhas", "Sem lead perdido", "Sem follow-up esquecido", "Com campanha rastreada"].map((item) => (
               <div className="flex items-center gap-2" key={item}>
                 <Check className="h-4 w-4 text-[#25D366]" />
@@ -157,7 +157,7 @@ export function LandingPage() {
             ))}
           </div>
         </div>
-        <div className="relative">
+        <div className="reveal-up relative" style={{ "--delay": "220ms" } as CSSProperties}>
           <div className="absolute -inset-6 bg-[linear-gradient(135deg,rgba(139,92,246,0.24),rgba(37,211,102,0.08),transparent)] blur-3xl" />
           <ProductMockup />
         </div>
@@ -173,7 +173,7 @@ export function LandingPage() {
         </div>
       </section>
 
-      <section className="relative mx-auto max-w-7xl px-5 py-20" id="solucao">
+      <section className="scroll-reveal relative mx-auto max-w-7xl px-5 py-20" id="solucao">
         <div className="absolute inset-x-5 top-8 h-px bg-[linear-gradient(90deg,transparent,rgba(139,92,246,0.55),rgba(37,211,102,0.25),transparent)]" />
         <SectionHeader
           eyebrow="O custo invisivel"
@@ -194,7 +194,7 @@ export function LandingPage() {
         </div>
       </section>
 
-      <section className="relative mx-auto max-w-7xl px-5 pb-20" id="prova">
+      <section className="scroll-reveal relative mx-auto max-w-7xl px-5 pb-20" id="prova">
         <BrandWatermark className="-right-28 top-0 h-72 w-72 opacity-[0.06]" />
         <div className="grid gap-6 lg:grid-cols-[0.85fr_1.15fr]">
           <div className="relative overflow-hidden rounded-2xl border border-[#25D366]/20 bg-[#07130D]/70 p-6 shadow-2xl shadow-[#25D366]/10">
@@ -234,7 +234,7 @@ export function LandingPage() {
         </div>
       </section>
 
-      <section className="relative border-y border-white/10 bg-[#0D0D13] px-5 py-20" id="prospeccao">
+      <section className="scroll-reveal relative border-y border-white/10 bg-[#0D0D13] px-5 py-20" id="prospeccao">
         <div className="absolute inset-x-0 top-0 h-52 bg-[linear-gradient(180deg,rgba(37,211,102,0.08),transparent)]" />
         <div className="absolute inset-x-0 bottom-0 h-48 bg-[linear-gradient(90deg,transparent,rgba(139,92,246,0.12),transparent)] blur-3xl" />
         <div className="mx-auto grid max-w-7xl gap-10 lg:grid-cols-[0.9fr_1.1fr]">
@@ -265,7 +265,7 @@ export function LandingPage() {
         </div>
       </section>
 
-      <section className="relative mx-auto max-w-7xl px-5 py-20" id="planos">
+      <section className="scroll-reveal relative mx-auto max-w-7xl px-5 py-20" id="planos">
         <div className="absolute inset-x-5 top-12 h-40 bg-[linear-gradient(90deg,rgba(139,92,246,0.08),rgba(37,211,102,0.06),transparent)] blur-3xl" />
         <SectionHeader
           eyebrow="Oferta"
@@ -307,7 +307,7 @@ export function LandingPage() {
               </p>
             </div>
             <div className="flex flex-col gap-3 sm:flex-row">
-              <Link className="flex h-12 items-center justify-center gap-2 rounded-lg bg-[#8B5CF6] px-5 text-sm font-semibold transition hover:bg-[#7C3AED]" href="/checkout">
+              <Link className="shine-cta flex h-12 items-center justify-center gap-2 rounded-lg bg-[#8B5CF6] px-5 text-sm font-semibold transition hover:bg-[#7C3AED]" href="/checkout">
                 Solicitar ativacao
                 <ArrowRight className="h-4 w-4" />
               </Link>
@@ -396,7 +396,7 @@ function PlanCard({
 
 function ProductMockup() {
   return (
-    <div className="relative overflow-hidden rounded-2xl border border-white/10 bg-[#111018]/90 p-4 shadow-2xl shadow-[#8B5CF6]/20 backdrop-blur-xl">
+    <div className="float-slow relative overflow-hidden rounded-2xl border border-white/10 bg-[#111018]/90 p-4 shadow-2xl shadow-[#8B5CF6]/20 backdrop-blur-xl">
       <BrandWatermark className="-right-14 -top-16 h-52 w-52 opacity-[0.055]" />
       <div className="absolute inset-x-0 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(139,92,246,0.9),rgba(37,211,102,0.35),transparent)]" />
       <div className="relative flex items-center justify-between border-b border-white/10 pb-3">
@@ -425,7 +425,10 @@ function ProductMockup() {
                 <span className="rounded-full bg-white/10 px-2 py-0.5 text-xs text-zinc-400">{index + 2}</span>
               </div>
               <div className="mt-2 h-1.5 rounded-full bg-white/10">
-                <div className="h-full rounded-full bg-[#8B5CF6]" style={{ width: `${32 + index * 15}%` }} />
+                <div
+                  className="animate-bar h-full rounded-full bg-[#8B5CF6]"
+                  style={{ "--bar-width": `${32 + index * 15}%`, "--delay": `${index * 120}ms` } as CSSProperties}
+                />
               </div>
             </div>
           ))}
@@ -456,7 +459,7 @@ function ProspectingMockup() {
       </div>
       <div className="relative mt-4 overflow-hidden rounded-xl border border-white/10">
         {["Ricco Pizzaria", "Real Pizza Igarassu", "Forno Nobre", "Bella Massa"].map((name, index) => (
-          <div className="grid grid-cols-[1fr_auto_auto] items-center gap-3 border-b border-white/10 bg-black/20 p-3 last:border-b-0" key={name}>
+          <div className="reveal-up grid grid-cols-[1fr_auto_auto] items-center gap-3 border-b border-white/10 bg-black/20 p-3 last:border-b-0" key={name} style={{ "--delay": `${index * 110}ms` } as CSSProperties}>
             <div>
               <div className="font-medium text-white">{name}</div>
               <div className="text-xs text-zinc-500">Telefone capturado</div>

@@ -31,3 +31,119 @@ body {
   background: #8b5cf6;
   color: white;
 }
+
+@keyframes origo-fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(18px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes origo-float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-10px);
+  }
+}
+
+@keyframes origo-glow {
+  0%,
+  100% {
+    opacity: 0.58;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.92;
+    transform: scale(1.04);
+  }
+}
+
+@keyframes origo-shine {
+  0% {
+    transform: translateX(-150%) skewX(-18deg);
+  }
+  45%,
+  100% {
+    transform: translateX(240%) skewX(-18deg);
+  }
+}
+
+@keyframes origo-bar {
+  from {
+    width: 0;
+  }
+  to {
+    width: var(--bar-width, 60%);
+  }
+}
+
+.reveal-up {
+  animation: origo-fade-up 720ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation-delay: var(--delay, 0ms);
+}
+
+.scroll-reveal {
+  animation: origo-fade-up 720ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.float-slow {
+  animation: origo-float 7s ease-in-out infinite;
+}
+
+.glow-breathe {
+  animation: origo-glow 10s ease-in-out infinite;
+  transform-origin: center;
+}
+
+.shine-cta {
+  isolation: isolate;
+  position: relative;
+  overflow: hidden;
+}
+
+.shine-cta::after {
+  animation: origo-shine 3.8s ease-in-out infinite;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.35), transparent);
+  content: "";
+  inset: 0 auto 0 -35%;
+  pointer-events: none;
+  position: absolute;
+  width: 32%;
+  z-index: 0;
+}
+
+.shine-cta > * {
+  position: relative;
+  z-index: 1;
+}
+
+.animate-bar {
+  animation: origo-bar 950ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation-delay: var(--delay, 0ms);
+}
+
+@supports (animation-timeline: view()) {
+  .scroll-reveal {
+    opacity: 0;
+    animation-timeline: view();
+    animation-range: entry 8% cover 26%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reveal-up,
+  .scroll-reveal,
+  .float-slow,
+  .glow-breathe,
+  .shine-cta::after,
+  .animate-bar {
+    animation: none !important;
+  }
+}

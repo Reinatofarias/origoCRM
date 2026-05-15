@@ -54,7 +54,7 @@ import {
 } from "lucide-react";
 import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
-import { FormEvent, KeyboardEvent, MouseEvent, ReactNode, useCallback, useEffect, useMemo, useState } from "react";
+import { CSSProperties, FormEvent, KeyboardEvent, MouseEvent, ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 
 import { recordAuditLog as recordAuditLogAction } from "@/actions/audit";
 import {
@@ -486,24 +486,31 @@ function AuthScreen() {
   }
 
   return (
-    <main className="min-h-screen bg-[#09090D] px-5 py-8 text-white">
-      <div className="mx-auto grid min-h-[calc(100vh-4rem)] max-w-6xl items-center gap-10 lg:grid-cols-[1fr_0.9fr]">
-        <section className="flex justify-center lg:justify-start">
-          <BrandLogo className="aspect-[3.13/1] w-[min(92vw,640px)]" />
+    <main className="relative min-h-screen overflow-hidden bg-[#09090D] px-5 py-8 text-white">
+      <div className="glow-breathe absolute inset-x-0 top-0 h-[34rem] bg-[radial-gradient(ellipse_at_24%_12%,rgba(139,92,246,0.3),transparent_42%),radial-gradient(ellipse_at_86%_18%,rgba(37,211,102,0.13),transparent_34%)]" />
+      <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.022)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.016)_1px,transparent_1px)] bg-[size:72px_72px] opacity-25" />
+      <div className="relative mx-auto grid min-h-[calc(100vh-4rem)] max-w-6xl items-center gap-10 lg:grid-cols-[1fr_0.9fr]">
+        <section className="reveal-up relative flex justify-center lg:justify-start">
+          <div className="absolute -inset-8 bg-[linear-gradient(135deg,rgba(139,92,246,0.2),rgba(37,211,102,0.08),transparent)] blur-3xl" />
+          <BrandLogo className="relative aspect-[3.13/1] w-[min(92vw,640px)]" />
         </section>
 
-        <section className="rounded-2xl border border-[#8B5CF6]/20 bg-white/[0.04] p-6 shadow-2xl shadow-[#8B5CF6]/10 backdrop-blur">
-          <div className="mb-6">
+        <section className="reveal-up relative overflow-hidden rounded-2xl border border-[#8B5CF6]/25 bg-white/[0.045] p-6 shadow-2xl shadow-[#8B5CF6]/15 backdrop-blur-xl" style={{ "--delay": "120ms" } as CSSProperties}>
+          <div className="absolute -right-20 -top-24 h-72 w-72 opacity-[0.06]">
+            <Image alt="" className="object-contain" fill sizes="288px" src="/origocrm-icon.png" />
+          </div>
+          <div className="absolute inset-x-0 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(139,92,246,0.85),rgba(37,211,102,0.35),transparent)]" />
+          <div className="relative mb-6">
             <h2 className="text-2xl font-semibold">Entrar</h2>
             <p className="mt-2 text-sm text-zinc-400">
               Acesse com seu usuario autorizado.
             </p>
           </div>
-          <form className="space-y-4" onSubmit={handleAuth}>
+          <form className="relative space-y-4" onSubmit={handleAuth}>
             <label className="block text-sm text-zinc-300">
               Email
               <input
-                className="mt-2 h-12 w-full rounded-lg border border-white/10 bg-black/30 px-4 text-white outline-none ring-[#8B5CF6]/50 transition focus:border-[#8B5CF6] focus:ring-4"
+                className="mt-2 h-12 w-full rounded-lg border border-white/10 bg-black/35 px-4 text-white outline-none ring-[#8B5CF6]/50 transition focus:border-[#8B5CF6] focus:ring-4"
                 onChange={(event) => setEmail(event.target.value)}
                 placeholder="email"
                 required
@@ -514,7 +521,7 @@ function AuthScreen() {
             <label className="block text-sm text-zinc-300">
               Senha
               <input
-                className="mt-2 h-12 w-full rounded-lg border border-white/10 bg-black/30 px-4 text-white outline-none ring-[#8B5CF6]/50 transition focus:border-[#8B5CF6] focus:ring-4"
+                className="mt-2 h-12 w-full rounded-lg border border-white/10 bg-black/35 px-4 text-white outline-none ring-[#8B5CF6]/50 transition focus:border-[#8B5CF6] focus:ring-4"
                 minLength={6}
                 onChange={(event) => setPassword(event.target.value)}
                 placeholder="minimo 6 caracteres"
@@ -524,7 +531,7 @@ function AuthScreen() {
               />
             </label>
             <button
-              className="flex h-12 w-full items-center justify-center gap-2 rounded-lg bg-[#8B5CF6] px-4 font-medium transition hover:bg-[#8B5CF6] disabled:opacity-60"
+              className="shine-cta flex h-12 w-full items-center justify-center gap-2 rounded-lg bg-[#8B5CF6] px-4 font-medium shadow-xl shadow-[#8B5CF6]/20 transition hover:bg-[#7C3AED] disabled:opacity-60"
               disabled={loading}
               type="submit"
             >
@@ -532,7 +539,7 @@ function AuthScreen() {
               Entrar
             </button>
           </form>
-          {message && <p className="mt-4 text-sm text-zinc-300">{message}</p>}
+          {message && <p className="relative mt-4 text-sm text-zinc-300">{message}</p>}
         </section>
       </div>
     </main>
