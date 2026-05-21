@@ -654,7 +654,7 @@ function Workspace({
 
       if (result.success && result.data) {
         setOrganizationContext(result.data);
-      } else if (result.error) {
+      } else if (result.error && !result.error.includes("Base SaaS pendente")) {
         setToast({
           id: newId("toast"),
           text: result.error,
@@ -758,8 +758,10 @@ function Workspace({
     window.localStorage.setItem("origocrm:theme", crmTheme);
   }, [crmTheme]);
 
+  const showLeadHeaderControls = view === "pipeline" || view === "leads";
+
   const filteredLeads = useMemo(() => {
-    const search = query.trim().toLowerCase();
+    const search = showLeadHeaderControls ? query.trim().toLowerCase() : "";
     return leads.filter((lead) =>
       (!search ||
         [lead.name, lead.phone, lead.company, lead.source, lead.owner_name ?? ""].some((value) =>
@@ -772,7 +774,7 @@ function Workspace({
         (dateFilter === "today" && isLeadCreatedToday(lead)) ||
         (dateFilter === "overdue" && isFollowupOverdue(lead))),
     );
-  }, [dateFilter, leads, query, statusFilter, tagFilter, tagsByLeadId, temperatureFilter]);
+  }, [dateFilter, leads, query, showLeadHeaderControls, statusFilter, tagFilter, tagsByLeadId, temperatureFilter]);
 
   const selectedLead = leads.find((lead) => lead.id === selectedLeadId) ?? null;
   const selectedPipelineLeads = filteredLeads.filter((lead) => selectedPipelineLeadIds.has(lead.id));
@@ -837,6 +839,7 @@ function Workspace({
   }
 
   function navigateView(nextView: View) {
+    if (nextView !== "pipeline" && nextView !== "leads") setQuery("");
     const nextPath = viewPaths[nextView];
     if (pathname !== nextPath) router.push(nextPath);
   }
@@ -1802,7 +1805,7 @@ function Workspace({
       )}
 
       <div className="relative flex min-h-screen flex-col lg:flex-row">
-        <aside className="relative overflow-hidden border-b border-white/10 bg-black/35 px-4 py-4 shadow-2xl shadow-black/30 backdrop-blur-xl lg:w-72 lg:border-b-0 lg:border-r">
+        <aside className="crm-sidebar relative overflow-hidden border-b border-white/10 bg-[#07070B]/95 px-4 py-4 shadow-2xl shadow-black/30 backdrop-blur-xl lg:w-72 lg:border-b-0 lg:border-r">
           <div className="pointer-events-none absolute -left-16 top-10 h-52 w-52 opacity-[0.05]">
             <Image alt="" className="object-contain" fill sizes="208px" src="/origocrm-icon.png" />
           </div>
@@ -1868,17 +1871,17 @@ function Workspace({
               <p className="mt-1 text-sm text-zinc-500">{getViewSubtitle(view)}</p>
             </div>
             <div className="flex flex-col gap-3 sm:flex-row">
-              <div className="relative">
-                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" />
-                <input
-                  className="h-11 w-full rounded-lg border border-white/10 bg-white/[0.04] pl-9 pr-3 text-sm outline-none transition placeholder:text-zinc-600 focus:border-[#8B5CF6] sm:w-72"
-                  onChange={(event) => setQuery(event.target.value)}
-                  placeholder="Buscar lead"
-                  value={query}
-                />
-              </div>
-              {(view === "pipeline" || view === "leads") && (
+              {showLeadHeaderControls && (
                 <>
+                  <div className="relative">
+                    <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" />
+                    <input
+                      className="h-11 w-full rounded-lg border border-white/10 bg-white/[0.04] pl-9 pr-3 text-sm outline-none transition placeholder:text-zinc-600 focus:border-[#8B5CF6] sm:w-72"
+                      onChange={(event) => setQuery(event.target.value)}
+                      placeholder="Buscar lead"
+                      value={query}
+                    />
+                  </div>
                   <select
                     className="h-11 rounded-lg border border-white/10 bg-white/[0.04] px-3 text-sm text-zinc-300 outline-none transition focus:border-[#8B5CF6]"
                     onChange={(event) => setStatusFilter(event.target.value as LeadStatus | "all")}
@@ -1967,7 +1970,7 @@ function Workspace({
                   </button>
                 </>
               )}
-              {view !== "settings" && (
+              {showLeadHeaderControls && (
                 <button
                   className="shine-cta flex h-11 items-center justify-center gap-2 rounded-lg bg-[#8B5CF6] px-4 text-sm font-medium shadow-lg shadow-[#8B5CF6]/20 transition hover:bg-[#7C3AED]"
                   onClick={() => {

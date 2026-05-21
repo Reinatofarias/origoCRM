@@ -8,6 +8,18 @@ function defaultOrganizationName(email?: string | null) {
   return `${prefix || "Minha empresa"} - OrigoCRM`;
 }
 
+function isMissingSaasTableError(message?: string | null) {
+  if (!message) return false;
+  const normalized = message.toLowerCase();
+  return (
+    normalized.includes("relation") ||
+    normalized.includes("schema cache") ||
+    normalized.includes("organization_members") ||
+    normalized.includes("organizations") ||
+    normalized.includes("subscriptions")
+  );
+}
+
 export async function getAuthenticatedOrganizationContext() {
   const supabase = await createSupabaseServerClient();
   if (!supabase) return { error: "Supabase nao configurado" };
@@ -28,7 +40,7 @@ export async function getAuthenticatedOrganizationContext() {
     .limit(1)
     .maybeSingle();
 
-  if (membershipError && membershipError.message.includes("relation")) {
+  if (membershipError && isMissingSaasTableError(membershipError.message)) {
     return { supabase, user, organizationId: null as string | null, member: null as OrganizationMember | null };
   }
 

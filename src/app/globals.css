@@ -191,6 +191,17 @@ body {
   color: #191426;
 }
 
+.crm-theme-light .crm-sidebar {
+  background:
+    radial-gradient(ellipse at 18% 8%, rgba(139, 92, 246, 0.22), transparent 34%),
+    #07070b !important;
+  color: #f5f3ff;
+}
+
+.crm-theme-light .crm-sidebar :is(.text-zinc-400, .text-zinc-500, .text-zinc-600) {
+  color: #a1a1aa !important;
+}
+
 .crm-theme-light .crm-content-header {
   background: rgba(255, 255, 255, 0.7) !important;
   border-color: rgba(39, 33, 52, 0.12) !important;

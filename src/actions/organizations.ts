@@ -20,6 +20,18 @@ function getDefaultOrganizationName(email?: string | null) {
   return `${prefix || "Minha empresa"} - OrigoCRM`;
 }
 
+function isMissingSaasTableError(message?: string | null) {
+  if (!message) return false;
+  const normalized = message.toLowerCase();
+  return (
+    normalized.includes("relation") ||
+    normalized.includes("schema cache") ||
+    normalized.includes("organization_members") ||
+    normalized.includes("organizations") ||
+    normalized.includes("subscriptions")
+  );
+}
+
 async function getAuthenticatedSupabase() {
   const supabase = await createSupabaseServerClient();
   if (!supabase) return { error: "Supabase nao configurado" };
@@ -47,7 +59,11 @@ export async function ensureOrganizationContext(): Promise<ActionResult<Organiza
     .limit(1)
     .maybeSingle();
 
-  if (membershipError && !membershipError.message.includes("relation")) {
+  if (membershipError && isMissingSaasTableError(membershipError.message)) {
+    return { success: false, error: "Base SaaS pendente. Aplique supabase/saas_base_migration.sql." };
+  }
+
+  if (membershipError) {
     return { success: false, error: membershipError.message };
   }
 
@@ -82,8 +98,8 @@ export async function ensureOrganizationContext(): Promise<ActionResult<Organiza
   if (organizationError) {
     return {
       success: false,
-      error: organizationError.message.includes("relation")
-        ? "Aplique supabase/saas_base_migration.sql para ativar organizacoes."
+      error: isMissingSaasTableError(organizationError.message)
+        ? "Base SaaS pendente. Aplique supabase/saas_base_migration.sql."
         : organizationError.message,
     };
   }
