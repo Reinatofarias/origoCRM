@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 
-import { createSupabaseServerClient } from "@/lib/server/supabase";
+import { getAuthenticatedOrganizationContext, withOrganizationId } from "@/lib/server/auth";
 
 type ActionResult<T = unknown> = {
   success: boolean;
@@ -10,22 +10,8 @@ type ActionResult<T = unknown> = {
   error?: string;
 };
 
-async function getAuthenticatedSupabase() {
-  const supabase = await createSupabaseServerClient();
-  if (!supabase) return { error: "Supabase nao configurado" };
-
-  const {
-    data: { user },
-    error,
-  } = await supabase.auth.getUser();
-
-  if (error || !user) return { error: "Sessao expirada. Entre novamente." };
-
-  return { supabase, user };
-}
-
 export async function createTag(input: { name: string; color?: string }) {
-  const auth = await getAuthenticatedSupabase();
+  const auth = await getAuthenticatedOrganizationContext();
   if ("error" in auth) return { success: false, error: auth.error } satisfies ActionResult;
 
   const name = input.name.trim();
@@ -33,11 +19,11 @@ export async function createTag(input: { name: string; color?: string }) {
 
   const { data, error } = await auth.supabase
     .from("tags")
-    .insert({
+    .insert(withOrganizationId({
       user_id: auth.user.id,
       name,
       color: input.color ?? "#8B5CF6",
-    })
+    }, auth.organizationId))
     .select()
     .single();
 
@@ -48,15 +34,15 @@ export async function createTag(input: { name: string; color?: string }) {
 }
 
 export async function assignLeadTag(leadId: string, tagId: string) {
-  const auth = await getAuthenticatedSupabase();
+  const auth = await getAuthenticatedOrganizationContext();
   if ("error" in auth) return { success: false, error: auth.error } satisfies ActionResult;
 
   const { error } = await auth.supabase.from("lead_tags").upsert(
-    {
+    withOrganizationId({
       user_id: auth.user.id,
       lead_id: leadId,
       tag_id: tagId,
-    },
+    }, auth.organizationId),
     { onConflict: "lead_id,tag_id" },
   );
 
@@ -67,15 +53,18 @@ export async function assignLeadTag(leadId: string, tagId: string) {
 }
 
 export async function removeLeadTag(leadId: string, tagId: string) {
-  const auth = await getAuthenticatedSupabase();
+  const auth = await getAuthenticatedOrganizationContext();
   if ("error" in auth) return { success: false, error: auth.error } satisfies ActionResult;
 
-  const { error } = await auth.supabase
+  let query = auth.supabase
     .from("lead_tags")
     .delete()
     .eq("lead_id", leadId)
-    .eq("tag_id", tagId)
-    .eq("user_id", auth.user.id);
+    .eq("tag_id", tagId);
+
+  query = auth.organizationId ? query.eq("organization_id", auth.organizationId) : query.eq("user_id", auth.user.id);
+
+  const { error } = await query;
 
   if (error) return { success: false, error: error.message } satisfies ActionResult;
 

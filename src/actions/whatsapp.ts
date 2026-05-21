@@ -11,7 +11,7 @@ import {
   updateStoredWhatsAppMessageStatus,
   upsertWhatsAppConversation,
 } from "@/lib/server/evolution";
-import { createSupabaseServerClient } from "@/lib/server/supabase";
+import { getAuthenticatedOrganizationContext, withOrganizationId } from "@/lib/server/auth";
 import type {
   EvolutionSendTextRequest,
   EvolutionSendTextResponse,
@@ -29,20 +29,6 @@ type EvolutionSendTextRawResponse = EvolutionSendTextResponse & {
   messageId?: string;
 };
 
-async function getAuthenticatedSupabase() {
-  const supabase = await createSupabaseServerClient();
-  if (!supabase) return { error: "Supabase nao configurado" };
-
-  const {
-    data: { user },
-    error,
-  } = await supabase.auth.getUser();
-
-  if (error || !user) return { error: "Sessao expirada. Entre novamente." };
-
-  return { supabase, user };
-}
-
 export async function sendWhatsAppMessage(
   leadId: string,
   phoneNumber: string,
@@ -53,7 +39,7 @@ export async function sendWhatsAppMessage(
   messageId?: string;
   error?: string;
 }> {
-  const auth = await getAuthenticatedSupabase();
+  const auth = await getAuthenticatedOrganizationContext();
   if ("error" in auth) return { success: false, error: auth.error };
 
   if (!phoneNumber?.trim()) {
@@ -102,23 +88,25 @@ export async function sendWhatsAppMessage(
     ...(nextFollowupAt ? { next_followup_at: nextFollowupAt } : {}),
   };
 
+  let leadUpdateQuery = auth.supabase.from("leads").update(leadUpdate).eq("id", leadId);
+  leadUpdateQuery = auth.organizationId
+    ? leadUpdateQuery.eq("organization_id", auth.organizationId)
+    : leadUpdateQuery.eq("user_id", auth.user.id);
+
   await Promise.all([
-    auth.supabase
-      .from("leads")
-      .update(leadUpdate)
-      .eq("id", leadId)
-      .eq("user_id", auth.user.id),
-    auth.supabase.from("interactions").insert({
+    leadUpdateQuery,
+    auth.supabase.from("interactions").insert(withOrganizationId({
       lead_id: leadId,
       user_id: auth.user.id,
       note: "Mensagem enviada via WhatsApp",
       message,
       type: "whatsapp_sent",
       channel: "whatsapp",
-    }),
+    }, auth.organizationId)),
     recordOutboundWhatsAppMessage({
       leadId,
       userId: auth.user.id,
+      organizationId: auth.organizationId,
       messageId,
       phoneNumber: normalizedPhone,
       content: message,
@@ -147,7 +135,7 @@ export async function sendWhatsAppConversationMessage(
   lead?: Lead;
   error?: string;
 }> {
-  const auth = await getAuthenticatedSupabase();
+  const auth = await getAuthenticatedOrganizationContext();
   if ("error" in auth) return { success: false, error: auth.error };
 
   if (!phoneNumber?.trim()) return { success: false, error: "Numero de telefone invalido" };
@@ -189,13 +177,15 @@ export async function sendWhatsAppConversationMessage(
 
     if (options?.nextFollowupAt) leadUpdate.next_followup_at = options.nextFollowupAt;
 
-    const { data: leadData } = await auth.supabase
+    let leadQuery = auth.supabase
       .from("leads")
       .update(leadUpdate)
       .eq("id", leadId)
-      .eq("user_id", auth.user.id)
-      .select()
-      .single();
+    leadQuery = auth.organizationId
+      ? leadQuery.eq("organization_id", auth.organizationId)
+      : leadQuery.eq("user_id", auth.user.id);
+
+    const { data: leadData } = await leadQuery.select().single();
 
     updatedLead = (leadData as Lead | null) ?? null;
   }
@@ -203,7 +193,7 @@ export async function sendWhatsAppConversationMessage(
   const { data, error } = await auth.supabase
     .from("whatsapp_messages")
     .upsert(
-      {
+      withOrganizationId({
         lead_id: leadId ?? null,
         user_id: auth.user.id,
         message_id: messageId,
@@ -213,7 +203,7 @@ export async function sendWhatsAppConversationMessage(
         direction: "outbound",
         content: message,
         status: normalizeEvolutionStatus(response.data.status),
-      },
+      }, auth.organizationId),
       { onConflict: "message_id", ignoreDuplicates: true },
     )
     .select()
@@ -222,18 +212,19 @@ export async function sendWhatsAppConversationMessage(
   if (error) return { success: false, error: error.message };
 
   if (leadId) {
-    await auth.supabase.from("interactions").insert({
+    await auth.supabase.from("interactions").insert(withOrganizationId({
       lead_id: leadId,
       user_id: auth.user.id,
       note: "Mensagem enviada pela inbox WhatsApp",
       message,
       type: "whatsapp_sent",
       channel: "whatsapp",
-    });
+    }, auth.organizationId));
   }
 
   await upsertWhatsAppConversation({
     userId: auth.user.id,
+    organizationId: auth.organizationId,
     leadId: leadId ?? null,
     phoneNumber: normalizedPhone,
     remoteJid: `${normalizedPhone}@s.whatsapp.net`,
@@ -256,7 +247,7 @@ export async function checkWhatsAppNumbers(phoneNumbers: string[]): Promise<{
   numbers?: Array<{ number: string; exists: boolean; jid?: string }>;
   error?: string;
 }> {
-  const auth = await getAuthenticatedSupabase();
+  const auth = await getAuthenticatedOrganizationContext();
   if ("error" in auth) return { success: false, error: auth.error };
 
   const numbers = Array.from(new Set(phoneNumbers.map(normalizePhone).filter(Boolean))).slice(0, 30);
@@ -297,7 +288,7 @@ export async function saveWhatsAppConversationAsLead(input: {
   lead?: Lead;
   error?: string;
 }> {
-  const auth = await getAuthenticatedSupabase();
+  const auth = await getAuthenticatedOrganizationContext();
   if ("error" in auth) return { success: false, error: auth.error };
 
   const phone = normalizePhone(input.phoneNumber);
@@ -306,27 +297,30 @@ export async function saveWhatsAppConversationAsLead(input: {
   const fallbackName = input.name?.trim() || phone;
   const status = input.status ?? "novo";
   const now = new Date().toISOString();
-  const { data: existingById } = input.leadId
-    ? await auth.supabase
-        .from("leads")
-        .select("*")
-        .eq("id", input.leadId)
-        .eq("user_id", auth.user.id)
-        .maybeSingle()
-    : { data: null };
-  const { data: existingByPhone } = existingById
-    ? { data: null }
-    : await auth.supabase
-        .from("leads")
-        .select("*")
-        .eq("user_id", auth.user.id)
-        .eq("phone", phone)
-        .maybeSingle();
+  let existingById: Lead | null = null;
+  if (input.leadId) {
+    let existingByIdQuery = auth.supabase.from("leads").select("*").eq("id", input.leadId);
+    existingByIdQuery = auth.organizationId
+      ? existingByIdQuery.eq("organization_id", auth.organizationId)
+      : existingByIdQuery.eq("user_id", auth.user.id);
+    const { data } = await existingByIdQuery.maybeSingle();
+    existingById = data as Lead | null;
+  }
+
+  let existingByPhone: Lead | null = null;
+  if (!existingById) {
+    let existingByPhoneQuery = auth.supabase.from("leads").select("*").eq("phone", phone);
+    existingByPhoneQuery = auth.organizationId
+      ? existingByPhoneQuery.eq("organization_id", auth.organizationId)
+      : existingByPhoneQuery.eq("user_id", auth.user.id);
+    const { data } = await existingByPhoneQuery.maybeSingle();
+    existingByPhone = data as Lead | null;
+  }
 
   let lead = (existingById ?? existingByPhone) as Lead | null;
 
   if (lead) {
-    const { data: updatedLead } = await auth.supabase
+    let updateLeadQuery = auth.supabase
       .from("leads")
       .update({
         name: fallbackName,
@@ -339,16 +333,19 @@ export async function saveWhatsAppConversationAsLead(input: {
         next_followup_at: input.nextFollowupAt || lead.next_followup_at,
         updated_at: now,
       })
-      .eq("id", lead.id)
-      .eq("user_id", auth.user.id)
-      .select()
-      .single();
+      .eq("id", lead.id);
+
+    updateLeadQuery = auth.organizationId
+      ? updateLeadQuery.eq("organization_id", auth.organizationId)
+      : updateLeadQuery.eq("user_id", auth.user.id);
+
+    const { data: updatedLead } = await updateLeadQuery.select().single();
 
     lead = (updatedLead as Lead | null) ?? lead;
   } else {
     lead = (await auth.supabase
       .from("leads")
-      .insert({
+      .insert(withOrganizationId({
         user_id: auth.user.id,
         name: fallbackName,
         phone,
@@ -360,23 +357,28 @@ export async function saveWhatsAppConversationAsLead(input: {
         last_contact_at: now,
         next_followup_at: input.nextFollowupAt || null,
         updated_at: now,
-      })
+      }, auth.organizationId))
       .select()
       .single()).data as Lead | null;
   }
 
   if (!lead) return { success: false, error: "Nao foi possivel criar lead" };
 
-  const { error } = await auth.supabase
+  let messageUpdateQuery = auth.supabase
     .from("whatsapp_messages")
     .update({ lead_id: lead.id, updated_at: now })
-    .eq("user_id", auth.user.id)
     .eq("phone_number", phone);
+  messageUpdateQuery = auth.organizationId
+    ? messageUpdateQuery.eq("organization_id", auth.organizationId)
+    : messageUpdateQuery.eq("user_id", auth.user.id);
+
+  const { error } = await messageUpdateQuery;
 
   if (error) return { success: false, error: error.message };
 
   await upsertWhatsAppConversation({
     userId: auth.user.id,
+    organizationId: auth.organizationId,
     leadId: lead.id,
     phoneNumber: phone,
     contactName: lead.name,
@@ -394,7 +396,7 @@ export async function updateWhatsAppConversationStatus(
   success: boolean;
   error?: string;
 }> {
-  const auth = await getAuthenticatedSupabase();
+  const auth = await getAuthenticatedOrganizationContext();
   if ("error" in auth) return { success: false, error: auth.error };
 
   const phone = normalizePhone(phoneNumber);
@@ -402,14 +404,14 @@ export async function updateWhatsAppConversationStatus(
 
   const { error } = await auth.supabase
     .from("whatsapp_conversations")
-    .upsert({
+    .upsert(withOrganizationId({
       user_id: auth.user.id,
       phone_number: phone,
       status,
       unread_count: status === "unread" ? 1 : 0,
       last_read_at: status === "unread" ? null : new Date().toISOString(),
       updated_at: new Date().toISOString(),
-    }, { onConflict: "user_id,phone_number" });
+    }, auth.organizationId), { onConflict: "user_id,phone_number" });
 
   if (error) {
     const message = error.message.includes("whatsapp_conversations_status_check")
@@ -438,15 +440,19 @@ export async function getWhatsAppHistory(leadId: string): Promise<{
   messages?: WhatsAppMessage[];
   error?: string;
 }> {
-  const auth = await getAuthenticatedSupabase();
+  const auth = await getAuthenticatedOrganizationContext();
   if ("error" in auth) return { success: false, error: auth.error };
 
-  const { data, error } = await auth.supabase
+  let historyQuery = auth.supabase
     .from("whatsapp_messages")
     .select("*")
-    .eq("lead_id", leadId)
-    .eq("user_id", auth.user.id)
-    .order("created_at", { ascending: false });
+    .eq("lead_id", leadId);
+
+  historyQuery = auth.organizationId
+    ? historyQuery.eq("organization_id", auth.organizationId)
+    : historyQuery.eq("user_id", auth.user.id);
+
+  const { data, error } = await historyQuery.order("created_at", { ascending: false });
 
   if (error) return { success: false, error: error.message };
 

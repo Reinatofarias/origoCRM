@@ -3,6 +3,7 @@ export type LeadStatus = string;
 export type Lead = {
   id: string;
   user_id?: string | null;
+  organization_id?: string | null;
   name: string;
   phone: string;
   company: string;
@@ -23,6 +24,7 @@ export type Lead = {
 export type Tag = {
   id: string;
   user_id?: string | null;
+  organization_id?: string | null;
   name: string;
   color: string;
   created_at: string;
@@ -30,6 +32,7 @@ export type Tag = {
 
 export type LeadTag = {
   user_id?: string | null;
+  organization_id?: string | null;
   lead_id: string;
   tag_id: string;
   created_at: string;
@@ -38,6 +41,7 @@ export type LeadTag = {
 export type MessageTemplate = {
   id: string;
   user_id?: string | null;
+  organization_id?: string | null;
   title: string;
   body: string;
   created_at: string;
@@ -46,6 +50,7 @@ export type MessageTemplate = {
 export type Interaction = {
   id: string;
   user_id?: string | null;
+  organization_id?: string | null;
   lead_id: string;
   note: string;
   message?: string | null;
@@ -57,6 +62,7 @@ export type Interaction = {
 export type Task = {
   id: string;
   user_id?: string | null;
+  organization_id?: string | null;
   lead_id?: string | null;
   type: "followup" | "call" | "email" | "whatsapp" | "meeting" | "other";
   title: string;
@@ -71,6 +77,7 @@ export type Task = {
 export type AuditLog = {
   id: string;
   user_id?: string | null;
+  organization_id?: string | null;
   entity_type: "lead" | "task" | "template" | "whatsapp" | "system";
   entity_id?: string | null;
   action: string;
@@ -85,6 +92,42 @@ export type AuditLogInput = {
   action: string;
   summary: string;
   metadata?: Record<string, unknown>;
+};
+
+export type Organization = {
+  id: string;
+  name: string;
+  slug?: string | null;
+  owner_user_id: string;
+  status: "active" | "suspended" | "canceled";
+  created_at: string;
+  updated_at: string;
+};
+
+export type OrganizationMember = {
+  id: string;
+  organization_id: string;
+  user_id: string;
+  role: "owner" | "admin" | "manager" | "seller" | "support" | "viewer";
+  status: "active" | "invited" | "disabled";
+  created_at: string;
+  updated_at: string;
+};
+
+export type Subscription = {
+  id: string;
+  organization_id: string;
+  plan_slug: "base" | "pro" | "prospecting" | "premium" | "manual";
+  billing_period: "monthly" | "semiannual" | "annual";
+  status: "trialing" | "active" | "past_due" | "canceled" | "paused";
+  provider?: string | null;
+  provider_customer_id?: string | null;
+  provider_subscription_id?: string | null;
+  current_period_start?: string | null;
+  current_period_end?: string | null;
+  cancel_at_period_end: boolean;
+  created_at: string;
+  updated_at: string;
 };
 
 export type ProspectingCampaignContactInput = {
@@ -290,6 +333,7 @@ export type WhatsAppMessage = {
   id: string;
   lead_id: string | null;
   user_id: string;
+  organization_id?: string | null;
   message_id: string;        // ID da mensagem no WhatsApp (Evolution)
   remote_jid?: string | null;
   phone_number: string;
@@ -306,6 +350,7 @@ export type WhatsAppMessage = {
 export type WhatsAppConversation = {
   id: string;
   user_id: string;
+  organization_id?: string | null;
   lead_id: string | null;
   phone_number: string;
   remote_jid?: string | null;
@@ -327,6 +372,7 @@ export type WhatsAppConversation = {
 export type WhatsAppLog = {
   id: string;
   user_id: string | null;
+  organization_id?: string | null;
   event_type: EvolutionWebhookEvent | string;
   status: "success" | "error";
   payload: Record<string, unknown>;

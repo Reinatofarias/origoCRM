@@ -177,3 +177,57 @@ body {
 .crm-shell [class*="bg-white/[0.04]"] {
   background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.018), rgba(255, 255, 255, 0));
 }
+
+.crm-shell.crm-theme-light {
+  background: #f6f3ff;
+  color: #191426;
+}
+
+.crm-theme-light .crm-content {
+  background:
+    radial-gradient(ellipse at 18% 0%, rgba(139, 92, 246, 0.14), transparent 35%),
+    radial-gradient(ellipse at 92% 8%, rgba(37, 211, 102, 0.09), transparent 28%),
+    #f7f4ff;
+  color: #191426;
+}
+
+.crm-theme-light .crm-content-header {
+  background: rgba(255, 255, 255, 0.7) !important;
+  border-color: rgba(39, 33, 52, 0.12) !important;
+}
+
+.crm-theme-light .crm-content-body {
+  color: #191426;
+}
+
+.crm-theme-light .crm-content :is(section, article, div).rounded-lg,
+.crm-theme-light .crm-content :is(section, article, div).rounded-xl,
+.crm-theme-light .crm-content :is(section, article, div).rounded-2xl {
+  border-color: rgba(39, 33, 52, 0.12);
+}
+
+.crm-theme-light .crm-content [class*="bg-black/"],
+.crm-theme-light .crm-content [class*="bg-white/[0.02"],
+.crm-theme-light .crm-content [class*="bg-white/[0.03"],
+.crm-theme-light .crm-content [class*="bg-white/[0.04"],
+.crm-theme-light .crm-content [class*="bg-[#121119]"] {
+  background-color: rgba(255, 255, 255, 0.78) !important;
+}
+
+.crm-theme-light .crm-content :is(input, select, textarea) {
+  background: rgba(255, 255, 255, 0.86) !important;
+  border-color: rgba(39, 33, 52, 0.14) !important;
+  color: #191426 !important;
+}
+
+.crm-theme-light .crm-content :is(.text-white, .text-zinc-100, .text-zinc-200, .text-zinc-300) {
+  color: #191426 !important;
+}
+
+.crm-theme-light .crm-content :is(.text-zinc-400, .text-zinc-500, .text-zinc-600) {
+  color: #665d76 !important;
+}
+
+.crm-theme-light .crm-content :is(.divide-white\/10 > :not([hidden]) ~ :not([hidden])) {
+  border-color: rgba(39, 33, 52, 0.11) !important;
+}

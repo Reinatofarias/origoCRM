@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 
-import { createSupabaseServerClient } from "@/lib/server/supabase";
+import { getAuthenticatedOrganizationContext, withOrganizationId } from "@/lib/server/auth";
 import type { LeadStatus } from "@/lib/types";
 
 type ActionResult<T = unknown> = {
@@ -23,22 +23,8 @@ function formatLeadDatabaseError(message: string) {
   return message;
 }
 
-async function getAuthenticatedSupabase() {
-  const supabase = await createSupabaseServerClient();
-  if (!supabase) return { error: "Supabase nao configurado" };
-
-  const {
-    data: { user },
-    error,
-  } = await supabase.auth.getUser();
-
-  if (error || !user) return { error: "Sessao expirada. Entre novamente." };
-
-  return { supabase, user };
-}
-
 export async function moveLeadStage(id: string, status: LeadStatus, outcomeReason?: string | null) {
-  const auth = await getAuthenticatedSupabase();
+  const auth = await getAuthenticatedOrganizationContext();
   if ("error" in auth) return { success: false, error: auth.error } satisfies ActionResult;
 
   const reason = outcomeReason?.trim() ?? "";
@@ -48,22 +34,25 @@ export async function moveLeadStage(id: string, status: LeadStatus, outcomeReaso
     ...(reason ? { outcome_reason: reason } : {}),
   };
 
-  const { error } = await auth.supabase
+  let query = auth.supabase
     .from("leads")
     .update(updatePayload)
-    .eq("id", id)
-    .eq("user_id", auth.user.id);
+    .eq("id", id);
+
+  query = auth.organizationId ? query.eq("organization_id", auth.organizationId) : query.eq("user_id", auth.user.id);
+
+  const { error } = await query;
 
   if (error) return { success: false, error: formatLeadDatabaseError(error.message) } satisfies ActionResult;
 
-  await auth.supabase.from("interactions").insert({
+  await auth.supabase.from("interactions").insert(withOrganizationId({
     lead_id: id,
     user_id: auth.user.id,
     note: `Status alterado para ${status}`,
     message: `Status alterado para ${status}`,
     type: "status_changed",
     channel: "whatsapp",
-  });
+  }, auth.organizationId));
 
   revalidatePath("/");
   return { success: true } satisfies ActionResult;

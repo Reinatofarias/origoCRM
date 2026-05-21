@@ -1,6 +1,6 @@
 "use server";
 
-import { createSupabaseServerClient } from "@/lib/server/supabase";
+import { getAuthenticatedOrganizationContext, withOrganizationId } from "@/lib/server/auth";
 import type { AuditLogInput } from "@/lib/types";
 
 type ActionResult<T = unknown> = {
@@ -9,34 +9,20 @@ type ActionResult<T = unknown> = {
   error?: string;
 };
 
-async function getAuthenticatedSupabase() {
-  const supabase = await createSupabaseServerClient();
-  if (!supabase) return { error: "Supabase nao configurado" };
-
-  const {
-    data: { user },
-    error,
-  } = await supabase.auth.getUser();
-
-  if (error || !user) return { error: "Sessao expirada. Entre novamente." };
-
-  return { supabase, user };
-}
-
 export async function recordAuditLog(input: AuditLogInput) {
-  const auth = await getAuthenticatedSupabase();
+  const auth = await getAuthenticatedOrganizationContext();
   if ("error" in auth) return { success: false, error: auth.error } satisfies ActionResult;
 
   const { data, error } = await auth.supabase
     .from("audit_logs")
-    .insert({
+    .insert(withOrganizationId({
       user_id: auth.user.id,
       entity_type: input.entity_type,
       entity_id: input.entity_id ?? null,
       action: input.action,
       summary: input.summary,
       metadata: input.metadata ?? {},
-    })
+    }, auth.organizationId))
     .select()
     .single();
 

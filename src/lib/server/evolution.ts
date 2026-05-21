@@ -124,12 +124,14 @@ export async function logWhatsAppEvent(
   eventType: EvolutionWebhookEvent | "webhook.error" | string,
   payload: Record<string, unknown>,
   userId?: string | null,
+  organizationId?: string | null,
 ) {
   const supabase = createSupabaseServiceRoleClient();
   if (!supabase) return;
 
   await supabase.from("whatsapp_logs").insert({
     user_id: userId ?? null,
+    organization_id: organizationId ?? null,
     event_type: eventType,
     status: eventType === "webhook.error" ? "error" : "success",
     payload,
@@ -141,6 +143,7 @@ export async function logWhatsAppEvent(
 export async function recordOutboundWhatsAppMessage(input: {
   leadId: string;
   userId: string;
+  organizationId?: string | null;
   messageId: string;
   phoneNumber: string;
   content: string;
@@ -152,6 +155,7 @@ export async function recordOutboundWhatsAppMessage(input: {
   await supabase.from("whatsapp_messages").insert({
     lead_id: input.leadId,
     user_id: input.userId,
+    organization_id: input.organizationId ?? null,
     message_id: input.messageId,
     phone_number: input.phoneNumber,
     direction: "outbound",
@@ -161,6 +165,7 @@ export async function recordOutboundWhatsAppMessage(input: {
 
   await upsertWhatsAppConversation({
     userId: input.userId,
+    organizationId: input.organizationId,
     leadId: input.leadId,
     phoneNumber: input.phoneNumber,
     lastMessage: input.content,
@@ -198,6 +203,7 @@ export async function updateStoredWhatsAppMessageStatus(
 
 export async function upsertWhatsAppConversation(input: {
   userId: string;
+  organizationId?: string | null;
   phoneNumber: string;
   leadId?: string | null;
   remoteJid?: string | null;
@@ -214,6 +220,7 @@ export async function upsertWhatsAppConversation(input: {
   const phoneNumber = normalizePhone(input.phoneNumber);
   const payload: Record<string, unknown> = {
     user_id: input.userId,
+    organization_id: input.organizationId ?? null,
     phone_number: phoneNumber,
     status: input.status ?? (input.direction === "inbound" ? "unread" : "responded"),
     updated_at: now,
@@ -263,7 +270,9 @@ export async function recordIncomingWhatsAppMessage(message: EvolutionIncomingMe
   const phoneNumber = normalizePhone(normalizedMessage.remoteJid);
   const messageContent = normalizedMessage.content;
   const lead = await findLeadByWhatsAppPhone(phoneNumber);
-  const ownerUserId = lead?.user_id ?? (await resolveWebhookOwnerUserId());
+  const owner = lead ? { userId: lead.user_id, organizationId: lead.organization_id ?? null } : await resolveWebhookOwner();
+  const ownerUserId = owner?.userId ?? null;
+  const organizationId = lead?.organization_id ?? owner?.organizationId ?? null;
   const avatarUrl = await fetchContactProfilePictureUrl(phoneNumber);
 
   if (!ownerUserId) {
@@ -281,6 +290,7 @@ export async function recordIncomingWhatsAppMessage(message: EvolutionIncomingMe
       phoneNumber,
       messageId: normalizedMessage.messageId,
       ownerUserId,
+      organizationId,
     });
   }
 
@@ -290,6 +300,7 @@ export async function recordIncomingWhatsAppMessage(message: EvolutionIncomingMe
     {
       lead_id: lead?.id ?? null,
       user_id: ownerUserId,
+      organization_id: organizationId,
       message_id: normalizedMessage.messageId,
       remote_jid: normalizedMessage.remoteJid,
       phone_number: phoneNumber,
@@ -307,6 +318,7 @@ export async function recordIncomingWhatsAppMessage(message: EvolutionIncomingMe
 
   await upsertWhatsAppConversation({
     userId: ownerUserId,
+    organizationId,
     leadId: lead?.id ?? null,
     phoneNumber,
     remoteJid: normalizedMessage.remoteJid,
@@ -321,6 +333,7 @@ export async function recordIncomingWhatsAppMessage(message: EvolutionIncomingMe
       supabase.from("interactions").insert({
         lead_id: lead.id,
         user_id: lead.user_id,
+        organization_id: lead.organization_id ?? null,
         note: `Lead respondeu: ${messageContent || "mensagem recebida"}`,
         message: messageContent,
         type: "note",
@@ -405,21 +418,22 @@ function getString(record: Record<string, unknown> | null | undefined, key: stri
   return typeof value === "string" && value.trim() ? value : null;
 }
 
-async function resolveWebhookOwnerUserId() {
+async function resolveWebhookOwner() {
   const configuredOwner = process.env.ORIGOCRM_OWNER_USER_ID || process.env.CRM_OWNER_USER_ID;
-  if (configuredOwner) return configuredOwner;
+  if (configuredOwner) return { userId: configuredOwner, organizationId: null as string | null };
 
   const supabase = createSupabaseServiceRoleClient();
   if (!supabase) return null;
 
   for (const table of ["leads", "message_templates", "interactions"]) {
-    const { data } = await supabase.from(table).select("user_id").limit(1).maybeSingle();
-    const userId = (data as { user_id?: string } | null)?.user_id;
-    if (userId) return userId;
+    const { data } = await supabase.from(table).select("user_id,organization_id").limit(1).maybeSingle();
+    const row = data as { user_id?: string; organization_id?: string | null } | null;
+    if (row?.user_id) return { userId: row.user_id, organizationId: row.organization_id ?? null };
   }
 
   const { data } = await supabase.auth.admin.listUsers({ page: 1, perPage: 1 });
-  return data.users[0]?.id ?? null;
+  const fallbackUserId = data.users[0]?.id ?? null;
+  return fallbackUserId ? { userId: fallbackUserId, organizationId: null as string | null } : null;
 }
 
 async function findLeadByWhatsAppPhone(phoneNumber: string) {
@@ -430,17 +444,17 @@ async function findLeadByWhatsAppPhone(phoneNumber: string) {
 
   const { data } = await supabase
     .from("leads")
-    .select("id,user_id,phone,created_at")
+    .select("id,user_id,organization_id,phone,created_at")
     .in("phone", candidates)
     .order("created_at", { ascending: false })
     .limit(1);
 
-  const exactLead = (data?.[0] as { id: string; user_id: string } | undefined) ?? null;
+  const exactLead = (data?.[0] as { id: string; user_id: string; organization_id?: string | null } | undefined) ?? null;
   if (exactLead) return exactLead;
 
   const { data: fallbackData } = await supabase
     .from("leads")
-    .select("id,user_id,phone,created_at")
+    .select("id,user_id,organization_id,phone,created_at")
     .order("created_at", { ascending: false })
     .limit(200);
 
@@ -455,7 +469,7 @@ async function findLeadByWhatsAppPhone(phoneNumber: string) {
     );
   });
 
-  return (fallbackLead as { id: string; user_id: string } | undefined) ?? null;
+  return (fallbackLead as { id: string; user_id: string; organization_id?: string | null } | undefined) ?? null;
 }
 
 function getBrazilianPhoneCandidates(phoneNumber: string) {

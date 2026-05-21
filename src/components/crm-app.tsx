@@ -45,6 +45,8 @@ import {
   Send,
   Settings,
   ShieldCheck,
+  Moon,
+  Sun,
   Sparkles,
   Tag,
   Trash2,
@@ -63,6 +65,7 @@ import {
   unarchiveLead as unarchiveLeadAction,
   updateLead as updateLeadAction,
 } from "@/actions/leads";
+import { ensureOrganizationContext, type OrganizationContext } from "@/actions/organizations";
 import { moveLeadStage } from "@/actions/pipeline";
 import { createProspectingCampaign as createProspectingCampaignAction } from "@/actions/prospecting";
 import {
@@ -118,6 +121,7 @@ import {
 
 type AuthUser = { id: string; email?: string };
 type Toast = { id: string; text: string };
+type CrmTheme = "dark" | "light";
 type DashboardAgendaItem = {
   lead: Lead | null;
   dueAt: string;
@@ -173,6 +177,11 @@ type PipelineStage = {
   title: string;
   kind: "open" | "closed";
 };
+
+function readCrmTheme(): CrmTheme {
+  if (typeof window === "undefined") return "dark";
+  return window.localStorage.getItem("origocrm:theme") === "light" ? "light" : "dark";
+}
 
 const defaultClosedStageIds = new Set<LeadStatus>(["fechado"]);
 const defaultPipelineStageIds = new Set<LeadStatus>(defaultPipelineColumns.map((column) => column.id));
@@ -585,6 +594,7 @@ function Workspace({
   const [bulkOwnerName, setBulkOwnerName] = useState("");
   const [savedFilterPresets, setSavedFilterPresets] = useState<SavedPipelineFilter[]>(initialFilterPresets);
   const [toast, setToast] = useState<Toast | null>(null);
+  const [crmTheme, setCrmTheme] = useState<CrmTheme>(() => readCrmTheme());
   const [recentLeadId, setRecentLeadId] = useState<string | null>(null);
   const [remoteLeads, setRemoteLeads] = useState<Lead[]>([]);
   const [remoteArchivedLeads, setRemoteArchivedLeads] = useState<Lead[]>([]);
@@ -596,6 +606,9 @@ function Workspace({
   const [remoteAuditLogs, setRemoteAuditLogs] = useState<AuditLog[]>([]);
   const [remoteTags, setRemoteTags] = useState<CrmTag[]>([]);
   const [remoteLeadTags, setRemoteLeadTags] = useState<LeadTag[]>([]);
+  const [organizationContext, setOrganizationContext] = useState<OrganizationContext | null>(null);
+  const [organizationReady, setOrganizationReady] = useState(false);
+  const organizationId = organizationContext?.organization.id ?? null;
   const leads = remoteLeads;
   const archivedLeads = remoteArchivedLeads;
   const templates = remoteTemplates;
@@ -611,10 +624,57 @@ function Workspace({
     () => new Set([...leads, ...archivedLeads].map((lead) => normalizeProspectingWhatsAppPhone(lead.phone)).filter(Boolean)),
     [archivedLeads, leads],
   );
+  const dispatchCountsByLeadId = useMemo(() => {
+    const sentByMessage = new Map<string, number>();
+    const sentByInteraction = new Map<string, number>();
+
+    for (const message of whatsappMessages) {
+      if (message.lead_id && message.direction === "outbound" && message.status !== "failed") {
+        sentByMessage.set(message.lead_id, (sentByMessage.get(message.lead_id) ?? 0) + 1);
+      }
+    }
+
+    for (const interaction of interactions) {
+      if (interaction.type === "whatsapp_sent") {
+        sentByInteraction.set(interaction.lead_id, (sentByInteraction.get(interaction.lead_id) ?? 0) + 1);
+      }
+    }
+
+    const ids = new Set([...sentByMessage.keys(), ...sentByInteraction.keys()]);
+    return new Map(Array.from(ids).map((id) => [id, Math.max(sentByMessage.get(id) ?? 0, sentByInteraction.get(id) ?? 0)]));
+  }, [interactions, whatsappMessages]);
   const tagsByLeadId = useMemo(() => groupLeadTagsByLead(leadTags, tags), [leadTags, tags]);
 
   useEffect(() => {
+    let mounted = true;
+
+    async function loadOrganizationContext() {
+      const result = await ensureOrganizationContext();
+      if (!mounted) return;
+
+      if (result.success && result.data) {
+        setOrganizationContext(result.data);
+      } else if (result.error) {
+        setToast({
+          id: newId("toast"),
+          text: result.error,
+        });
+      }
+
+      setOrganizationReady(true);
+    }
+
+    loadOrganizationContext();
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
     async function loadRemoteData() {
+      if (!organizationReady) return;
+
       if (!supabase) {
         setLoading(false);
         return;
@@ -632,15 +692,15 @@ function Workspace({
         tagResult,
         leadTagResult,
       ] = await Promise.all([
-        supabase.from("leads").select("*").order("created_at", { ascending: false }),
-        supabase.from("message_templates").select("*").order("created_at", { ascending: true }),
-        supabase.from("interactions").select("*").order("created_at", { ascending: false }),
-        supabase.from("tasks").select("*").order("due_at", { ascending: true }).limit(200),
-        supabase.from("whatsapp_messages").select("*").order("created_at", { ascending: false }).limit(100),
-        supabase.from("whatsapp_logs").select("*").order("created_at", { ascending: false }).limit(30),
-        supabase.from("audit_logs").select("*").order("created_at", { ascending: false }).limit(80),
-        supabase.from("tags").select("*").order("name", { ascending: true }),
-        supabase.from("lead_tags").select("*"),
+        (organizationId ? supabase.from("leads").select("*").eq("organization_id", organizationId) : supabase.from("leads").select("*")).order("created_at", { ascending: false }),
+        (organizationId ? supabase.from("message_templates").select("*").eq("organization_id", organizationId) : supabase.from("message_templates").select("*")).order("created_at", { ascending: true }),
+        (organizationId ? supabase.from("interactions").select("*").eq("organization_id", organizationId) : supabase.from("interactions").select("*")).order("created_at", { ascending: false }),
+        (organizationId ? supabase.from("tasks").select("*").eq("organization_id", organizationId) : supabase.from("tasks").select("*")).order("due_at", { ascending: true }).limit(200),
+        (organizationId ? supabase.from("whatsapp_messages").select("*").eq("organization_id", organizationId) : supabase.from("whatsapp_messages").select("*")).order("created_at", { ascending: false }).limit(100),
+        (organizationId ? supabase.from("whatsapp_logs").select("*").eq("organization_id", organizationId) : supabase.from("whatsapp_logs").select("*")).order("created_at", { ascending: false }).limit(30),
+        (organizationId ? supabase.from("audit_logs").select("*").eq("organization_id", organizationId) : supabase.from("audit_logs").select("*")).order("created_at", { ascending: false }).limit(80),
+        (organizationId ? supabase.from("tags").select("*").eq("organization_id", organizationId) : supabase.from("tags").select("*")).order("name", { ascending: true }),
+        organizationId ? supabase.from("lead_tags").select("*").eq("organization_id", organizationId) : supabase.from("lead_tags").select("*"),
       ]);
 
       if (
@@ -671,7 +731,7 @@ function Workspace({
     }
 
     loadRemoteData();
-  }, [supabase, user.id]);
+  }, [organizationId, organizationReady, supabase, user.id]);
 
   useEffect(() => {
     if (!toast) return;
@@ -693,6 +753,10 @@ function Workspace({
   useEffect(() => {
     window.localStorage.setItem("origocrm:pipeline-stages", JSON.stringify(pipelineStages));
   }, [pipelineStages]);
+
+  useEffect(() => {
+    window.localStorage.setItem("origocrm:theme", crmTheme);
+  }, [crmTheme]);
 
   const filteredLeads = useMemo(() => {
     const search = query.trim().toLowerCase();
@@ -723,6 +787,10 @@ function Workspace({
   }, [leads, pipelineStages]);
   function showToast(text: string) {
     setToast({ id: newId("toast"), text });
+  }
+
+  function withOrganizationPayload<T extends object>(payload: T) {
+    return organizationId ? { ...payload, organization_id: organizationId } : payload;
   }
 
   function exportFilteredLeads() {
@@ -1251,7 +1319,7 @@ function Workspace({
           },
           { cancelOpenFollowups: false },
         ),
-        supabase.from("interactions").insert({ ...interaction, user_id: user.id }),
+        supabase.from("interactions").insert(withOrganizationPayload({ ...interaction, user_id: user.id })),
       ]);
       if (interactionError) showToast("Erro ao salvar follow-up");
       if (!taskResult.success) showToast("Follow-up salvo; aplique a migracao de tarefas no Supabase");
@@ -1319,7 +1387,7 @@ function Workspace({
         { cancelOpenFollowups: false },
       );
       const interactionError = interaction
-        ? (await supabase.from("interactions").insert({ ...interaction, user_id: user.id })).error
+        ? (await supabase.from("interactions").insert(withOrganizationPayload({ ...interaction, user_id: user.id }))).error
         : null;
 
       if (!taskResult.success || interactionError) {
@@ -1372,7 +1440,7 @@ function Workspace({
     if (supabase) {
       const taskResult = await completeTaskAction(task.id, { leadId: task.lead_id ?? lead?.id ?? null, clearLeadFollowup: shouldClearFollowup });
       const interactionError = interaction
-        ? (await supabase.from("interactions").insert({ ...interaction, user_id: user.id })).error
+        ? (await supabase.from("interactions").insert(withOrganizationPayload({ ...interaction, user_id: user.id }))).error
         : null;
 
       if (!taskResult.success || interactionError) {
@@ -1436,7 +1504,7 @@ function Workspace({
         updateLeadFollowup: task.type === "followup" && Boolean(lead),
       });
       const interactionError = interaction
-        ? (await supabase.from("interactions").insert({ ...interaction, user_id: user.id })).error
+        ? (await supabase.from("interactions").insert(withOrganizationPayload({ ...interaction, user_id: user.id }))).error
         : null;
 
       if (!taskResult.success || interactionError) {
@@ -1501,7 +1569,7 @@ function Workspace({
         due_at: input.due_at,
       });
       const interactionError = interaction
-        ? (await supabase.from("interactions").insert({ ...interaction, user_id: user.id })).error
+        ? (await supabase.from("interactions").insert(withOrganizationPayload({ ...interaction, user_id: user.id }))).error
         : null;
 
       if (!taskResult.success || interactionError) {
@@ -1565,9 +1633,12 @@ function Workspace({
     showToast("Temperatura atualizada");
 
     if (supabase) {
+      const leadUpdateQuery = organizationId
+        ? supabase.from("leads").update({ temperature }).eq("id", lead.id).eq("organization_id", organizationId)
+        : supabase.from("leads").update({ temperature }).eq("id", lead.id).eq("user_id", user.id);
       const [{ error: leadError }, { error: interactionError }] = await Promise.all([
-        supabase.from("leads").update({ temperature }).eq("id", lead.id),
-        supabase.from("interactions").insert({ ...interaction, user_id: user.id }),
+        leadUpdateQuery,
+        supabase.from("interactions").insert(withOrganizationPayload({ ...interaction, user_id: user.id })),
       ]);
 
       if (leadError || interactionError) {
@@ -1601,7 +1672,7 @@ function Workspace({
     };
     addInteractionOptimistic(interaction);
     if (supabase) {
-      const { error } = await supabase.from("interactions").insert({ ...interaction, user_id: user.id });
+      const { error } = await supabase.from("interactions").insert(withOrganizationPayload({ ...interaction, user_id: user.id }));
       if (error) showToast("Erro ao registrar interacao");
       else await recordAuditLog({
         entity_type: "lead",
@@ -1660,7 +1731,7 @@ function Workspace({
 
     const { data, error } = await supabase
       .from("message_templates")
-      .insert({ title, body, user_id: user.id })
+      .insert(withOrganizationPayload({ title, body, user_id: user.id }))
       .select()
       .single();
 
@@ -1692,11 +1763,14 @@ function Workspace({
     setRemoteTemplates((items) => items.filter((item) => item.id !== template.id));
     showToast("Mensagem pronta excluida");
 
-    const { error } = await supabase
+    let deleteQuery = supabase
       .from("message_templates")
       .delete()
-      .eq("id", template.id)
-      .eq("user_id", user.id);
+      .eq("id", template.id);
+
+    deleteQuery = organizationId ? deleteQuery.eq("organization_id", organizationId) : deleteQuery.eq("user_id", user.id);
+
+    const { error } = await deleteQuery;
 
     if (error) {
       setRemoteTemplates(previousTemplates);
@@ -1718,7 +1792,7 @@ function Workspace({
   }
 
   return (
-    <main className="crm-shell relative min-h-screen overflow-hidden bg-[#09090D] text-white">
+    <main className={`crm-shell crm-theme-${crmTheme} relative min-h-screen overflow-hidden bg-[#09090D] text-white`}>
       <div className="glow-breathe pointer-events-none absolute inset-x-0 top-0 h-[34rem] bg-[radial-gradient(ellipse_at_14%_0%,rgba(139,92,246,0.28),transparent_42%),radial-gradient(ellipse_at_88%_12%,rgba(37,211,102,0.12),transparent_34%)]" />
       <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.022)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.016)_1px,transparent_1px)] bg-[size:72px_72px] opacity-25" />
       {toast && (
@@ -1786,8 +1860,8 @@ function Workspace({
           </button>
         </aside>
 
-        <section className="relative flex-1 overflow-hidden">
-          <header className="relative flex flex-col gap-4 border-b border-white/10 bg-black/20 px-5 py-4 shadow-xl shadow-black/10 backdrop-blur-xl xl:flex-row xl:items-center xl:justify-between">
+        <section className="crm-content relative flex-1 overflow-hidden">
+          <header className="crm-content-header relative flex flex-col gap-4 border-b border-white/10 bg-black/20 px-5 py-4 shadow-xl shadow-black/10 backdrop-blur-xl xl:flex-row xl:items-center xl:justify-between">
             <div className="absolute inset-x-0 bottom-0 h-px bg-[linear-gradient(90deg,transparent,rgba(139,92,246,0.55),rgba(37,211,102,0.18),transparent)]" />
             <div>
               <h1 className="text-2xl font-semibold">{viewTitles[view]}</h1>
@@ -1908,7 +1982,7 @@ function Workspace({
             </div>
           </header>
 
-          <div className="reveal-up relative p-5">
+          <div className="crm-content-body reveal-up relative p-5">
             {loading ? (
               <div className="flex h-96 items-center justify-center">
                 <Loader2 className="h-6 w-6 animate-spin text-[#8B5CF6]" />
@@ -1934,6 +2008,7 @@ function Workspace({
                   <Pipeline
                     bulkOwnerName={bulkOwnerName}
                     columns={visiblePipelineStages}
+                    dispatchCountsByLeadId={dispatchCountsByLeadId}
                     leadTags={tagsByLeadId}
                     leads={filteredLeads}
                     onBulkArchive={() => void bulkArchiveSelectedLeads()}
@@ -1981,6 +2056,7 @@ function Workspace({
                   <Conversations
                     columns={visiblePipelineStages}
                     leads={leads}
+                    organizationId={organizationId}
                     templates={templates}
                     onAudit={recordAuditLog}
                     onLeadCreated={(lead) => {
@@ -2000,10 +2076,12 @@ function Workspace({
                   <SettingsView
                     archivedLeads={archivedLeads}
                     auditLogs={auditLogs}
+                    crmTheme={crmTheme}
                     initialTab={settingsInitialTab}
                     leads={leads}
                     onAddTemplate={addTemplate}
                     onDeleteTemplate={(template) => setTemplatePendingDelete(template)}
+                    onThemeChange={setCrmTheme}
                     tasks={tasks}
                     templates={templates}
                     user={user}
@@ -3397,6 +3475,19 @@ function TasksView({
                         Editar
                       </button>
                       <button
+                        className="flex h-9 items-center gap-1 rounded-lg border border-[#8B5CF6]/25 bg-[#8B5CF6]/10 px-3 text-xs text-[#DDD6FE] transition hover:bg-[#8B5CF6]/20"
+                        onClick={() => openGoogleCalendarEvent({
+                          title: task.title,
+                          startsAt: task.due_at,
+                          details: visibleNotes || `${taskTypeLabel(task.type)} criado no OrigoCRM`,
+                          lead,
+                        })}
+                        type="button"
+                      >
+                        <CalendarClock className="h-3.5 w-3.5" />
+                        Google
+                      </button>
+                      <button
                         className="flex h-9 items-center gap-1 rounded-lg border border-red-400/20 bg-red-500/10 px-3 text-xs text-red-200 transition hover:bg-red-500/20"
                         onClick={() => setDeleteTarget({ task, lead })}
                         type="button"
@@ -3472,6 +3563,18 @@ function TasksView({
                         type="button"
                       >
                         Reagendar
+                      </button>
+                      <button
+                        className="h-9 rounded-lg border border-white/10 px-3 text-xs text-zinc-300 transition hover:bg-white/[0.06]"
+                        onClick={() => openGoogleCalendarEvent({
+                          title: `Follow-up com ${lead.name}`,
+                          startsAt: lead.next_followup_at ?? addDays(1),
+                          details: "Agenda comercial criada no OrigoCRM",
+                          lead,
+                        })}
+                        type="button"
+                      >
+                        Google
                       </button>
                       <button
                         className="h-9 rounded-lg border border-[#25D366]/25 bg-[#25D366]/10 px-3 text-xs text-[#9AF0B8] transition hover:bg-[#25D366]/20"
@@ -3684,6 +3787,7 @@ function getPipelineMeta(id: LeadStatus, title: string) {
 function Pipeline({
   leads,
   leadTags,
+  dispatchCountsByLeadId,
   columns,
   recentLeadId,
   selectedLeadIds,
@@ -3703,6 +3807,7 @@ function Pipeline({
 }: {
   leads: Lead[];
   leadTags: Map<string, CrmTag[]>;
+  dispatchCountsByLeadId: Map<string, number>;
   columns: PipelineStage[];
   recentLeadId: string | null;
   selectedLeadIds: Set<string>;
@@ -3771,6 +3876,7 @@ function Pipeline({
               <PipelineColumn
                 key={column.id}
                 id={column.id}
+                dispatchCountsByLeadId={dispatchCountsByLeadId}
                 leads={columnLeads}
                 leadTags={leadTags}
                 onLeadClick={onLeadClick}
@@ -4148,6 +4254,50 @@ function buildTaskNotes(notes: string, repeat: TaskRepeat) {
   return `${cleanNotes}${cleanNotes ? "\n" : ""}[[repeat:${repeat}]]`;
 }
 
+function formatGoogleCalendarDate(date: Date) {
+  return date.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
+}
+
+function buildGoogleCalendarUrl(input: {
+  title: string;
+  startsAt: string;
+  details?: string | null;
+  lead?: Lead | null;
+}) {
+  const startsAt = new Date(input.startsAt);
+  if (Number.isNaN(startsAt.getTime())) return null;
+
+  const endsAt = new Date(startsAt);
+  endsAt.setMinutes(endsAt.getMinutes() + 30);
+
+  const details = [
+    input.details,
+    input.lead ? `Lead: ${input.lead.name}` : null,
+    input.lead?.phone ? `Telefone: ${input.lead.phone}` : null,
+    input.lead?.company ? `Empresa: ${input.lead.company}` : null,
+  ].filter(Boolean).join("\n");
+
+  const params = new URLSearchParams({
+    action: "TEMPLATE",
+    text: input.title || "Tarefa OrigoCRM",
+    dates: `${formatGoogleCalendarDate(startsAt)}/${formatGoogleCalendarDate(endsAt)}`,
+    details,
+  });
+
+  return `https://calendar.google.com/calendar/render?${params.toString()}`;
+}
+
+function openGoogleCalendarEvent(input: {
+  title: string;
+  startsAt: string;
+  details?: string | null;
+  lead?: Lead | null;
+}) {
+  const url = buildGoogleCalendarUrl(input);
+  if (!url || typeof window === "undefined") return;
+  window.open(url, "_blank", "noopener,noreferrer");
+}
+
 function getNextRecurringDueAt(value: string, repeat: TaskRepeat) {
   if (repeat === "none") return null;
 
@@ -4291,6 +4441,7 @@ function PipelineColumn({
   id,
   title,
   leads,
+  dispatchCountsByLeadId,
   leadTags,
   columns,
   closedStageIds,
@@ -4306,6 +4457,7 @@ function PipelineColumn({
   id: LeadStatus;
   title: string;
   leads: Lead[];
+  dispatchCountsByLeadId: Map<string, number>;
   leadTags: Map<string, CrmTag[]>;
   columns: PipelineStage[];
   closedStageIds: Set<LeadStatus>;
@@ -4322,6 +4474,7 @@ function PipelineColumn({
   const meta = getPipelineMeta(id, title);
   const stats = getPipelineColumnStats(leads, closedStageIds);
   const riskCount = stats.overdue + stats.noAction;
+  const dispatchCount = leads.reduce((total, lead) => total + (dispatchCountsByLeadId.get(lead.id) ?? 0), 0);
 
   return (
     <div
@@ -4367,6 +4520,9 @@ function PipelineColumn({
               {stats.hot} quentes
             </span>
           )}
+          <span className="rounded-full border border-[#25D366]/20 bg-[#25D366]/10 px-2 py-1 text-[#9AF0B8]">
+            {dispatchCount} disparos
+          </span>
         </div>
       </div>
       <SortableContext items={leads.map((lead) => lead.id)} strategy={verticalListSortingStrategy}>
@@ -4376,6 +4532,7 @@ function PipelineColumn({
               key={lead.id}
               highlighted={recentLeadId === lead.id}
               lead={lead}
+              dispatchCount={dispatchCountsByLeadId.get(lead.id) ?? 0}
               leadTags={leadTags.get(lead.id) ?? []}
               onClick={() => onLeadClick(lead)}
               onDelete={() => onLeadDelete(lead)}
@@ -4401,6 +4558,7 @@ function PipelineColumn({
 
 function SortableLeadCard({
   lead,
+  dispatchCount,
   leadTags,
   columns,
   closedStageIds,
@@ -4414,6 +4572,7 @@ function SortableLeadCard({
   onToggleSelection,
 }: {
   lead: Lead;
+  dispatchCount: number;
   leadTags: CrmTag[];
   columns: PipelineStage[];
   closedStageIds: Set<LeadStatus>;
@@ -4443,6 +4602,7 @@ function SortableLeadCard({
         closedStageIds={closedStageIds}
         highlighted={highlighted}
         lead={lead}
+        dispatchCount={dispatchCount}
         leadTags={leadTags}
         onClick={onClick}
         onDelete={onDelete}
@@ -4459,6 +4619,7 @@ function SortableLeadCard({
 
 function LeadCard({
   lead,
+  dispatchCount = 0,
   leadTags = [],
   columns,
   closedStageIds,
@@ -4474,6 +4635,7 @@ function LeadCard({
   onQuickSchedule,
 }: {
   lead: Lead;
+  dispatchCount?: number;
   leadTags?: CrmTag[];
   columns?: PipelineStage[];
   closedStageIds?: Set<LeadStatus>;
@@ -4603,6 +4765,9 @@ function LeadCard({
             +{leadTags.length - 3}
           </span>
         )}
+        <span className="rounded-full border border-[#25D366]/20 bg-[#25D366]/10 px-2 py-1 text-[11px] text-[#9AF0B8]">
+          {dispatchCount} disparo{dispatchCount === 1 ? "" : "s"}
+        </span>
       </div>
 
       <div className="mt-3 grid gap-1.5 text-xs">
@@ -4826,6 +4991,7 @@ const conversationStatusTabs: Array<{
 function Conversations({
   columns,
   leads,
+  organizationId,
   templates,
   onAudit,
   onLeadCreated,
@@ -4833,6 +4999,7 @@ function Conversations({
 }: {
   columns: PipelineStage[];
   leads: Lead[];
+  organizationId: string | null;
   templates: MessageTemplate[];
   onAudit: (input: AuditLogInput) => Promise<void>;
   onLeadCreated: (lead: Lead) => void;
@@ -4866,9 +5033,16 @@ function Conversations({
 
     let mounted = true;
 
+    const messageQuery = organizationId
+      ? supabase.from("whatsapp_messages").select("*").eq("organization_id", organizationId)
+      : supabase.from("whatsapp_messages").select("*");
+    const conversationQuery = organizationId
+      ? supabase.from("whatsapp_conversations").select("*").eq("organization_id", organizationId)
+      : supabase.from("whatsapp_conversations").select("*");
+
     Promise.all([
-      supabase.from("whatsapp_messages").select("*").order("created_at", { ascending: true }),
-      supabase.from("whatsapp_conversations").select("*").order("updated_at", { ascending: false }),
+      messageQuery.order("created_at", { ascending: true }),
+      conversationQuery.order("updated_at", { ascending: false }),
     ]).then(([messageResult, conversationResult]) => {
         if (!mounted) return;
         setMessages((messageResult.data as WhatsAppMessage[] | null) ?? []);
@@ -4883,6 +5057,7 @@ function Conversations({
         { event: "*", schema: "public", table: "whatsapp_messages" },
         (payload) => {
           const nextMessage = payload.new as WhatsAppMessage;
+          if (organizationId && nextMessage?.organization_id !== organizationId) return;
           if (
             payload.eventType === "INSERT" &&
             nextMessage?.direction === "inbound" &&
@@ -4905,6 +5080,8 @@ function Conversations({
         "postgres_changes",
         { event: "*", schema: "public", table: "whatsapp_conversations" },
         (payload) => {
+          const nextConversation = payload.new as WhatsAppConversation;
+          if (organizationId && nextConversation?.organization_id !== organizationId) return;
           setStoredConversations((current) => applyConversationRealtimeEvent(current, payload));
         },
       )
@@ -4915,7 +5092,7 @@ function Conversations({
       supabase.removeChannel(messageChannel);
       supabase.removeChannel(conversationChannel);
     };
-  }, [selectedPhone, supabase]);
+  }, [organizationId, selectedPhone, supabase]);
 
   const conversations = useMemo(() => {
     const grouped = new Map<string, WhatsAppMessage[]>();
@@ -6144,6 +6321,11 @@ function migrationChecksInitialState(configured: boolean): MigrationCheck[] {
       detail: "Verificando conexao autenticada",
     },
     {
+      label: "Base SaaS",
+      status: "checking",
+      detail: "Verificando organizacoes, membros e assinatura",
+    },
+    {
       label: "Campos comerciais",
       status: "checking",
       detail: "Verificando commercial_pipeline_migration.sql",
@@ -6210,6 +6392,7 @@ const defaultCrmPreferences: CrmPreferences = {
 };
 
 const migrationSqlByLabel: Record<string, string> = {
+  "Base SaaS": "Aplique o arquivo completo supabase/saas_base_migration.sql no SQL Editor do Supabase.",
   "Campos comerciais": [
     "alter table public.leads add column if not exists estimated_value numeric(12,2);",
     "alter table public.leads add column if not exists owner_name text not null default '';",
@@ -6312,10 +6495,12 @@ function readUserRole(): UserRole {
 function SettingsView({
   auditLogs,
   archivedLeads,
+  crmTheme,
   initialTab,
   leads,
   onAddTemplate,
   onDeleteTemplate,
+  onThemeChange,
   tasks,
   templates,
   user,
@@ -6325,10 +6510,12 @@ function SettingsView({
 }: {
   auditLogs: AuditLog[];
   archivedLeads: Lead[];
+  crmTheme: CrmTheme;
   initialTab?: SettingsTab;
   leads: Lead[];
   onAddTemplate: (title: string, body: string) => void;
   onDeleteTemplate: (template: MessageTemplate) => void;
+  onThemeChange: (theme: CrmTheme) => void;
   tasks: Task[];
   templates: MessageTemplate[];
   user: AuthUser;
@@ -6404,8 +6591,12 @@ function SettingsView({
 
     const client = supabase;
     setChecking(true);
-    const [session, commercial, tasksResult, auditResult, conversationResult, tagResult, campaignResult, webhookResult, evolutionResult] = await Promise.all([
+    const [session, saasResult, commercial, tasksResult, auditResult, conversationResult, tagResult, campaignResult, webhookResult, evolutionResult] = await Promise.all([
       client.auth.getUser(),
+      client
+        .from("organization_members")
+        .select("id,organization_id,role,status")
+        .limit(1),
       client
         .from("leads")
         .select("id,estimated_value,owner_name,temperature,outcome_reason,sla_hours,archived_at")
@@ -6452,6 +6643,13 @@ function SettingsView({
         label: "Supabase",
         status: session.data.user ? "ok" : "missing",
         detail: session.data.user ? "Sessao autenticada e banco acessivel" : "Usuario nao autenticado ou RLS bloqueando leitura",
+      },
+      {
+        label: "Base SaaS",
+        status: saasResult.error ? "missing" : "ok",
+        detail: saasResult.error
+          ? "Aplique supabase/saas_base_migration.sql para ativar organizacoes, membros e assinaturas"
+          : "Organizacoes, membros e assinatura disponiveis para venda recorrente",
       },
       {
         label: "Campos comerciais",
@@ -6892,7 +7090,35 @@ function SettingsView({
       {activeTab === "crm" && (
       <section className="rounded-xl border border-white/10 bg-white/[0.035] p-5">
         <h2 className="text-lg font-semibold">Preferencias do CRM</h2>
-        <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        <div className="mt-4 grid gap-4 xl:grid-cols-[0.85fr_1.15fr]">
+          <div className="rounded-lg border border-white/10 bg-black/20 p-4">
+            <div className="text-sm font-medium text-zinc-100">Aparencia</div>
+            <p className="mt-1 text-sm text-zinc-500">
+              Alterne o conteudo do sistema entre escuro e claro. A barra lateral permanece escura para preservar a identidade OrigoCRM.
+            </p>
+            <div className="mt-4 grid gap-2 sm:grid-cols-2">
+              {([
+                ["dark", Moon, "Escuro", "Operacao em ambiente dark premium."],
+                ["light", Sun, "Claro", "Leitura clara com menu lateral dark."],
+              ] as Array<[CrmTheme, typeof Moon, string, string]>).map(([theme, Icon, title, description]) => (
+                <button
+                  className={`rounded-lg border p-4 text-left transition ${
+                    crmTheme === theme
+                      ? "border-[#8B5CF6]/60 bg-[#8B5CF6]/15 shadow-lg shadow-[#8B5CF6]/10"
+                      : "border-white/10 bg-white/[0.035] hover:bg-white/[0.06]"
+                  }`}
+                  key={theme}
+                  onClick={() => onThemeChange(theme)}
+                  type="button"
+                >
+                  <Icon className="h-4 w-4 text-[#A78BFA]" />
+                  <div className="mt-3 font-medium text-zinc-100">{title}</div>
+                  <div className="mt-1 text-xs leading-5 text-zinc-500">{description}</div>
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="grid gap-4 md:grid-cols-2">
           <SettingsInput label="Nome da empresa" value={preferences.companyName} onChange={(value) => updatePreference("companyName", value)} />
           <SettingsInput label="Marca exibida" value={preferences.brandName} onChange={(value) => updatePreference("brandName", value)} />
           <SettingsInput label="SLA padrao (horas)" value={preferences.defaultSlaHours} onChange={(value) => updatePreference("defaultSlaHours", value)} />
@@ -6900,10 +7126,21 @@ function SettingsView({
           <SettingsInput label="Follow-up padrao (dias)" value={preferences.defaultFollowupDays} onChange={(value) => updatePreference("defaultFollowupDays", value)} />
           <SettingsInput label="Origem padrao WhatsApp" value={preferences.defaultWhatsAppSource} onChange={(value) => updatePreference("defaultWhatsAppSource", value)} />
           <SettingsInput label="Responsavel padrao" value={preferences.defaultOwnerName} onChange={(value) => updatePreference("defaultOwnerName", value)} />
+          </div>
         </div>
         <div className="mt-5 rounded-lg border border-white/10 bg-black/20 p-4">
           <div className="text-sm font-medium text-zinc-100">Funil e temperaturas</div>
           <p className="mt-1 text-sm text-zinc-500">Etapas seguem configuraveis na tela CRM. Temperaturas atuais: frio, morno e quente.</p>
+        </div>
+        <div className="mt-4 rounded-lg border border-[#8B5CF6]/20 bg-[#8B5CF6]/10 p-4">
+          <div className="flex items-center gap-2 text-sm font-medium text-zinc-100">
+            <CalendarClock className="h-4 w-4 text-[#A78BFA]" />
+            Google Calendar
+          </div>
+          <p className="mt-1 text-sm leading-6 text-zinc-500">
+            As tarefas e agendas comerciais agora possuem acao Google para abrir um evento pre-preenchido no Calendar.
+            A sincronizacao automatica em segundo plano entra na etapa OAuth, com conta Google conectada por usuario.
+          </p>
         </div>
       </section>
       )}

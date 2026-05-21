@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 
-import { createSupabaseServerClient } from "@/lib/server/supabase";
+import { getAuthenticatedOrganizationContext, withOrganizationId } from "@/lib/server/auth";
 import type { ProspectingCampaignInput } from "@/lib/types";
 
 type ActionResult<T = unknown> = {
@@ -11,27 +11,13 @@ type ActionResult<T = unknown> = {
   error?: string;
 };
 
-async function getAuthenticatedSupabase() {
-  const supabase = await createSupabaseServerClient();
-  if (!supabase) return { error: "Supabase nao configurado" };
-
-  const {
-    data: { user },
-    error,
-  } = await supabase.auth.getUser();
-
-  if (error || !user) return { error: "Sessao expirada. Entre novamente." };
-
-  return { supabase, user };
-}
-
 export async function createProspectingCampaign(input: ProspectingCampaignInput) {
-  const auth = await getAuthenticatedSupabase();
+  const auth = await getAuthenticatedOrganizationContext();
   if ("error" in auth) return { success: false, error: auth.error } satisfies ActionResult;
 
   const { data: campaign, error } = await auth.supabase
     .from("prospecting_campaigns")
-    .insert({
+    .insert(withOrganizationId({
       user_id: auth.user.id,
       name: input.name.trim() || "Campanha de prospeccao",
       niche: input.niche ?? "",
@@ -44,7 +30,7 @@ export async function createProspectingCampaign(input: ProspectingCampaignInput)
       failed_count: input.failed_count,
       ignored_count: input.ignored_count,
       status: input.status ?? "completed",
-    })
+    }, auth.organizationId))
     .select()
     .single();
 
@@ -53,7 +39,7 @@ export async function createProspectingCampaign(input: ProspectingCampaignInput)
   const campaignId = (campaign as { id: string }).id;
   if (input.contacts.length > 0) {
     const { error: contactsError } = await auth.supabase.from("prospecting_campaign_contacts").insert(
-      input.contacts.map((contact) => ({
+      input.contacts.map((contact) => withOrganizationId({
         campaign_id: campaignId,
         user_id: auth.user.id,
         business_name: contact.business_name,
@@ -66,7 +52,7 @@ export async function createProspectingCampaign(input: ProspectingCampaignInput)
         message: contact.message ?? null,
         error: contact.error ?? null,
         sent_at: contact.sent_at ?? null,
-      })),
+      }, auth.organizationId)),
     );
 
     if (contactsError) return { success: false, error: contactsError.message } satisfies ActionResult;
