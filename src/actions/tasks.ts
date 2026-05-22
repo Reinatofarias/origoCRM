@@ -2,14 +2,29 @@
 
 import { revalidatePath } from "next/cache";
 
+import { deleteTaskFromGoogleCalendar, syncTaskToGoogleCalendar } from "@/lib/server/google-calendar";
 import { getAuthenticatedOrganizationContext, withOrganizationId } from "@/lib/server/auth";
-import type { TaskInput } from "@/lib/types";
+import type { Lead, Task, TaskInput } from "@/lib/types";
 
 type ActionResult<T = unknown> = {
   success: boolean;
   data?: T;
   error?: string;
 };
+
+async function getLeadForTask(auth: Awaited<ReturnType<typeof getAuthenticatedOrganizationContext>>, leadId?: string | null) {
+  if ("error" in auth || !leadId) return null;
+
+  let query = auth.supabase
+    .from("leads")
+    .select("*")
+    .eq("id", leadId);
+
+  query = auth.organizationId ? query.eq("organization_id", auth.organizationId) : query.eq("user_id", auth.user.id);
+
+  const { data } = await query.maybeSingle();
+  return (data as Lead | null) ?? null;
+}
 
 export async function createTask(input: TaskInput, options: { cancelOpenFollowups?: boolean } = {}) {
   const auth = await getAuthenticatedOrganizationContext();
@@ -48,6 +63,16 @@ export async function createTask(input: TaskInput, options: { cancelOpenFollowup
     .single();
 
   if (error) return { success: false, error: error.message } satisfies ActionResult;
+
+  const createdTask = data as Task;
+  const lead = await getLeadForTask(auth, createdTask.lead_id);
+  await syncTaskToGoogleCalendar({
+    supabase: auth.supabase,
+    userId: auth.user.id,
+    organizationId: auth.organizationId,
+    task: createdTask,
+    lead,
+  });
 
   if (input.type === "followup" && input.lead_id) {
     let leadQuery = auth.supabase
@@ -129,9 +154,19 @@ export async function updateTask(taskId: string, input: TaskInput) {
 
   query = auth.organizationId ? query.eq("organization_id", auth.organizationId) : query.eq("user_id", auth.user.id);
 
-  const { error } = await query;
+  const { data, error } = await query.select().single();
 
   if (error) return { success: false, error: error.message } satisfies ActionResult;
+
+  const updatedTask = data as Task;
+  const lead = await getLeadForTask(auth, updatedTask.lead_id);
+  await syncTaskToGoogleCalendar({
+    supabase: auth.supabase,
+    userId: auth.user.id,
+    organizationId: auth.organizationId,
+    task: updatedTask,
+    lead,
+  });
 
   if (input.type === "followup" && input.lead_id) {
     let leadQuery = auth.supabase
@@ -161,9 +196,19 @@ export async function rescheduleTask(taskId: string, input: { leadId?: string | 
   if (input.leadId) query.eq("lead_id", input.leadId);
   else query.is("lead_id", null);
 
-  const { error } = await query;
+  const { data, error } = await query.select().single();
 
   if (error) return { success: false, error: error.message } satisfies ActionResult;
+
+  const updatedTask = data as Task;
+  const lead = await getLeadForTask(auth, updatedTask.lead_id);
+  await syncTaskToGoogleCalendar({
+    supabase: auth.supabase,
+    userId: auth.user.id,
+    organizationId: auth.organizationId,
+    task: updatedTask,
+    lead,
+  });
 
   if (input.updateLeadFollowup && input.leadId) {
     let leadQuery = auth.supabase
@@ -182,6 +227,26 @@ export async function rescheduleTask(taskId: string, input: { leadId?: string | 
 export async function deleteTask(taskId: string, input: { leadId?: string | null }) {
   const auth = await getAuthenticatedOrganizationContext();
   if ("error" in auth) return { success: false, error: auth.error } satisfies ActionResult;
+
+  let currentTaskQuery = auth.supabase
+    .from("tasks")
+    .select("*")
+    .eq("id", taskId);
+
+  currentTaskQuery = auth.organizationId ? currentTaskQuery.eq("organization_id", auth.organizationId) : currentTaskQuery.eq("user_id", auth.user.id);
+  if (input.leadId) currentTaskQuery.eq("lead_id", input.leadId);
+  else currentTaskQuery.is("lead_id", null);
+
+  const { data: currentTask } = await currentTaskQuery.maybeSingle();
+
+  if (currentTask) {
+    await deleteTaskFromGoogleCalendar({
+      supabase: auth.supabase,
+      userId: auth.user.id,
+      organizationId: auth.organizationId,
+      task: currentTask as Task,
+    });
+  }
 
   let query = auth.supabase
     .from("tasks")

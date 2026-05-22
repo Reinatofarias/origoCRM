@@ -105,27 +105,35 @@ from public.organization_members om
 where t.organization_id is null and t.user_id = om.user_id and om.status = 'active';
 
 update public.interactions t
-set organization_id = coalesce(l.organization_id, om.organization_id)
+set organization_id = coalesce(
+  (select l.organization_id from public.leads l where l.id = t.lead_id),
+  om.organization_id
+)
 from public.organization_members om
-left join public.leads l on l.id = t.lead_id
 where t.organization_id is null and t.user_id = om.user_id and om.status = 'active';
 
 update public.tasks t
-set organization_id = coalesce(l.organization_id, om.organization_id)
+set organization_id = coalesce(
+  (select l.organization_id from public.leads l where l.id = t.lead_id),
+  om.organization_id
+)
 from public.organization_members om
-left join public.leads l on l.id = t.lead_id
 where t.organization_id is null and t.user_id = om.user_id and om.status = 'active';
 
 update public.whatsapp_messages t
-set organization_id = coalesce(l.organization_id, om.organization_id)
+set organization_id = coalesce(
+  (select l.organization_id from public.leads l where l.id = t.lead_id),
+  om.organization_id
+)
 from public.organization_members om
-left join public.leads l on l.id = t.lead_id
 where t.organization_id is null and t.user_id = om.user_id and om.status = 'active';
 
 update public.whatsapp_conversations t
-set organization_id = coalesce(l.organization_id, om.organization_id)
+set organization_id = coalesce(
+  (select l.organization_id from public.leads l where l.id = t.lead_id),
+  om.organization_id
+)
 from public.organization_members om
-left join public.leads l on l.id = t.lead_id
 where t.organization_id is null and t.user_id = om.user_id and om.status = 'active';
 
 update public.whatsapp_logs t
@@ -144,17 +152,21 @@ from public.organization_members om
 where t.organization_id is null and t.user_id = om.user_id and om.status = 'active';
 
 update public.lead_tags t
-set organization_id = coalesce(l.organization_id, tg.organization_id, om.organization_id)
+set organization_id = coalesce(
+  (select l.organization_id from public.leads l where l.id = t.lead_id),
+  (select tg.organization_id from public.tags tg where tg.id = t.tag_id),
+  om.organization_id
+)
 from public.organization_members om
-left join public.leads l on l.id = t.lead_id
-left join public.tags tg on tg.id = t.tag_id
 where t.organization_id is null and t.user_id = om.user_id and om.status = 'active';
 
 update public.whatsapp_conversation_tags t
-set organization_id = coalesce(c.organization_id, tg.organization_id, om.organization_id)
+set organization_id = coalesce(
+  (select c.organization_id from public.whatsapp_conversations c where c.id = t.conversation_id),
+  (select tg.organization_id from public.tags tg where tg.id = t.tag_id),
+  om.organization_id
+)
 from public.organization_members om
-left join public.whatsapp_conversations c on c.id = t.conversation_id
-left join public.tags tg on tg.id = t.tag_id
 where t.organization_id is null and t.user_id = om.user_id and om.status = 'active';
 
 update public.prospecting_campaigns t
@@ -163,9 +175,11 @@ from public.organization_members om
 where t.organization_id is null and t.user_id = om.user_id and om.status = 'active';
 
 update public.prospecting_campaign_contacts t
-set organization_id = coalesce(c.organization_id, om.organization_id)
+set organization_id = coalesce(
+  (select c.organization_id from public.prospecting_campaigns c where c.id = t.campaign_id),
+  om.organization_id
+)
 from public.organization_members om
-left join public.prospecting_campaigns c on c.id = t.campaign_id
 where t.organization_id is null and t.user_id = om.user_id and om.status = 'active';
 
 create index if not exists organizations_owner_user_id_idx on public.organizations(owner_user_id);

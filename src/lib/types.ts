@@ -70,6 +70,10 @@ export type Task = {
   due_at: string;
   status: "open" | "completed" | "canceled";
   completed_at?: string | null;
+  google_event_id?: string | null;
+  google_calendar_id?: string | null;
+  google_synced_at?: string | null;
+  google_sync_error?: string | null;
   created_at: string;
   updated_at: string;
 };

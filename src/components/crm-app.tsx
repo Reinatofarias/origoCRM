@@ -154,6 +154,20 @@ type MigrationCheck = {
   status: "checking" | "ok" | "missing";
   detail: string;
 };
+type GoogleCalendarStatus = {
+  configured: boolean;
+  migrated?: boolean;
+  connected: boolean;
+  error?: string;
+  connection?: {
+    account_email?: string | null;
+    calendar_id?: string | null;
+    status?: string;
+    last_error?: string | null;
+    last_synced_at?: string | null;
+    updated_at?: string | null;
+  } | null;
+};
 type AuditLogInput = {
   entity_type: AuditLog["entity_type"];
   entity_id?: string | null;
@@ -3422,6 +3436,16 @@ function TasksView({
                             Repete {taskRepeatLabel(repeat).toLowerCase()}
                           </span>
                         )}
+                        {task.google_synced_at && (
+                          <span className="rounded-full border border-[#25D366]/25 bg-[#25D366]/10 px-2 py-0.5 text-[11px] text-[#9AF0B8]">
+                            Google sync
+                          </span>
+                        )}
+                        {task.google_sync_error && (
+                          <span className="rounded-full border border-red-400/25 bg-red-500/10 px-2 py-0.5 text-[11px] text-red-200">
+                            Google pendente
+                          </span>
+                        )}
                         <span className="font-medium text-zinc-100">{task.title}</span>
                       </div>
                       {lead ? (
@@ -6354,6 +6378,11 @@ function migrationChecksInitialState(configured: boolean): MigrationCheck[] {
       detail: "Verificando tags_and_prospecting_campaigns_migration.sql",
     },
     {
+      label: "Google Calendar",
+      status: "checking",
+      detail: "Verificando OAuth e tabela google_calendar_connections",
+    },
+    {
       label: "Webhook WhatsApp",
       status: "checking",
       detail: "Verificando recebimento recente de eventos",
@@ -6396,6 +6425,7 @@ const defaultCrmPreferences: CrmPreferences = {
 
 const migrationSqlByLabel: Record<string, string> = {
   "Base SaaS": "Aplique o arquivo completo supabase/saas_base_migration.sql no SQL Editor do Supabase.",
+  "Google Calendar": "Aplique o arquivo completo supabase/google_calendar_migration.sql no SQL Editor do Supabase.",
   "Campos comerciais": [
     "alter table public.leads add column if not exists estimated_value numeric(12,2);",
     "alter table public.leads add column if not exists owner_name text not null default '';",
@@ -6546,6 +6576,9 @@ function SettingsView({
   const [evolutionQrCode, setEvolutionQrCode] = useState<string | null>(null);
   const [evolutionPairingCode, setEvolutionPairingCode] = useState<string | null>(null);
   const [evolutionFeedback, setEvolutionFeedback] = useState("");
+  const [googleCalendarStatus, setGoogleCalendarStatus] = useState<GoogleCalendarStatus | null>(null);
+  const [googleCalendarLoading, setGoogleCalendarLoading] = useState(false);
+  const [googleCalendarFeedback, setGoogleCalendarFeedback] = useState("");
   const [role, setRole] = useState<UserRole>(() => readUserRole());
   const [preferences, setPreferences] = useState<CrmPreferences>(() => readCrmPreferences());
   const [auditEntityFilter, setAuditEntityFilter] = useState<AuditLog["entity_type"] | "all">("all");
@@ -6594,7 +6627,20 @@ function SettingsView({
 
     const client = supabase;
     setChecking(true);
-    const [session, saasResult, commercial, tasksResult, auditResult, conversationResult, tagResult, campaignResult, webhookResult, evolutionResult] = await Promise.all([
+    const [
+      session,
+      saasResult,
+      commercial,
+      tasksResult,
+      googleTaskResult,
+      auditResult,
+      conversationResult,
+      tagResult,
+      campaignResult,
+      webhookResult,
+      evolutionResult,
+      googleCalendarResult,
+    ] = await Promise.all([
       client.auth.getUser(),
       client
         .from("organization_members")
@@ -6607,6 +6653,10 @@ function SettingsView({
       client
         .from("tasks")
         .select("id,lead_id,type,title,due_at,status,completed_at")
+        .limit(1),
+      client
+        .from("tasks")
+        .select("id,google_event_id,google_calendar_id,google_synced_at,google_sync_error")
         .limit(1),
       client
         .from("audit_logs")
@@ -6626,8 +6676,10 @@ function SettingsView({
         .limit(1),
       fetch("/api/webhooks/evolution", { cache: "no-store" }).then((response) => response.json()).catch(() => null),
       fetch("/api/evolution/status", { cache: "no-store" }).then(async (response) => ({ ok: response.ok, data: await response.json() })).catch(() => null),
+      fetch("/api/integrations/google/status", { cache: "no-store" }).then(async (response) => ({ ok: response.ok, data: await response.json() })).catch(() => null),
     ]);
     const evolutionData = evolutionResult?.data;
+    const googleCalendarData = googleCalendarResult?.data as GoogleCalendarStatus | undefined;
 
     if (evolutionData) {
       setEvolutionStatus({
@@ -6639,6 +6691,10 @@ function SettingsView({
         profileName: evolutionData.profileName,
         error: evolutionData.error,
       });
+    }
+
+    if (googleCalendarData) {
+      setGoogleCalendarStatus(googleCalendarData);
     }
 
     setChecks([
@@ -6690,6 +6746,17 @@ function SettingsView({
           : "Tags e historico de campanhas de prospeccao disponiveis",
       },
       {
+        label: "Google Calendar",
+        status: googleCalendarData?.configured && !googleTaskResult.error && googleCalendarData.migrated !== false ? "ok" : "missing",
+        detail: !googleCalendarData?.configured
+          ? "Configure GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET e GOOGLE_CALENDAR_REDIRECT_URI na Vercel"
+          : googleTaskResult.error || googleCalendarData.migrated === false
+            ? "Aplique supabase/google_calendar_migration.sql para ativar conexao por usuario e eventos automaticos"
+            : googleCalendarData.connected
+              ? `Agenda conectada${googleCalendarData.connection?.account_email ? ` em ${googleCalendarData.connection.account_email}` : ""}`
+              : "OAuth configurado. Conecte uma conta Google na aba CRM",
+      },
+      {
         label: "Webhook WhatsApp",
         status: webhookResult?.status === "ok" ? "ok" : "missing",
         detail: webhookResult?.status === "ok"
@@ -6729,6 +6796,34 @@ function SettingsView({
     const timeout = window.setTimeout(() => setActiveTab(initialTab), 0);
     return () => window.clearTimeout(timeout);
   }, [initialTab]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const params = new URLSearchParams(window.location.search);
+    const googleCalendar = params.get("googleCalendar");
+    const googleCalendarError = params.get("googleCalendarError");
+
+    const timeout = window.setTimeout(() => {
+      if (googleCalendar === "connected") {
+        setActiveTab("crm");
+        setGoogleCalendarFeedback("Google Calendar conectado. Novas tarefas serao sincronizadas automaticamente.");
+        void refreshGoogleCalendarStatus();
+      } else if (googleCalendarError) {
+        setActiveTab("crm");
+        setGoogleCalendarFeedback(googleCalendarError);
+      } else if (googleCalendar) {
+        setActiveTab("crm");
+        setGoogleCalendarFeedback(`Google Calendar: ${googleCalendar}`);
+      }
+
+      if (googleCalendar || googleCalendarError) {
+        window.history.replaceState(null, "", window.location.pathname);
+      }
+    }, 0);
+
+    return () => window.clearTimeout(timeout);
+  }, []);
 
   async function copyText(label: string, text: string) {
     await navigator.clipboard.writeText(text);
@@ -6815,6 +6910,52 @@ function SettingsView({
     const response = await fetch("/api/webhooks/evolution", { cache: "no-store" });
     const data = await response.json();
     setEvolutionFeedback(response.ok ? `Webhook ativo: ${(data.events ?? []).join(", ")}` : "Webhook nao respondeu");
+  }
+
+  async function refreshGoogleCalendarStatus() {
+    setGoogleCalendarLoading(true);
+    try {
+      const response = await fetch("/api/integrations/google/status", { cache: "no-store" });
+      const data = await response.json();
+      setGoogleCalendarStatus({
+        configured: Boolean(data.configured),
+        migrated: data.migrated,
+        connected: Boolean(data.connected),
+        error: data.error,
+        connection: data.connection ?? null,
+      });
+      if (!response.ok || data.error) {
+        setGoogleCalendarFeedback(data.error ?? "Nao foi possivel consultar Google Calendar");
+      }
+    } catch {
+      setGoogleCalendarFeedback("Nao foi possivel consultar Google Calendar");
+    } finally {
+      setGoogleCalendarLoading(false);
+    }
+  }
+
+  function connectGoogleCalendar() {
+    window.location.href = "/api/integrations/google/connect";
+  }
+
+  async function disconnectGoogleCalendar() {
+    setGoogleCalendarFeedback("");
+    setGoogleCalendarLoading(true);
+    try {
+      const response = await fetch("/api/integrations/google/disconnect", { method: "DELETE" });
+      const data = await response.json();
+      if (!response.ok || data.error) {
+        setGoogleCalendarFeedback(data.error ?? "Nao foi possivel desconectar Google Calendar");
+        return;
+      }
+
+      setGoogleCalendarFeedback("Google Calendar desconectado");
+      await refreshGoogleCalendarStatus();
+    } catch {
+      setGoogleCalendarFeedback("Nao foi possivel desconectar Google Calendar");
+    } finally {
+      setGoogleCalendarLoading(false);
+    }
   }
 
   function updatePreference<K extends keyof CrmPreferences>(key: K, value: CrmPreferences[K]) {
@@ -7136,14 +7277,95 @@ function SettingsView({
           <p className="mt-1 text-sm text-zinc-500">Etapas seguem configuraveis na tela CRM. Temperaturas atuais: frio, morno e quente.</p>
         </div>
         <div className="mt-4 rounded-lg border border-[#8B5CF6]/20 bg-[#8B5CF6]/10 p-4">
-          <div className="flex items-center gap-2 text-sm font-medium text-zinc-100">
-            <CalendarClock className="h-4 w-4 text-[#A78BFA]" />
-            Google Calendar
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+            <div>
+              <div className="flex items-center gap-2 text-sm font-medium text-zinc-100">
+                <CalendarClock className="h-4 w-4 text-[#A78BFA]" />
+                Google Calendar
+              </div>
+              <p className="mt-1 text-sm leading-6 text-zinc-500">
+                Conecte sua conta Google para criar e atualizar eventos automaticamente quando uma tarefa for criada,
+                editada ou reagendada no OrigoCRM.
+              </p>
+            </div>
+            <SettingsStatusPill
+              status={googleCalendarStatus?.connected ? "ok" : "missing"}
+              okLabel={googleCalendarStatus?.connected ? "Conectado" : "Pendente"}
+            />
           </div>
-          <p className="mt-1 text-sm leading-6 text-zinc-500">
-            As tarefas e agendas comerciais agora possuem acao Google para abrir um evento pre-preenchido no Calendar.
-            A sincronizacao automatica em segundo plano entra na etapa OAuth, com conta Google conectada por usuario.
-          </p>
+
+          <div className="mt-4 grid gap-3 md:grid-cols-3">
+            <SettingsMetric
+              icon={ShieldCheck}
+              label="OAuth"
+              value={googleCalendarStatus?.configured ? "Configurado" : "Pendente"}
+            />
+            <SettingsMetric
+              icon={UserRound}
+              label="Conta"
+              value={googleCalendarStatus?.connection?.account_email ?? user.email ?? "Nao conectada"}
+            />
+            <SettingsMetric
+              icon={Clock3}
+              label="Ultima sync"
+              value={
+                googleCalendarStatus?.connection?.last_synced_at
+                  ? new Date(googleCalendarStatus.connection.last_synced_at).toLocaleString("pt-BR")
+                  : "Sem sincronizacao"
+              }
+            />
+          </div>
+
+          {(googleCalendarFeedback || googleCalendarStatus?.error || googleCalendarStatus?.connection?.last_error) && (
+            <p className="mt-4 rounded-lg border border-white/10 bg-black/20 p-3 text-sm text-zinc-300">
+              {googleCalendarFeedback || googleCalendarStatus?.error || googleCalendarStatus?.connection?.last_error}
+            </p>
+          )}
+
+          <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+            <button
+              className="flex h-10 items-center justify-center gap-2 rounded-lg border border-white/10 px-3 text-sm text-zinc-200 transition hover:bg-white/[0.06] disabled:opacity-60"
+              disabled={googleCalendarLoading}
+              onClick={() => void refreshGoogleCalendarStatus()}
+              type="button"
+            >
+              {googleCalendarLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+              Atualizar status
+            </button>
+            {googleCalendarStatus?.connected ? (
+              <button
+                className="flex h-10 items-center justify-center gap-2 rounded-lg border border-red-400/20 bg-red-500/10 px-3 text-sm text-red-300 transition hover:bg-red-500/20 disabled:opacity-60"
+                disabled={googleCalendarLoading}
+                onClick={() => void disconnectGoogleCalendar()}
+                type="button"
+              >
+                <WifiOff className="h-4 w-4" />
+                Desconectar agenda
+              </button>
+            ) : (
+              <button
+                className="flex h-10 items-center justify-center gap-2 rounded-lg bg-[#8B5CF6] px-4 text-sm font-medium text-white transition hover:bg-[#7C3AED] disabled:opacity-60"
+                disabled={googleCalendarLoading || googleCalendarStatus?.migrated === false || googleCalendarStatus?.configured === false}
+                onClick={connectGoogleCalendar}
+                type="button"
+              >
+                <ExternalLink className="h-4 w-4" />
+                Conectar Google Calendar
+              </button>
+            )}
+            <button
+              className="flex h-10 items-center justify-center gap-2 rounded-lg border border-white/10 px-3 text-sm text-zinc-200 transition hover:bg-white/[0.06]"
+              onClick={() => openGoogleCalendarEvent({
+                title: "Tarefa OrigoCRM",
+                startsAt: addDays(1),
+                details: "Teste de evento pre-preenchido pelo OrigoCRM",
+              })}
+              type="button"
+            >
+              <CalendarClock className="h-4 w-4" />
+              Testar link manual
+            </button>
+          </div>
         </div>
       </section>
       )}
