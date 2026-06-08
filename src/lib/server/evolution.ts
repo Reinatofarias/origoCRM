@@ -46,7 +46,7 @@ export function getEvolutionInstanceEndpoint(path: string) {
 
 export async function callEvolutionApi<T>(
   endpoint: string,
-  data: Record<string, unknown>,
+  data: Record<string, unknown> | null,
   method: "GET" | "POST" | "PUT" | "DELETE" = "POST",
 ): Promise<EvolutionApiResponse<T>> {
   const config = getEvolutionServerConfig();
@@ -62,13 +62,14 @@ export async function callEvolutionApi<T>(
   const timeout = setTimeout(() => controller.abort(), 15000);
 
   try {
+    const canSendBody = method !== "GET";
     const response = await fetch(`${config.apiUrl}${endpoint}`, {
       method,
       headers: {
         "Content-Type": "application/json",
         apikey: config.apiKey,
       },
-      body: data ? JSON.stringify(data) : undefined,
+      body: canSendBody && data ? JSON.stringify(data) : undefined,
       cache: "no-store",
       signal: controller.signal,
     });
