@@ -1,7 +1,11 @@
 import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
 
-import { getAuthenticatedOrganizationContext } from "@/lib/server/auth";
+import {
+  getAuthenticatedOrganizationContext,
+  requireServerPermission,
+  requireServerPlanFeature,
+} from "@/lib/server/auth";
 import {
   encryptGoogleToken,
   exchangeGoogleAuthorizationCode,
@@ -30,14 +34,22 @@ export async function GET(request: NextRequest) {
   if ("error" in auth) {
     return NextResponse.redirect(new URL("/settings?googleCalendar=auth_error", appUrl));
   }
+  const permissionError = requireServerPermission(auth, "task:manage");
+  if (permissionError) {
+    return NextResponse.redirect(new URL("/settings?googleCalendar=forbidden", appUrl));
+  }
+  const planError = await requireServerPlanFeature(auth, "googleCalendar");
+  if (planError) {
+    return NextResponse.redirect(new URL("/settings?googleCalendar=plan_required", appUrl));
+  }
 
   try {
     const config = getGoogleCalendarConfig();
-    if (!config) throw new Error("Google Calendar nao configurado");
+    if (!config) throw new Error("Google Calendar não configurado");
 
     const token = await exchangeGoogleAuthorizationCode(code);
     if (!token.refresh_token) {
-      throw new Error("Google nao retornou refresh token. Revogue o acesso e conecte novamente.");
+      throw new Error("Google não retornou refresh token. Revogue o acesso e conecte novamente.");
     }
 
     const expiresAt = token.expires_in

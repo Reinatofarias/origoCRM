@@ -14,8 +14,8 @@ export function PricingSection() {
     <>
       <div className="mt-8 flex flex-col gap-3 rounded-2xl border border-white/10 bg-white/[0.035] p-3 md:flex-row md:items-center md:justify-between">
         <div className="px-2">
-          <div className="text-sm font-semibold text-white">Escolha a forma de contratacao</div>
-          <p className="mt-1 text-sm text-zinc-500">Os valores abaixo sao por usuario, calculados por mes dentro do periodo escolhido.</p>
+          <div className="text-sm font-semibold text-white">Escolha a forma de contratação</div>
+          <p className="mt-1 text-sm text-zinc-500">Os valores abaixo sao por usuário, calculados por mes dentro do período escolhido.</p>
         </div>
         <div className="grid gap-2 rounded-xl border border-white/10 bg-black/25 p-1 sm:grid-cols-3">
           {billingPeriods.map((item) => (
@@ -31,7 +31,7 @@ export function PricingSection() {
         </div>
       </div>
 
-      <div className="relative mt-10 grid gap-4 lg:grid-cols-4">
+      <div className="relative mt-10 grid gap-4 lg:grid-cols-3">
         {pricingPlans.map((plan) => {
           const monthlyPrice = plan.prices[period];
           const total = monthlyPrice * billing.months;
@@ -52,11 +52,11 @@ export function PricingSection() {
               </div>
               <div className="mt-5">
                 <span className="text-3xl font-semibold">{formatCurrency(monthlyPrice)}</span>
-                <span className="text-sm text-zinc-500"> / usuario / mes</span>
+                <span className="text-sm text-zinc-500"> / usuário / mês</span>
               </div>
               <div className="mt-3 rounded-lg border border-white/10 bg-black/25 px-3 py-2 text-xs leading-5 text-zinc-400">
-                {billing.note}. Total do periodo: <span className="font-semibold text-zinc-200">{formatCurrency(total)}</span>
-                {savings > 0 && <span className="block text-[#9AF0B8]">Economia de {formatCurrency(savings)} por usuario.</span>}
+                {billing.note}. Total do período: <span className="font-semibold text-zinc-200">{formatCurrency(total)}</span>
+                {savings > 0 && <span className="block text-[#9AF0B8]">Economia de {formatCurrency(savings)} por usuário.</span>}
               </div>
               <ul className="mt-5 space-y-2">
                 {plan.features.map((feature) => (

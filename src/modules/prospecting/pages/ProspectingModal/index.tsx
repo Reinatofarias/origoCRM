@@ -30,12 +30,12 @@ export function ProspectingModal({
   existingLeadPhones: Set<string>;
   onAddLead: (input: LeadInput) => Promise<void> | void;
   onClose: () => void;
-  onSendProspectingMessage: (phoneNumber: string, message: string) => Promise<{ success: boolean; error?: string }>;
-  onCampaignCompleted?: (input: ProspectingCampaignInput) => Promise<void> | void;
+  onSendProspectingMessage: (phoneNumber: string, message: string) => Promise<{ success: boolean; error: string }>;
+  onCampaignCompleted: (input: ProspectingCampaignInput) => Promise<void> | void;
   onValidateWhatsAppNumbers: (phoneNumbers: string[]) => Promise<{
     success: boolean;
-    numbers?: Array<{ number: string; exists: boolean; jid?: string }>;
-    error?: string;
+    numbers: Array<{ number: string; exists: boolean; jid: string }>;
+    error: string;
   }>;
   templates: MessageTemplate[];
 }) {
@@ -76,19 +76,19 @@ function ProspectingModalContent({
   existingLeadPhones: Set<string>;
   onAddLead: (input: LeadInput) => Promise<void> | void;
   onClose: () => void;
-  onSendProspectingMessage: (phoneNumber: string, message: string) => Promise<{ success: boolean; error?: string }>;
-  onCampaignCompleted?: (input: ProspectingCampaignInput) => Promise<void> | void;
+  onSendProspectingMessage: (phoneNumber: string, message: string) => Promise<{ success: boolean; error: string }>;
+  onCampaignCompleted: (input: ProspectingCampaignInput) => Promise<void> | void;
   onValidateWhatsAppNumbers: (phoneNumbers: string[]) => Promise<{
     success: boolean;
-    numbers?: Array<{ number: string; exists: boolean; jid?: string }>;
-    error?: string;
+    numbers: Array<{ number: string; exists: boolean; jid: string }>;
+    error: string;
   }>;
   templates: MessageTemplate[];
 }) {
   const prospecting = useProspecting();
   const [selectedBusinessIds, setSelectedBusinessIds] = useState<Set<string>>(() => new Set());
   const [dispatchStates, setDispatchStates] = useState<Record<string, ProspectingDispatchState>>({});
-  const [selectedTemplateId, setSelectedTemplateId] = useState(() => templates[0]?.id ?? "");
+  const [selectedTemplateId, setSelectedTemplateId] = useState(() => templates[0].id ?? "");
   const [intervalSeconds, setIntervalSeconds] = useState(12);
   const [isSendingCampaign, setIsSendingCampaign] = useState(false);
   const [isValidatingWhatsApp, setIsValidatingWhatsApp] = useState(false);
@@ -101,12 +101,12 @@ function ProspectingModalContent({
     () => prospecting.businesses.filter((business) => selectedBusinessIds.has(business.id)),
     [prospecting.businesses, selectedBusinessIds],
   );
-  const selectedTemplateIdForUi = selectedTemplateId || templates[0]?.id || "";
+  const selectedTemplateIdForUi = selectedTemplateId || templates[0].id || "";
   const selectedTemplate = templates.find((template) => template.id === selectedTemplateIdForUi) ?? null;
   const sendableBusinesses = selectedBusinesses.filter((business) => {
     const phone = normalizeProspectingWhatsAppPhone(business.phone);
-    const state = dispatchStates[business.id]?.status;
-    const validation = validationStates[business.id]?.status;
+    const state = dispatchStates[business.id]?.status ?? "new";
+    const validation = validationStates[business.id]?.status ?? "unknown";
     return (
       Boolean(phone) &&
       validation === "valid" &&
@@ -186,7 +186,7 @@ function ProspectingModalContent({
   function toggleBusiness(business: ProspectBusiness) {
     const phone = normalizeProspectingWhatsAppPhone(business.phone);
     if (!phone || existingLeadPhones.has(phone) || prospecting.addedLeadIds.has(business.id)) return;
-    if (isFinishedDispatch(dispatchStates[business.id]?.status)) return;
+    if (isFinishedDispatch(dispatchStates[business.id]?.status ?? "new")) return;
     setSelectedBusinessIds((current) => {
       const next = new Set(current);
       if (next.has(business.id)) next.delete(business.id);
@@ -322,7 +322,7 @@ function ProspectingModalContent({
       setDispatchStates((current) => ({
         ...current,
         [business.id]: result.success
-          ? { status: "sent", sentAt: sentAt ?? new Date().toISOString() }
+          ? { status: "sent", sentAt: sentAt ? new Date().toISOString() : undefined }
           : { status: "failed", error: result.error ?? "Falha ao enviar" },
       }));
 
@@ -336,11 +336,12 @@ function ProspectingModalContent({
     if (onCampaignCompleted) {
       const sent = campaignContacts.filter((contact) => contact.dispatch_status === "sent").length;
       const failed = campaignContacts.filter((contact) => contact.dispatch_status === "failed").length;
+      const searchInput = lastSearchInput;
       await onCampaignCompleted({
-        name: `Prospeccao ${lastSearchInput?.niche ?? "Google"} - ${new Date().toLocaleDateString("pt-BR")}`,
-        niche: lastSearchInput?.niche ?? "",
-        state: lastSearchInput?.state ?? "",
-        city: lastSearchInput?.city ?? "",
+        name: `Prospeccao ${searchInput?.niche ?? "Google"} - ${new Date().toLocaleDateString("pt-BR")}`,
+        niche: searchInput?.niche ?? "",
+        state: searchInput?.state ?? "",
+        city: searchInput?.city ?? "",
         template_id: selectedTemplate.id,
         total_contacts: campaignContacts.length,
         whatsapp_validated_count: campaignBusinesses.filter((business) => validationStates[business.id]?.status === "valid").length,
@@ -475,7 +476,7 @@ function renderProspectingTemplate(template: string, business: ProspectBusiness)
     .replaceAll("{{estado}}", business.state ?? "");
 }
 
-function isFinishedDispatch(status?: ProspectingDispatchState["status"]) {
+function isFinishedDispatch(status: ProspectingDispatchState["status"]) {
   return status === "sent" || status === "lead_added" || status === "ignored";
 }
 
@@ -496,15 +497,16 @@ function canEnterCampaignBatch({
 }) {
   const phone = normalizeProspectingWhatsAppPhone(business.phone);
   if (!phone || existingLeadPhones.has(phone) || isAdded) return false;
-  if (isFinishedDispatch(dispatchState?.status)) return false;
-  if (validationState?.status === "invalid" || validationState?.status === "error" || validationState?.status === "checking") return false;
-  if (onlyWhatsApp) return validationState?.status === "valid";
+  if (isFinishedDispatch(dispatchState?.status ?? "new")) return false;
+  const status = validationState?.status ?? "unknown";
+  if (status === "invalid" || status === "error" || status === "checking") return false;
+  if (onlyWhatsApp) return status === "valid";
   return true;
 }
 
 function validWhatsAppCountAfterCheck(
   businesses: ProspectBusiness[],
-  checked: Map<string, { number: string; exists: boolean; jid?: string }>,
+  checked: Map<string, { number: string; exists: boolean; jid: string }>,
 ) {
   return businesses.filter((business) => checked.get(normalizeProspectingWhatsAppPhone(business.phone))?.exists).length;
 }

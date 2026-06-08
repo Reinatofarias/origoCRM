@@ -6,6 +6,7 @@ import {
   updateStoredWhatsAppMessageStatus,
   validateEvolutionWebhook,
 } from "@/lib/server/evolution";
+import { isPayloadTooLarge } from "@/lib/server/security";
 import type {
   EvolutionIncomingMessage,
   EvolutionMessageUpdate,
@@ -15,6 +16,14 @@ import type {
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   try {
+    if (isPayloadTooLarge(request, 1_000_000)) {
+      await logWhatsAppEvent("webhook.payload_too_large", {
+        contentLength: request.headers.get("content-length"),
+        timestamp: new Date().toISOString(),
+      }, null, null);
+      return NextResponse.json({ status: "received" });
+    }
+
     const payload = (await request.json()) as EvolutionWebhookPayload;
     const signature =
       request.nextUrl.searchParams.get("token") ??
@@ -27,7 +36,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       await logWhatsAppEvent("webhook.invalid_signature", {
         event: payload.event,
         timestamp: new Date().toISOString(),
-      });
+      }, null, null);
       return NextResponse.json({ status: "received" });
     }
 
@@ -37,7 +46,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     await logWhatsAppEvent("webhook.error", {
       error: error instanceof Error ? error.message : "Unknown error",
       timestamp: new Date().toISOString(),
-    });
+    }, null, null);
 
     return NextResponse.json({ status: "error", message: "Processing error" });
   }
@@ -63,10 +72,10 @@ async function handleWebhookEvent(
     case "presence.update":
       break;
     default:
-      await logWhatsAppEvent("webhook.unhandled_event", { eventType, normalizedEvent, data });
+      await logWhatsAppEvent("webhook.unhandled_event", { eventType, normalizedEvent, data }, null, null);
   }
 
-  await logWhatsAppEvent(normalizedEvent, { data });
+  await logWhatsAppEvent(normalizedEvent, { data }, null, null);
 }
 
 function normalizeWebhookEvent(eventType: string) {
@@ -85,7 +94,7 @@ async function handleMessageUpdate(data: unknown): Promise<void> {
   for (const update of extractWebhookItems<EvolutionMessageUpdate>(data)) {
     const messageId = getMessageUpdateId(update);
     if (!messageId) {
-      await logWhatsAppEvent("messages.update.ignored", { update, reason: "missing_message_id" });
+      await logWhatsAppEvent("messages.update.ignored", { update, reason: "missing_message_id" }, null, null);
       continue;
     }
 
@@ -116,7 +125,7 @@ function normalizeMessageUpdateStatus(status: unknown): "sent" | "delivered" | "
 function extractWebhookItems<T>(data: unknown): T[] {
   if (Array.isArray(data)) return data as T[];
   if (!data || typeof data !== "object") return [];
-  if ("messages" in data && Array.isArray((data as { messages?: unknown }).messages)) {
+  if ("messages" in data && Array.isArray((data as { messages: unknown }).messages)) {
     return (data as { messages: T[] }).messages;
   }
   const record = data as Record<string, unknown>;

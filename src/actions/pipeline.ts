@@ -2,14 +2,12 @@
 
 import { revalidatePath } from "next/cache";
 
-import { getAuthenticatedOrganizationContext, withOrganizationId } from "@/lib/server/auth";
+import { getAuthenticatedOrganizationContext, requireServerPermission, withOrganizationId } from "@/lib/server/auth";
 import type { LeadStatus } from "@/lib/types";
 
-type ActionResult<T = unknown> = {
-  success: boolean;
-  data?: T;
-  error?: string;
-};
+type ActionResult<T = unknown> =
+  | { success: true; data?: T }
+  | { success: false; error: string };
 
 function formatLeadDatabaseError(message: string) {
   if (message.includes("leads_status_check")) {
@@ -23,9 +21,11 @@ function formatLeadDatabaseError(message: string) {
   return message;
 }
 
-export async function moveLeadStage(id: string, status: LeadStatus, outcomeReason?: string | null) {
+export async function moveLeadStage(id: string, status: LeadStatus, outcomeReason: string | null) {
   const auth = await getAuthenticatedOrganizationContext();
-  if ("error" in auth) return { success: false, error: auth.error } satisfies ActionResult;
+  if ("error" in auth) return { success: false, error: auth.error ?? "Não autenticado" } satisfies ActionResult;
+  const permissionError = requireServerPermission(auth, "pipeline:update");
+  if (permissionError) return { success: false, error: permissionError } satisfies ActionResult;
 
   const reason = outcomeReason?.trim() ?? "";
 

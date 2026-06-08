@@ -11,7 +11,7 @@ import {
   updateStoredWhatsAppMessageStatus,
   upsertWhatsAppConversation,
 } from "@/lib/server/evolution";
-import { getAuthenticatedOrganizationContext, withOrganizationId } from "@/lib/server/auth";
+import { getAuthenticatedOrganizationContext, requireServerPermission, requireServerPlanFeature, withOrganizationId } from "@/lib/server/auth";
 import type {
   EvolutionSendTextRequest,
   EvolutionSendTextResponse,
@@ -24,29 +24,33 @@ import type {
 import { normalizePhone } from "@/lib/utils";
 
 type EvolutionSendTextRawResponse = EvolutionSendTextResponse & {
-  key?: { id?: string };
-  message?: { key?: { id?: string } };
-  messageId?: string;
+  key: { id: string };
+  message: { key: { id: string } };
+  messageId: string;
 };
 
 export async function sendWhatsAppMessage(
   leadId: string,
   phoneNumber: string,
   message: string,
-  nextFollowupAt?: string,
+  nextFollowupAt: string,
 ): Promise<{
   success: boolean;
   messageId?: string;
   error?: string;
 }> {
   const auth = await getAuthenticatedOrganizationContext();
-  if ("error" in auth) return { success: false, error: auth.error };
+  if ("error" in auth) return { success: false, error: auth.error ?? "Não autenticado" };
+  const permissionError = requireServerPermission(auth, "conversation:send");
+  if (permissionError) return { success: false, error: permissionError };
+  const planError = await requireServerPlanFeature(auth, "conversations");
+  if (planError) return { success: false, error: planError };
 
-  if (!phoneNumber?.trim()) {
+  if (!phoneNumber.trim()) {
     return { success: false, error: "Numero de telefone invalido" };
   }
 
-  if (!message?.trim()) {
+  if (!message.trim()) {
     return { success: false, error: "Mensagem vazia" };
   }
 
@@ -58,12 +62,14 @@ export async function sendWhatsAppMessage(
   const endpoint = getEvolutionInstanceEndpoint("/message/sendText");
 
   if (!endpoint) {
-    return { success: false, error: "Instancia da Evolution nao configurada" };
+    return { success: false, error: "Instância da Evolution não configurada" };
   }
 
   const response = await callEvolutionApi<EvolutionSendTextRawResponse>(endpoint, {
     number: normalizedPhone,
     text: message,
+    delay: 0,
+    linkPreview: false,
   } satisfies EvolutionSendTextRequest);
 
   if (response.error || response.status >= 400 || !response.data) {
@@ -76,8 +82,8 @@ export async function sendWhatsAppMessage(
   const messageId =
     response.data.id ??
     response.data.messageId ??
-    response.data.key?.id ??
-    response.data.message?.key?.id ??
+    response.data.key.id ??
+    response.data.message.key.id ??
     crypto.randomUUID();
   const status = normalizeEvolutionStatus(response.data.status);
   const now = new Date().toISOString();
@@ -124,10 +130,10 @@ export async function sendWhatsAppMessage(
 export async function sendWhatsAppConversationMessage(
   phoneNumber: string,
   message: string,
-  leadId?: string | null,
-  options?: {
-    nextFollowupAt?: string | null;
-    moveStatus?: LeadStatus | null;
+  leadId: string | null,
+  options: {
+    nextFollowupAt: string | null;
+    moveStatus: LeadStatus | null;
   },
 ): Promise<{
   success: boolean;
@@ -136,21 +142,27 @@ export async function sendWhatsAppConversationMessage(
   error?: string;
 }> {
   const auth = await getAuthenticatedOrganizationContext();
-  if ("error" in auth) return { success: false, error: auth.error };
+  if ("error" in auth) return { success: false, error: auth.error ?? "Não autenticado" };
+  const permissionError = requireServerPermission(auth, "conversation:send");
+  if (permissionError) return { success: false, error: permissionError };
+  const planError = await requireServerPlanFeature(auth, "conversations");
+  if (planError) return { success: false, error: planError };
 
-  if (!phoneNumber?.trim()) return { success: false, error: "Numero de telefone invalido" };
-  if (!message?.trim()) return { success: false, error: "Mensagem vazia" };
+  if (!phoneNumber.trim()) return { success: false, error: "Numero de telefone invalido" };
+  if (!message.trim()) return { success: false, error: "Mensagem vazia" };
   if (message.length > 1024) {
     return { success: false, error: "Mensagem muito longa (max 1024 caracteres)" };
   }
 
   const normalizedPhone = normalizePhone(phoneNumber);
   const endpoint = getEvolutionInstanceEndpoint("/message/sendText");
-  if (!endpoint) return { success: false, error: "Instancia da Evolution nao configurada" };
+  if (!endpoint) return { success: false, error: "Instância da Evolution não configurada" };
 
   const response = await callEvolutionApi<EvolutionSendTextRawResponse>(endpoint, {
     number: normalizedPhone,
     text: message,
+    delay: 0,
+    linkPreview: false,
   } satisfies EvolutionSendTextRequest);
 
   if (response.error || response.status >= 400 || !response.data) {
@@ -170,17 +182,17 @@ export async function sendWhatsAppConversationMessage(
 
   if (leadId) {
     const leadUpdate: Record<string, unknown> = {
-      status: options?.moveStatus || "contatado",
+      status: options.moveStatus || "contatado",
       last_contact_at: now,
       updated_at: now,
     };
 
-    if (options?.nextFollowupAt) leadUpdate.next_followup_at = options.nextFollowupAt;
+    if (options.nextFollowupAt) leadUpdate.next_followup_at = options.nextFollowupAt;
 
     let leadQuery = auth.supabase
       .from("leads")
       .update(leadUpdate)
-      .eq("id", leadId)
+      .eq("id", leadId);
     leadQuery = auth.organizationId
       ? leadQuery.eq("organization_id", auth.organizationId)
       : leadQuery.eq("user_id", auth.user.id);
@@ -228,6 +240,7 @@ export async function sendWhatsAppConversationMessage(
     leadId: leadId ?? null,
     phoneNumber: normalizedPhone,
     remoteJid: `${normalizedPhone}@s.whatsapp.net`,
+    contactName: updatedLead?.name ?? null,
     contactAvatarUrl: avatarUrl,
     lastMessage: message,
     direction: "outbound",
@@ -239,22 +252,26 @@ export async function sendWhatsAppConversationMessage(
 }
 
 type WhatsAppNumberCheckResponse =
-  | Array<{ number?: string; exists?: boolean; jid?: string }>
-  | { numbers?: Array<{ number?: string; exists?: boolean; jid?: string }> };
+  | Array<{ number: string; exists: boolean; jid: string }>
+  | { numbers: Array<{ number: string; exists: boolean; jid: string }> };
 
 export async function checkWhatsAppNumbers(phoneNumbers: string[]): Promise<{
   success: boolean;
-  numbers?: Array<{ number: string; exists: boolean; jid?: string }>;
+  numbers?: Array<{ number: string; exists: boolean; jid: string }>;
   error?: string;
 }> {
   const auth = await getAuthenticatedOrganizationContext();
-  if ("error" in auth) return { success: false, error: auth.error };
+  if ("error" in auth) return { success: false, error: auth.error ?? "Não autenticado" };
+  const permissionError = requireServerPermission(auth, "prospecting:use");
+  if (permissionError) return { success: false, error: permissionError };
+  const planError = await requireServerPlanFeature(auth, "prospecting");
+  if (planError) return { success: false, error: planError };
 
   const numbers = Array.from(new Set(phoneNumbers.map(normalizePhone).filter(Boolean))).slice(0, 30);
   if (numbers.length === 0) return { success: false, error: "Nenhum numero para validar" };
 
   const endpoint = getEvolutionInstanceEndpoint("/chat/whatsappNumbers");
-  if (!endpoint) return { success: false, error: "Instancia da Evolution nao configurada" };
+  if (!endpoint) return { success: false, error: "Instância da Evolution não configurada" };
 
   const response = await callEvolutionApi<WhatsAppNumberCheckResponse>(endpoint, { numbers }, "POST");
 
@@ -275,21 +292,25 @@ export async function checkWhatsAppNumbers(phoneNumbers: string[]): Promise<{
 
 export async function saveWhatsAppConversationAsLead(input: {
   phoneNumber: string;
-  leadId?: string | null;
-  name?: string | null;
-  company?: string;
-  source?: string;
-  status?: LeadStatus;
-  temperature?: Lead["temperature"] | null;
-  ownerName?: string | null;
-  nextFollowupAt?: string | null;
+  leadId: string | null;
+  name: string | null;
+  company: string;
+  source: string;
+  status: LeadStatus;
+  temperature: Lead["temperature"] | null;
+  ownerName: string | null;
+  nextFollowupAt: string | null;
 }): Promise<{
   success: boolean;
   lead?: Lead;
   error?: string;
 }> {
   const auth = await getAuthenticatedOrganizationContext();
-  if ("error" in auth) return { success: false, error: auth.error };
+  if ("error" in auth) return { success: false, error: auth.error ?? "Não autenticado" };
+  const permissionError = requireServerPermission(auth, input.leadId ? "lead:update" : "lead:create");
+  if (permissionError) return { success: false, error: permissionError };
+  const planError = await requireServerPlanFeature(auth, "conversations");
+  if (planError) return { success: false, error: planError };
 
   const phone = normalizePhone(input.phoneNumber);
   if (!phone) return { success: false, error: "Numero de telefone invalido" };
@@ -362,7 +383,7 @@ export async function saveWhatsAppConversationAsLead(input: {
       .single()).data as Lead | null;
   }
 
-  if (!lead) return { success: false, error: "Nao foi possivel criar lead" };
+  if (!lead) return { success: false, error: "Não foi possível criar lead" };
 
   let messageUpdateQuery = auth.supabase
     .from("whatsapp_messages")
@@ -381,7 +402,11 @@ export async function saveWhatsAppConversationAsLead(input: {
     organizationId: auth.organizationId,
     leadId: lead.id,
     phoneNumber: phone,
+    remoteJid: `${phone}@s.whatsapp.net`,
     contactName: lead.name,
+    contactAvatarUrl: null,
+    lastMessage: null,
+    direction: null,
     status: "converted",
   });
 
@@ -397,7 +422,11 @@ export async function updateWhatsAppConversationStatus(
   error?: string;
 }> {
   const auth = await getAuthenticatedOrganizationContext();
-  if ("error" in auth) return { success: false, error: auth.error };
+  if ("error" in auth) return { success: false, error: auth.error ?? "Não autenticado" };
+  const permissionError = requireServerPermission(auth, "conversation:update");
+  if (permissionError) return { success: false, error: permissionError };
+  const planError = await requireServerPlanFeature(auth, "conversations");
+  if (planError) return { success: false, error: planError };
 
   const phone = normalizePhone(phoneNumber);
   if (!phone) return { success: false, error: "Numero de telefone invalido" };
@@ -414,9 +443,9 @@ export async function updateWhatsAppConversationStatus(
     }, auth.organizationId), { onConflict: "user_id,phone_number" });
 
   if (error) {
-    const message = error.message.includes("whatsapp_conversations_status_check")
-      ? "Aplique supabase/conversations_operational_migration.sql para liberar o status Resolvida."
-      : error.message;
+      const message = error.message.includes("whatsapp_conversations_status_check")
+        ? "Aplique supabase/conversations_operational_migration.sql para liberar o status Resolvida."
+        : error.message;
     return { success: false, error: message };
   }
 
@@ -441,7 +470,11 @@ export async function getWhatsAppHistory(leadId: string): Promise<{
   error?: string;
 }> {
   const auth = await getAuthenticatedOrganizationContext();
-  if ("error" in auth) return { success: false, error: auth.error };
+  if ("error" in auth) return { success: false, error: auth.error ?? "Não autenticado" };
+  const permissionError = requireServerPermission(auth, "conversation:update");
+  if (permissionError) return { success: false, error: permissionError };
+  const planError = await requireServerPlanFeature(auth, "conversations");
+  if (planError) return { success: false, error: planError };
 
   let historyQuery = auth.supabase
     .from("whatsapp_messages")
@@ -467,7 +500,7 @@ export async function logWhatsAppEvent(
   error?: string;
 }> {
   try {
-    await persistWhatsAppEvent(eventType, payload);
+    await persistWhatsAppEvent(eventType, payload, null, null);
     return { success: true };
   } catch (error) {
     return {

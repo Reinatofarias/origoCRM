@@ -2,11 +2,13 @@
 
 import { revalidatePath } from "next/cache";
 
-import { getAuthenticatedOrganizationContext, withOrganizationId } from "@/lib/server/auth";
+import { getAuthenticatedOrganizationContext, requireServerPermission, withOrganizationId } from "@/lib/server/auth";
 
 export async function createInteraction(leadId: string, note: string) {
   const auth = await getAuthenticatedOrganizationContext();
   if ("error" in auth) return { success: false, error: auth.error };
+  const permissionError = requireServerPermission(auth, "lead:update");
+  if (permissionError) return { success: false, error: permissionError };
 
   const { data, error } = await auth.supabase
     .from("interactions")
@@ -30,6 +32,8 @@ export async function createInteraction(leadId: string, note: string) {
 export async function deleteInteraction(interactionId: string) {
   const auth = await getAuthenticatedOrganizationContext();
   if ("error" in auth) return { success: false, error: auth.error };
+  const permissionError = requireServerPermission(auth, "lead:update");
+  if (permissionError) return { success: false, error: permissionError };
 
   let query = auth.supabase
     .from("interactions")

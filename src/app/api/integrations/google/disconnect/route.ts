@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
 
-import { getAuthenticatedOrganizationContext } from "@/lib/server/auth";
+import { getAuthenticatedOrganizationContext, requireServerPermission } from "@/lib/server/auth";
 import {
   decryptGoogleToken,
   revokeGoogleRefreshToken,
 } from "@/lib/server/google-calendar";
 
-function isMissingGoogleTable(message?: string | null) {
+function isMissingGoogleTable(message: string | null) {
   if (!message) return false;
   const normalized = message.toLowerCase();
   return normalized.includes("google_calendar_connections") || normalized.includes("schema cache") || normalized.includes("relation");
@@ -15,6 +15,8 @@ function isMissingGoogleTable(message?: string | null) {
 export async function DELETE() {
   const auth = await getAuthenticatedOrganizationContext();
   if ("error" in auth) return NextResponse.json({ error: auth.error }, { status: 401 });
+  const permissionError = requireServerPermission(auth, "task:manage");
+  if (permissionError) return NextResponse.json({ error: permissionError }, { status: 403 });
 
   let selectQuery = auth.supabase
     .from("google_calendar_connections")
@@ -33,7 +35,7 @@ export async function DELETE() {
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   if (!data) return NextResponse.json({ disconnected: true });
 
-  const refreshToken = (data as { refresh_token_encrypted?: string | null }).refresh_token_encrypted;
+  const refreshToken = (data as { refresh_token_encrypted: string | null }).refresh_token_encrypted;
   if (refreshToken) await revokeGoogleRefreshToken(decryptGoogleToken(refreshToken)).catch(() => undefined);
 
   let updateQuery = auth.supabase

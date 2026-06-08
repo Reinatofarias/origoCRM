@@ -164,12 +164,12 @@ export function ProspectingMobile({
         />
         {isLoading && <ProspectingSkeleton />}
         {!isLoading && businesses
-          .filter((business) => !onlyWhatsApp || validationStates[business.id]?.status === "valid")
+          .filter((business) => !onlyWhatsApp || validationStates[business.id].status === "valid")
           .map((business) => {
           const normalizedPhone = normalizeProspectingWhatsAppPhone(business.phone);
           const unavailable = !normalizedPhone || existingLeadPhones.has(normalizedPhone) || addedLeadIds.has(business.id);
-          const dispatchStatus = dispatchStates[business.id]?.status;
-          const validationStatus = validationStates[business.id]?.status ?? "unknown";
+          const dispatchStatus = dispatchStates[business.id].status;
+          const validationStatus = validationStates[business.id].status ?? "unknown";
           const isFinished = dispatchStatus === "sent" || dispatchStatus === "lead_added" || dispatchStatus === "ignored";
           const isSelected = selectedBusinessIds.has(business.id);
 

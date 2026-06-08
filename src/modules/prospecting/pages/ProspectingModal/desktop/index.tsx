@@ -203,7 +203,7 @@ function Metric({
   label,
   value,
 }: {
-  icon: ComponentType<{ className?: string }>;
+  icon: ComponentType<{ className: string }>;
   label: string;
   value: number;
 }) {

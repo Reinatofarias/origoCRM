@@ -7,7 +7,7 @@ export async function searchGoogleBusinesses(input: ProspectingSearchInput): Pro
     body: JSON.stringify(input),
   });
 
-  const payload = (await response.json()) as ProspectingSearchResult & { error?: string };
+  const payload = (await response.json()) as ProspectingSearchResult & { error: string };
 
   if (!response.ok) {
     throw new Error(payload.error ?? "Nao foi possivel buscar empresas");

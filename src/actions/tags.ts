@@ -2,20 +2,20 @@
 
 import { revalidatePath } from "next/cache";
 
-import { getAuthenticatedOrganizationContext, withOrganizationId } from "@/lib/server/auth";
+import { getAuthenticatedOrganizationContext, requireServerPermission, withOrganizationId } from "@/lib/server/auth";
 
-type ActionResult<T = unknown> = {
-  success: boolean;
-  data?: T;
-  error?: string;
-};
+type ActionResult<T = unknown> =
+  | { success: true; data?: T }
+  | { success: false; error: string };
 
-export async function createTag(input: { name: string; color?: string }) {
+export async function createTag(input: { name: string; color: string }) {
   const auth = await getAuthenticatedOrganizationContext();
-  if ("error" in auth) return { success: false, error: auth.error } satisfies ActionResult;
+  if ("error" in auth) return { success: false, error: auth.error ?? "Não autenticado" } satisfies ActionResult;
+  const permissionError = requireServerPermission(auth, "lead:update");
+  if (permissionError) return { success: false, error: permissionError } satisfies ActionResult;
 
   const name = input.name.trim();
-  if (!name) return { success: false, error: "Nome da tag obrigatorio" } satisfies ActionResult;
+  if (!name) return { success: false, error: "Nome da tag obrigatório" } satisfies ActionResult;
 
   const { data, error } = await auth.supabase
     .from("tags")
@@ -35,7 +35,9 @@ export async function createTag(input: { name: string; color?: string }) {
 
 export async function assignLeadTag(leadId: string, tagId: string) {
   const auth = await getAuthenticatedOrganizationContext();
-  if ("error" in auth) return { success: false, error: auth.error } satisfies ActionResult;
+  if ("error" in auth) return { success: false, error: auth.error ?? "Não autenticado" } satisfies ActionResult;
+  const permissionError = requireServerPermission(auth, "lead:update");
+  if (permissionError) return { success: false, error: permissionError } satisfies ActionResult;
 
   const { error } = await auth.supabase.from("lead_tags").upsert(
     withOrganizationId({
@@ -54,7 +56,9 @@ export async function assignLeadTag(leadId: string, tagId: string) {
 
 export async function removeLeadTag(leadId: string, tagId: string) {
   const auth = await getAuthenticatedOrganizationContext();
-  if ("error" in auth) return { success: false, error: auth.error } satisfies ActionResult;
+  if ("error" in auth) return { success: false, error: auth.error ?? "Não autenticado" } satisfies ActionResult;
+  const permissionError = requireServerPermission(auth, "lead:update");
+  if (permissionError) return { success: false, error: permissionError } satisfies ActionResult;
 
   let query = auth.supabase
     .from("lead_tags")

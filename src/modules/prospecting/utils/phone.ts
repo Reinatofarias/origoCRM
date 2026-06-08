@@ -1,6 +1,6 @@
 import { normalizePhone } from "@/lib/utils";
 
-export function normalizeProspectingWhatsAppPhone(phone?: string | null) {
+export function normalizeProspectingWhatsAppPhone(phone: string | null) {
   const normalized = normalizePhone(phone ?? "");
   if (!normalized) return "";
   if (normalized.startsWith("55")) return normalized;

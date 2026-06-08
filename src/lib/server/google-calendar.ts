@@ -17,31 +17,95 @@ type GoogleCalendarConfig = {
 
 type GoogleCalendarConnection = {
   id: string;
-  organization_id?: string | null;
+  organization_id: string | null;
   user_id: string;
-  account_email?: string | null;
-  calendar_id?: string | null;
-  refresh_token_encrypted?: string | null;
-  scopes?: string[] | null;
+  account_email: string | null;
+  calendar_id: string | null;
+  refresh_token_encrypted: string | null;
+  scopes: string[] | null;
   status: "connected" | "disconnected" | "error";
 };
 
 type GoogleTokenResponse = {
-  access_token?: string;
-  refresh_token?: string;
-  expires_in?: number;
-  scope?: string;
-  token_type?: string;
-  error?: string;
-  error_description?: string;
+  access_token: string;
+  refresh_token: string;
+  expires_in: number;
+  scope: string;
+  token_type: string;
+  error: string;
+  error_description: string;
 };
 
 type GoogleEventResponse = {
   id?: string;
+  summary?: string;
+  description?: string;
   htmlLink?: string;
-  error?: {
-    message?: string;
+  hangoutLink?: string;
+  location?: string;
+  start?: {
+    date?: string;
+    dateTime?: string;
+    timeZone?: string;
   };
+  end?: {
+    date?: string;
+    dateTime?: string;
+    timeZone?: string;
+  };
+  conferenceData?: {
+    entryPoints: Array<{
+      entryPointType: string;
+      uri: string;
+      label: string;
+    }>;
+  };
+  error?: {
+    message: string;
+  };
+};
+
+type GoogleEventListResponse = {
+  items: Array<{
+    id: string;
+    summary: string;
+    description: string;
+    htmlLink: string;
+    hangoutLink: string;
+    location: string;
+    conferenceData: {
+      entryPoints: Array<{
+        entryPointType: string;
+        uri: string;
+        label: string;
+      }>;
+    };
+    status: string;
+    start: {
+      date: string;
+      dateTime: string;
+      timeZone: string;
+    };
+    end: {
+      date: string;
+      dateTime: string;
+      timeZone: string;
+    };
+  }>;
+  error: {
+    message: string;
+  };
+};
+
+export type GoogleCalendarEventInput = {
+  title: string;
+  description: string | null;
+  startsAt: string;
+  endsAt: string | null;
+  durationMinutes: number | null;
+  attendees: string[];
+  createMeet: boolean;
+  location: string | null;
 };
 
 export function getGoogleCalendarConfig(): GoogleCalendarConfig | null {
@@ -71,12 +135,12 @@ export function buildGoogleCalendarAuthorizationUrl(state: string) {
     state,
   });
 
-  return `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`;
+  return `https://accounts.google.com/o/oauth2/v2/auth${params.toString()}`;
 }
 
 export async function exchangeGoogleAuthorizationCode(code: string) {
   const config = getGoogleCalendarConfig();
-  if (!config) throw new Error("Google Calendar nao configurado");
+  if (!config) throw new Error("Google Calendar não configurado");
 
   const response = await fetch("https://oauth2.googleapis.com/token", {
     method: "POST",
@@ -93,7 +157,7 @@ export async function exchangeGoogleAuthorizationCode(code: string) {
   const data = (await response.json()) as GoogleTokenResponse;
 
   if (!response.ok || data.error) {
-    throw new Error(data.error_description || data.error || "Nao foi possivel conectar o Google Calendar");
+    throw new Error(data.error_description || data.error || "Não foi possível conectar o Google Calendar");
   }
 
   return data;
@@ -101,7 +165,7 @@ export async function exchangeGoogleAuthorizationCode(code: string) {
 
 async function refreshGoogleAccessToken(refreshToken: string) {
   const config = getGoogleCalendarConfig();
-  if (!config) throw new Error("Google Calendar nao configurado");
+  if (!config) throw new Error("Google Calendar não configurado");
 
   const response = await fetch("https://oauth2.googleapis.com/token", {
     method: "POST",
@@ -117,7 +181,7 @@ async function refreshGoogleAccessToken(refreshToken: string) {
   const data = (await response.json()) as GoogleTokenResponse;
 
   if (!response.ok || data.error || !data.access_token) {
-    throw new Error(data.error_description || data.error || "Nao foi possivel atualizar acesso ao Google Calendar");
+    throw new Error(data.error_description || data.error || "Não foi possível atualizar acesso ao Google Calendar");
   }
 
   return data.access_token;
@@ -162,15 +226,15 @@ export function decryptGoogleToken(value: string) {
   ]).toString("utf8");
 }
 
-function getTaskCalendarTitle(task: Pick<Task, "title" | "type">, lead?: Pick<Lead, "name"> | null) {
-  if (task.title?.trim()) return task.title.trim();
+function getTaskCalendarTitle(task: Pick<Task, "title" | "type">, lead: Pick<Lead, "name"> | null) {
+  if (task.title.trim()) return task.title.trim();
   if (lead?.name) return `Follow-up com ${lead.name}`;
   return "Tarefa OrigoCRM";
 }
 
-function buildGoogleEvent(task: Pick<Task, "title" | "type" | "notes" | "due_at">, lead?: Lead | null) {
+function buildGoogleEvent(task: Pick<Task, "title" | "type" | "notes" | "due_at">, lead: Lead | null) {
   const start = new Date(task.due_at);
-  if (Number.isNaN(start.getTime())) throw new Error("Data da tarefa invalida");
+  if (Number.isNaN(start.getTime())) throw new Error("Data da tarefa inválida");
 
   const end = new Date(start);
   end.setMinutes(end.getMinutes() + 30);
@@ -200,10 +264,80 @@ function buildGoogleEvent(task: Pick<Task, "title" | "type" | "notes" | "due_at"
   };
 }
 
+function resolveGoogleEventTimes(input: Pick<GoogleCalendarEventInput, "startsAt" | "endsAt" | "durationMinutes">) {
+  const start = new Date(input.startsAt);
+  if (Number.isNaN(start.getTime())) throw new Error("Data inicial inválida");
+
+  const end = input.endsAt ? new Date(input.endsAt) : new Date(start);
+  if (!input.endsAt) end.setMinutes(end.getMinutes() + (input.durationMinutes || 30));
+  if (Number.isNaN(end.getTime()) || end.getTime() <= start.getTime()) {
+    end.setTime(start.getTime() + (input.durationMinutes || 30) * 60 * 1000);
+  }
+
+  return { start, end };
+}
+
+function sanitizeGoogleEventInput(input: GoogleCalendarEventInput) {
+  const title = input.title.trim();
+  if (!title) throw new Error("Título do evento obrigatório");
+
+  const { start, end } = resolveGoogleEventTimes(input);
+  const attendees = (input.attendees ?? [])
+    .map((email) => email.trim().toLowerCase())
+    .filter((email, index, all) => email.includes("@") && all.indexOf(email) === index)
+    .map((email) => ({ email }));
+
+  return {
+    summary: title,
+    description: input.description?.trim() || undefined,
+    location: input.location?.trim() || undefined,
+    attendees: attendees.length ? attendees : undefined,
+    start: {
+      dateTime: start.toISOString(),
+      timeZone: "America/Fortaleza",
+    },
+    end: {
+      dateTime: end.toISOString(),
+      timeZone: "America/Fortaleza",
+    },
+    reminders: {
+      useDefault: true,
+    },
+    ...(input.createMeet
+      ? {
+          conferenceData: {
+            createRequest: {
+              requestId: crypto.randomUUID(),
+              conferenceSolutionKey: { type: "hangoutsMeet" },
+            },
+          },
+        }
+      : {}),
+  };
+}
+
+function mapGoogleCalendarEvent(event: GoogleEventResponse) {
+  const meetLink =
+    event.hangoutLink ??
+    event.conferenceData?.entryPoints?.find((entry) => entry.entryPointType === "video")?.uri ??
+    null;
+
+  return {
+    id: event.id ?? crypto.randomUUID(),
+    title: event.summary || "Sem titulo",
+    description: event.description ?? null,
+    htmlLink: event.htmlLink ?? null,
+    hangoutLink: meetLink,
+    location: event.location ?? null,
+    startsAt: event.start?.dateTime ?? event.start?.date ?? null,
+    endsAt: event.end?.dateTime ?? event.end?.date ?? null,
+  };
+}
+
 async function getConnection(
   supabase: GenericSupabaseClient,
   userId: string,
-  organizationId?: string | null,
+  organizationId: string | null,
 ) {
   let query = supabase
     .from("google_calendar_connections")
@@ -239,9 +373,9 @@ async function updateTaskGoogleFields(
 export async function syncTaskToGoogleCalendar(input: {
   supabase: GenericSupabaseClient;
   userId: string;
-  organizationId?: string | null;
+  organizationId: string | null;
   task: Task;
-  lead?: Lead | null;
+  lead: Lead | null;
 }) {
   const config = getGoogleCalendarConfig();
   if (!config) return { synced: false, reason: "missing_config" };
@@ -270,7 +404,7 @@ export async function syncTaskToGoogleCalendar(input: {
     const data = (await response.json()) as GoogleEventResponse;
 
     if (!response.ok || data.error || !data.id) {
-      throw new Error(data.error?.message || "Nao foi possivel sincronizar evento no Google Calendar");
+      throw new Error(data?.error?.message || "Não foi possível sincronizar evento no Google Calendar");
     }
 
     await updateTaskGoogleFields(input.supabase, input.task.id, input.userId, input.organizationId, {
@@ -293,7 +427,7 @@ export async function syncTaskToGoogleCalendar(input: {
 export async function deleteTaskFromGoogleCalendar(input: {
   supabase: GenericSupabaseClient;
   userId: string;
-  organizationId?: string | null;
+  organizationId: string | null;
   task: Pick<Task, "id" | "google_event_id" | "google_calendar_id">;
 }) {
   const config = getGoogleCalendarConfig();
@@ -317,5 +451,232 @@ export async function deleteTaskFromGoogleCalendar(input: {
     return { deleted: response.ok || response.status === 410 || response.status === 404 };
   } catch {
     return { deleted: false };
+  }
+}
+
+export async function listGoogleCalendarEvents(input: {
+  supabase: GenericSupabaseClient;
+  userId: string;
+  organizationId: string | null;
+  maxResults: number;
+}) {
+  const config = getGoogleCalendarConfig();
+  if (!config) return { configured: false, connected: false, events: [] };
+
+  const connection = await getConnection(input.supabase, input.userId, input.organizationId);
+  if (!connection?.refresh_token_encrypted) {
+    return { configured: true, connected: false, events: [] };
+  }
+
+  try {
+    const accessToken = await refreshGoogleAccessToken(decryptGoogleToken(connection.refresh_token_encrypted));
+    const calendarId = connection.calendar_id || "primary";
+    const url = new URL(`https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events`);
+    url.searchParams.set("timeMin", new Date().toISOString());
+    url.searchParams.set("singleEvents", "true");
+    url.searchParams.set("orderBy", "startTime");
+    url.searchParams.set("maxResults", String(input.maxResults ?? 20));
+
+    const response = await fetch(url, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      cache: "no-store",
+    });
+    const data = (await response.json()) as GoogleEventListResponse;
+
+    if (!response.ok || data.error) {
+      throw new Error(data?.error?.message || "Não foi possível listar eventos do Google Calendar");
+    }
+
+    await input.supabase
+      .from("google_calendar_connections")
+      .update({ last_synced_at: new Date().toISOString(), last_error: null, updated_at: new Date().toISOString() })
+      .eq("id", connection.id);
+
+    return {
+      configured: true,
+      connected: true,
+      events: (data.items ?? [])
+        .filter((event) => event.status !== "cancelled")
+        .map(mapGoogleCalendarEvent),
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Erro ao ler Google Calendar";
+    try {
+      await input.supabase
+        .from("google_calendar_connections")
+        .update({ status: "error", last_error: message, updated_at: new Date().toISOString() })
+        .eq("id", connection.id);
+    } catch {
+      // Best-effort diagnostics; the UI still receives the original Calendar error.
+    }
+
+    return { configured: true, connected: true, events: [], error: message };
+  }
+}
+
+export async function createGoogleCalendarEvent(input: {
+  supabase: GenericSupabaseClient;
+  userId: string;
+  organizationId: string | null;
+  event: GoogleCalendarEventInput;
+}) {
+  const config = getGoogleCalendarConfig();
+  if (!config) return { configured: false, connected: false, event: null, error: "Google Calendar não configurado" };
+
+  const connection = await getConnection(input.supabase, input.userId, input.organizationId);
+  if (!connection?.refresh_token_encrypted) {
+    return { configured: true, connected: false, event: null, error: "Google Calendar não conectado" };
+  }
+
+  try {
+    const accessToken = await refreshGoogleAccessToken(decryptGoogleToken(connection.refresh_token_encrypted));
+    const calendarId = connection.calendar_id || "primary";
+    const url = new URL(`https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events`);
+    if (input.event.createMeet) url.searchParams.set("conferenceDataVersion", "1");
+    if (input.event.attendees.length) url.searchParams.set("sendUpdates", "all");
+
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(sanitizeGoogleEventInput(input.event)),
+      cache: "no-store",
+    });
+    const data = (await response.json()) as GoogleEventResponse;
+
+    if (!response.ok || data.error || !data.id) {
+      throw new Error(data?.error?.message || "Não foi possível criar evento no Google Calendar");
+    }
+
+    await input.supabase
+      .from("google_calendar_connections")
+      .update({ last_synced_at: new Date().toISOString(), last_error: null, updated_at: new Date().toISOString() })
+      .eq("id", connection.id);
+
+    return {
+      configured: true,
+      connected: true,
+      event: mapGoogleCalendarEvent(data),
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Erro ao criar evento no Google Calendar";
+    await input.supabase
+      .from("google_calendar_connections")
+      .update({ status: "error", last_error: message, updated_at: new Date().toISOString() })
+      .eq("id", connection.id);
+
+    return { configured: true, connected: true, event: null, error: message };
+  }
+}
+
+export async function updateGoogleCalendarEvent(input: {
+  supabase: GenericSupabaseClient;
+  userId: string;
+  organizationId: string | null;
+  eventId: string;
+  event: GoogleCalendarEventInput;
+}) {
+  const config = getGoogleCalendarConfig();
+  if (!config) return { configured: false, connected: false, event: null, error: "Google Calendar não configurado" };
+
+  const connection = await getConnection(input.supabase, input.userId, input.organizationId);
+  if (!connection?.refresh_token_encrypted) {
+    return { configured: true, connected: false, event: null, error: "Google Calendar não conectado" };
+  }
+
+  try {
+    const accessToken = await refreshGoogleAccessToken(decryptGoogleToken(connection.refresh_token_encrypted));
+    const calendarId = connection.calendar_id || "primary";
+    const url = new URL(
+      `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(input.eventId)}`,
+    );
+    if (input.event.createMeet) url.searchParams.set("conferenceDataVersion", "1");
+    if (input.event.attendees.length) url.searchParams.set("sendUpdates", "all");
+
+    const response = await fetch(url, {
+      method: "PATCH",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(sanitizeGoogleEventInput(input.event)),
+      cache: "no-store",
+    });
+    const data = (await response.json()) as GoogleEventResponse;
+
+    if (!response.ok || data.error || !data.id) {
+      throw new Error(data?.error?.message || "Não foi possível editar evento no Google Calendar");
+    }
+
+    await input.supabase
+      .from("google_calendar_connections")
+      .update({ last_synced_at: new Date().toISOString(), last_error: null, updated_at: new Date().toISOString() })
+      .eq("id", connection.id);
+
+    return {
+      configured: true,
+      connected: true,
+      event: mapGoogleCalendarEvent(data),
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Erro ao editar evento no Google Calendar";
+    await input.supabase
+      .from("google_calendar_connections")
+      .update({ status: "error", last_error: message, updated_at: new Date().toISOString() })
+      .eq("id", connection.id);
+
+    return { configured: true, connected: true, event: null, error: message };
+  }
+}
+
+export async function deleteGoogleCalendarEvent(input: {
+  supabase: GenericSupabaseClient;
+  userId: string;
+  organizationId: string | null;
+  eventId: string;
+}) {
+  const config = getGoogleCalendarConfig();
+  if (!config) return { configured: false, connected: false, deleted: false, error: "Google Calendar não configurado" };
+
+  const connection = await getConnection(input.supabase, input.userId, input.organizationId);
+  if (!connection?.refresh_token_encrypted) {
+    return { configured: true, connected: false, deleted: false, error: "Google Calendar não conectado" };
+  }
+
+  try {
+    const accessToken = await refreshGoogleAccessToken(decryptGoogleToken(connection.refresh_token_encrypted));
+    const calendarId = connection.calendar_id || "primary";
+    const url = new URL(
+      `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(input.eventId)}`,
+    );
+    url.searchParams.set("sendUpdates", "all");
+
+    const response = await fetch(url, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${accessToken}` },
+      cache: "no-store",
+    });
+
+    if (!response.ok && response.status !== 404 && response.status !== 410) {
+      const data = (await response.json().catch(() => null)) as GoogleEventResponse | null;
+      throw new Error(data?.error?.message || "Não foi possível excluir evento no Google Calendar");
+    }
+
+    await input.supabase
+      .from("google_calendar_connections")
+      .update({ last_synced_at: new Date().toISOString(), last_error: null, updated_at: new Date().toISOString() })
+      .eq("id", connection.id);
+
+    return { configured: true, connected: true, deleted: true };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Erro ao excluir evento no Google Calendar";
+    await input.supabase
+      .from("google_calendar_connections")
+      .update({ status: "error", last_error: message, updated_at: new Date().toISOString() })
+      .eq("id", connection.id);
+
+    return { configured: true, connected: true, deleted: false, error: message };
   }
 }

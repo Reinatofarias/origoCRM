@@ -11,6 +11,8 @@ export function makeInteraction(
 ): Interaction {
   return {
     id: newId("interaction"),
+    user_id: null,
+    organization_id: null,
     lead_id: leadId,
     note,
     message: note,
@@ -50,15 +52,15 @@ export function getNextLeadAfterSend(
 export function validateLead(input: LeadInput): { valid: boolean; errors: string[] } {
   const errors: string[] = [];
 
-  if (!input.name?.trim()) {
+  if (!input.name.trim()) {
     errors.push("Nome é obrigatório");
   }
 
-  if (!input.phone?.trim()) {
+  if (!input.phone.trim()) {
     errors.push("Telefone é obrigatório");
   }
 
-  if (!input.company?.trim()) {
+  if (!input.company.trim()) {
     errors.push("Empresa é obrigatória");
   }
 

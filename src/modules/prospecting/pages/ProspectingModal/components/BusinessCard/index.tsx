@@ -34,7 +34,7 @@ export function BusinessCard({
           className="h-full w-full object-cover opacity-75 transition duration-500 group-hover:scale-105 group-hover:opacity-95"
           fill
           sizes="(max-width: 768px) 100vw, 420px"
-          src={business.photoUrl ?? "https://images.unsplash.com/photo-1497366754035-f200968a6e72?auto=format&fit=crop&w=600&q=80"}
+          src={business.photoUrl ?? "https://images.unsplash.com/photo-1497366754035-f200968a6e72auto=format&fit=crop&w=600&q=80"}
           unoptimized
         />
         <div className="absolute inset-0 bg-gradient-to-t from-[#09090D] via-[#09090D]/20 to-transparent" />
@@ -52,7 +52,7 @@ export function BusinessCard({
             </div>
             <div className="flex shrink-0 items-center gap-1 rounded-full border border-amber-400/20 bg-amber-500/10 px-2 py-1 text-xs text-amber-100">
               <Star className="h-3.5 w-3.5 fill-amber-300 text-amber-300" />
-              {business.rating?.toFixed(1) ?? "-"}
+              {business.rating.toFixed(1) ?? "-"}
             </div>
           </div>
           <div className="mt-3 flex items-start gap-2 text-xs leading-5 text-zinc-500">

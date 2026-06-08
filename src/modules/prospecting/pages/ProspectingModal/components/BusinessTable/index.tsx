@@ -5,7 +5,7 @@ import { CheckCircle2, ExternalLink, MessageCircle, Phone, Plus, Star, XCircle }
 import type { ProspectBusiness, ProspectingDispatchState, ProspectingWhatsAppValidationState } from "../../../../types";
 import { normalizeProspectingWhatsAppPhone } from "../../../../utils/phone";
 
-function statusLabel(state?: ProspectingDispatchState, isAdded?: boolean, isDuplicate?: boolean, isSelected?: boolean) {
+function statusLabel(state: ProspectingDispatchState, isAdded: boolean, isDuplicate: boolean, isSelected: boolean) {
   if (isAdded) return { label: "Lead criado", className: "border-[#25D366]/25 bg-[#25D366]/10 text-[#9AF0B8]" };
   if (isDuplicate) return { label: "Ja esta no CRM", className: "border-amber-400/25 bg-amber-500/10 text-amber-100" };
   if (isSelected && !state) return { label: "No lote", className: "border-[#8B5CF6]/25 bg-[#8B5CF6]/10 text-[#DDD6FE]" };
@@ -83,7 +83,7 @@ export function BusinessTable({
           const dispatchStatus = dispatchStates[business.id]?.status;
           const isFinished = dispatchStatus === "sent" || dispatchStatus === "lead_added" || dispatchStatus === "ignored";
           const label = statusLabel(dispatchStates[business.id], isAdded, isDuplicate, isSelected);
-          const validation = validationStates[business.id]?.status ?? "unknown";
+          const validation = validationStates[business.id].status ?? "unknown";
 
           return (
             <div

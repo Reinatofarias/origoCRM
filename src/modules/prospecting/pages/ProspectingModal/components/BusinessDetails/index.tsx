@@ -12,7 +12,7 @@ export function BusinessDetails({
 }: {
   approach: string;
   business: ProspectBusiness | null;
-  onGenerateApproach?: (business: ProspectBusiness) => void;
+  onGenerateApproach: (business: ProspectBusiness) => void;
 }) {
   if (!business) {
     return (
@@ -67,7 +67,7 @@ function DetailRow({
   label,
   value,
 }: {
-  icon: ComponentType<{ className?: string }>;
+  icon: ComponentType<{ className: string }>;
   label: string;
   value: string;
 }) {

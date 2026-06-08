@@ -3,16 +3,14 @@
 import { revalidatePath } from "next/cache";
 
 import { deleteTaskFromGoogleCalendar, syncTaskToGoogleCalendar } from "@/lib/server/google-calendar";
-import { getAuthenticatedOrganizationContext, withOrganizationId } from "@/lib/server/auth";
+import { getAuthenticatedOrganizationContext, requireServerPermission, withOrganizationId } from "@/lib/server/auth";
 import type { Lead, Task, TaskInput } from "@/lib/types";
 
-type ActionResult<T = unknown> = {
-  success: boolean;
-  data?: T;
-  error?: string;
-};
+type ActionResult<T = unknown> =
+  | { success: true; data?: T }
+  | { success: false; error: string };
 
-async function getLeadForTask(auth: Awaited<ReturnType<typeof getAuthenticatedOrganizationContext>>, leadId?: string | null) {
+async function getLeadForTask(auth: Awaited<ReturnType<typeof getAuthenticatedOrganizationContext>>, leadId: string | null) {
   if ("error" in auth || !leadId) return null;
 
   let query = auth.supabase
@@ -28,10 +26,12 @@ async function getLeadForTask(auth: Awaited<ReturnType<typeof getAuthenticatedOr
 
 export async function createTask(input: TaskInput, options: { cancelOpenFollowups?: boolean } = {}) {
   const auth = await getAuthenticatedOrganizationContext();
-  if ("error" in auth) return { success: false, error: auth.error } satisfies ActionResult;
+  if ("error" in auth) return { success: false, error: auth.error ?? "Não autenticado" } satisfies ActionResult;
+  const permissionError = requireServerPermission(auth, "task:manage");
+  if (permissionError) return { success: false, error: permissionError } satisfies ActionResult;
 
   if (options.cancelOpenFollowups && input.type === "followup") {
-    if (!input.lead_id) return { success: false, error: "Lead obrigatorio para cancelar follow-ups" } satisfies ActionResult;
+    if (!input.lead_id) return { success: false, error: "Lead obrigatório para cancelar follow-ups" } satisfies ActionResult;
 
     let cancelQuery = auth.supabase
       .from("tasks")
@@ -84,7 +84,7 @@ export async function createTask(input: TaskInput, options: { cancelOpenFollowup
 
     const { data: lead } = await leadQuery.single();
 
-    const currentFollowupValue = (lead as { next_followup_at?: string | null } | null)?.next_followup_at;
+    const currentFollowupValue = (lead as { next_followup_at: string | null } | null)?.next_followup_at;
     const currentFollowup = currentFollowupValue ? new Date(currentFollowupValue).getTime() : null;
     const nextFollowup = new Date(input.due_at).getTime();
 
@@ -103,9 +103,11 @@ export async function createTask(input: TaskInput, options: { cancelOpenFollowup
   return { success: true, data } satisfies ActionResult;
 }
 
-export async function completeTask(taskId: string, input: { leadId?: string | null; clearLeadFollowup?: boolean }) {
+export async function completeTask(taskId: string, input: { leadId: string | null; clearLeadFollowup: boolean }) {
   const auth = await getAuthenticatedOrganizationContext();
-  if ("error" in auth) return { success: false, error: auth.error } satisfies ActionResult;
+  if ("error" in auth) return { success: false, error: auth.error ?? "Não autenticado" } satisfies ActionResult;
+  const permissionError = requireServerPermission(auth, "task:manage");
+  if (permissionError) return { success: false, error: permissionError } satisfies ActionResult;
 
   const now = new Date().toISOString();
   let query = auth.supabase
@@ -138,7 +140,9 @@ export async function completeTask(taskId: string, input: { leadId?: string | nu
 
 export async function updateTask(taskId: string, input: TaskInput) {
   const auth = await getAuthenticatedOrganizationContext();
-  if ("error" in auth) return { success: false, error: auth.error } satisfies ActionResult;
+  if ("error" in auth) return { success: false, error: auth.error ?? "Não autenticado" } satisfies ActionResult;
+  const permissionError = requireServerPermission(auth, "task:manage");
+  if (permissionError) return { success: false, error: permissionError } satisfies ActionResult;
 
   let query = auth.supabase
     .from("tasks")
@@ -182,9 +186,11 @@ export async function updateTask(taskId: string, input: TaskInput) {
   return { success: true } satisfies ActionResult;
 }
 
-export async function rescheduleTask(taskId: string, input: { leadId?: string | null; dueAt: string; updateLeadFollowup?: boolean }) {
+export async function rescheduleTask(taskId: string, input: { leadId: string | null; dueAt: string; updateLeadFollowup: boolean }) {
   const auth = await getAuthenticatedOrganizationContext();
-  if ("error" in auth) return { success: false, error: auth.error } satisfies ActionResult;
+  if ("error" in auth) return { success: false, error: auth.error ?? "Não autenticado" } satisfies ActionResult;
+  const permissionError = requireServerPermission(auth, "task:manage");
+  if (permissionError) return { success: false, error: permissionError } satisfies ActionResult;
 
   let query = auth.supabase
     .from("tasks")
@@ -224,9 +230,11 @@ export async function rescheduleTask(taskId: string, input: { leadId?: string | 
   return { success: true } satisfies ActionResult;
 }
 
-export async function deleteTask(taskId: string, input: { leadId?: string | null }) {
+export async function deleteTask(taskId: string, input: { leadId: string | null }) {
   const auth = await getAuthenticatedOrganizationContext();
-  if ("error" in auth) return { success: false, error: auth.error } satisfies ActionResult;
+  if ("error" in auth) return { success: false, error: auth.error ?? "Não autenticado" } satisfies ActionResult;
+  const permissionError = requireServerPermission(auth, "task:manage");
+  if (permissionError) return { success: false, error: permissionError } satisfies ActionResult;
 
   let currentTaskQuery = auth.supabase
     .from("tasks")

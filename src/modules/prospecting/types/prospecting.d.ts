@@ -11,9 +11,9 @@ export interface ProspectingSearchInput {
   state: string;
   city?: string;
   page?: number;
-  limit?: number;
+  limit: number;
   start?: number;
-  provider?: ProspectingProvider;
+  provider: ProspectingProvider;
 }
 
 export interface ProspectBusinessSignal {
@@ -26,17 +26,17 @@ export interface ProspectBusiness {
   id: string;
   name: string;
   category: string;
-  phone?: string;
-  website?: string;
-  address?: string;
-  city?: string;
-  state?: string;
-  rating?: number;
-  reviewsCount?: number;
-  businessStatus?: ProspectingStatus;
-  photoUrl?: string;
-  googleMapsUrl?: string;
-  leadScore?: number;
+  phone: string;
+  website: string;
+  address: string;
+  city: string;
+  state: string;
+  rating: number;
+  reviewsCount: number;
+  businessStatus: ProspectingStatus;
+  photoUrl: string;
+  googleMapsUrl: string;
+  leadScore: number;
   signals: ProspectBusinessSignal[];
   sourceProvider: ProspectingProvider;
 }
@@ -45,7 +45,7 @@ export interface ProspectingSearchResult {
   query: string;
   provider: ProspectingProvider;
   page: number;
-  start?: number;
+  start: number;
   hasNextPage: boolean;
   businesses: ProspectBusiness[];
 }
@@ -58,7 +58,7 @@ export interface EnrichedCompany {
 
 export interface ProspectingLeadPayload {
   input: LeadInput;
-  sourceBusiness?: ProspectBusiness;
+  sourceBusiness: ProspectBusiness;
 }
 
 export type ProspectingDispatchStatus = "new" | "queued" | "sending" | "sent" | "failed" | "ignored" | "lead_added";

@@ -1,31 +1,12 @@
-"use client";
+﻿"use client";
 
 import {
-  DndContext,
-  DragEndEvent,
-  KeyboardSensor,
-  PointerSensor,
-  useDroppable,
-  useSensor,
-  useSensors,
-} from "@dnd-kit/core";
-import {
-  SortableContext,
-  sortableKeyboardCoordinates,
-  useSortable,
-  verticalListSortingStrategy,
-} from "@dnd-kit/sortable";
-import { CSS } from "@dnd-kit/utilities";
-import {
   AlertTriangle,
-  ArrowDown,
-  ArrowUp,
-  BarChart3,
   CalendarClock,
   Check,
-  CheckCheck,
   Clock3,
   Copy,
+  CreditCard,
   Database,
   Edit3,
   Eye,
@@ -34,7 +15,6 @@ import {
   Archive,
   Loader2,
   Link2,
-  LogOut,
   MessageCircle,
   Plus,
   QrCode,
@@ -56,7 +36,7 @@ import {
 } from "lucide-react";
 import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
-import { CSSProperties, FormEvent, KeyboardEvent, MouseEvent, ReactNode, useCallback, useEffect, useMemo, useState } from "react";
+import { FormEvent, KeyboardEvent, useCallback, useEffect, useMemo, useState } from "react";
 
 import { recordAuditLog as recordAuditLogAction } from "@/actions/audit";
 import {
@@ -65,7 +45,18 @@ import {
   unarchiveLead as unarchiveLeadAction,
   updateLead as updateLeadAction,
 } from "@/actions/leads";
-import { ensureOrganizationContext, type OrganizationContext } from "@/actions/organizations";
+import {
+  cancelOrganizationInvitation,
+  createOrganizationInvitation,
+  disableOrganizationMember,
+  ensureOrganizationContext,
+  listOrganizationInvitations,
+  listOrganizationMembers,
+  updateOrganizationMemberRole,
+  type OrganizationContext,
+  type OrganizationInvitationRow,
+  type OrganizationMemberRow,
+} from "@/actions/organizations";
 import { moveLeadStage } from "@/actions/pipeline";
 import { createProspectingCampaign as createProspectingCampaignAction } from "@/actions/prospecting";
 import {
@@ -87,8 +78,161 @@ import {
   sendWhatsAppMessage,
   updateWhatsAppConversationStatus,
 } from "@/actions/whatsapp";
-import { pipelineColumns as defaultPipelineColumns } from "@/lib/constants";
+import {
+  createPipelineStageId,
+  emptyLead,
+  groupLeadTagsByLead,
+  pickTagColor,
+  readPipelineStages,
+  readSavedPipelineFilterPresets,
+  readSavedPipelineFilters,
+  resolvePipelineStageId,
+  type PipelineStage,
+  type SavedPipelineFilter,
+} from "@/components/crm/pipeline-state";
+import { PipelineStagesModal } from "@/components/crm/pipeline-controls";
+import { LeadList, Pipeline } from "@/components/crm/pipeline-board";
+import {
+  ConfirmDeleteLead,
+  ConfirmDeleteTask,
+  ConfirmDeleteTemplate,
+} from "@/components/crm/confirmations";
+import { CrmContentHeader, type CrmViewMode } from "@/components/crm/content-header";
+import {
+  DashboardActivityChart,
+  DashboardFunnelChart,
+  DashboardScoreChart,
+  DashboardStageChart,
+  DashboardTaskChart,
+  type DashboardActivityDay,
+} from "@/components/crm/dashboard-charts";
+import {
+  DashboardCompactMetric,
+  DashboardEmpty,
+  DashboardMiniLegend,
+  DashboardPriorityCard,
+} from "@/components/crm/dashboard-widgets";
+import {
+  DashboardLeadRow,
+  DashboardOperationalTaskRow,
+  DashboardRiskLeadRow,
+} from "@/components/crm/dashboard-rows";
+import { DashboardWhatsAppHealth } from "@/components/crm/dashboard-whatsapp-health";
+import {
+  applyConversationRealtimeEvent,
+  applyMessageRealtimeEvent,
+  conversationStatus,
+  conversationStatusLabel,
+  conversationStatusTabs,
+  countPendingInboundMessages,
+  findLeadByPhone,
+  getPhoneCandidates,
+  getRepeatedOutboundContactNames,
+  getSafeConversationContactName,
+  getStageTitle,
+  getWhatsAppMessageDisplay,
+  messageStatusLabel,
+  previewTemplateText,
+  sortConversations,
+  upsertLocalConversation,
+  upsertWhatsAppMessage,
+  type ConversationLeadFilter,
+  type ConversationPriorityFilter,
+  type ConversationSort,
+  type ConversationStatusFilter,
+} from "@/components/crm/conversation-state";
+import {
+  ContactAvatar,
+  ConversationDateDivider,
+  ConversationInfoRow,
+  ConversationSystemEvent,
+  messageStatusIcon,
+} from "@/components/crm/conversation-components";
+import { ConversationLeadModal, type ConversationLeadSaveInput } from "@/components/crm/conversation-lead-modal";
+import {
+  endOfDay,
+  formatCurrency,
+  getDueAtLabel,
+  getNextRecurringDueAt,
+  getTaskRepeat,
+  getTemperatureLabel,
+  isCommercialTask,
+  isFollowupDue,
+  isFollowupOverdue,
+  isLeadClosed,
+  isLeadCreatedToday,
+  isSameDay,
+  isSameFollowupDay,
+  isTaskDueOnDate,
+  isTaskDueToday,
+  isTaskOverdue,
+  leadToInput,
+  openGoogleCalendarEvent,
+  startOfDay,
+  stripTaskMetadata,
+  taskRepeatLabel,
+  taskTypeLabel,
+  toDateTimeLocal,
+  fromDateTimeLocal,
+} from "@/components/crm/lead-helpers";
+import { LeadHistory, timelineTitle } from "@/components/crm/lead-history";
+import { LeadMetric, LeadSummaryItem } from "@/components/crm/lead-summary";
+import { AuthScreen, MissingSupabaseConfig } from "@/components/crm/auth-screen";
+import { CrmSidebar } from "@/components/crm/sidebar";
+import {
+  migrationSqlByLabel,
+  modulePermissionGroups,
+  readCrmPreferences,
+  readUserRole,
+  roleOptions,
+  sensitivePermissionGroups,
+  settingsTabs,
+  type CrmPreferences,
+  type SettingsTab,
+} from "@/components/crm/settings-state";
+import {
+  SettingsDetailPanel,
+  SettingsInput,
+  SettingsMetric,
+  SettingsStatusPill,
+} from "@/components/crm/settings-components";
+import {
+  ConfirmDeleteGoogleEvent,
+  GoogleEventEditorModal,
+  TaskEditorModal,
+} from "@/components/crm/task-modals";
+import { Templates } from "@/components/crm/templates-view";
+import type {
+  GoogleCalendarEvent,
+  GoogleCalendarEventDraft,
+  TaskEditorState,
+  TaskInput,
+  TaskScope,
+} from "@/components/crm/tasks-types";
+import { readCrmTheme, type CrmTheme } from "@/components/crm/theme";
+import { Input, Modal } from "@/components/crm/ui";
 import { createSupabaseClient, isSupabaseConfigured } from "@/lib/db";
+import {
+  can,
+  crmPermissionLabels,
+  crmRoleLabels,
+  getPermissionsForRole,
+  type CrmRole,
+} from "@/lib/permissions";
+import { calculateLeadScore } from "@/lib/lead-scoring";
+import {
+  billingPeriods,
+  formatMoneyFromCents,
+  getBillingPeriod,
+  getPlan,
+  getPlanMonthlyEquivalentCents,
+  getPlanPriceCents,
+  getPlanUserLimit,
+  planHasFeature,
+  plans,
+  type BillingPeriod,
+  type PlanSlug,
+} from "@/lib/plans";
 import type {
   AuditLog,
   Interaction,
@@ -103,7 +247,7 @@ import type {
   WhatsAppConversation,
   WhatsAppMessage,
 } from "@/lib/types";
-import { getViewSubtitle, pathViews, type View, viewPaths, viewTitles } from "@/lib/navigation";
+import { pathViews, type View, viewPaths } from "@/lib/navigation";
 import { ProspectingModal } from "@/modules/prospecting";
 import { normalizeProspectingWhatsAppPhone } from "@/modules/prospecting/utils/phone";
 import {
@@ -119,36 +263,19 @@ import {
   getNextLeadAfterSend,
 } from "@/lib/services/leads";
 
-type AuthUser = { id: string; email?: string };
+type AuthUser = { id: string; email: string };
 type Toast = { id: string; text: string };
-type CrmTheme = "dark" | "light";
 type DashboardAgendaItem = {
   lead: Lead | null;
   dueAt: string;
   title: string;
-  task?: Task;
-};
-type DashboardActivityDay = {
-  key: string;
-  label: string;
-  created: number;
-  replies: number;
-  contacts: number;
+  task: Task | null;
 };
 type InteractionInput = {
   note: string;
   type: NonNullable<Interaction["type"]>;
   channel: Interaction["channel"];
 };
-type TaskInput = {
-  lead_id?: string | null;
-  type: Task["type"];
-  title: string;
-  notes?: string | null;
-  due_at: string;
-};
-type TaskRepeat = "none" | "weekly" | "monthly" | "daily";
-type TaskScope = "open" | "overdue" | "today" | "upcoming" | "completed";
 type MigrationCheck = {
   label: string;
   status: "checking" | "ok" | "missing";
@@ -156,268 +283,30 @@ type MigrationCheck = {
 };
 type GoogleCalendarStatus = {
   configured: boolean;
-  migrated?: boolean;
+  migrated: boolean;
   connected: boolean;
-  error?: string;
-  connection?: {
-    account_email?: string | null;
-    calendar_id?: string | null;
-    status?: string;
-    last_error?: string | null;
-    last_synced_at?: string | null;
-    updated_at?: string | null;
+  error: string;
+  connection: {
+    account_email: string | null;
+    calendar_id: string | null;
+    status: string;
+    last_error: string | null;
+    last_synced_at: string | null;
+    updated_at: string | null;
   } | null;
 };
 type AuditLogInput = {
   entity_type: AuditLog["entity_type"];
-  entity_id?: string | null;
+  entity_id: string | null;
   action: string;
   summary: string;
   metadata?: Record<string, unknown>;
 };
-type SavedPipelineFilter = {
-  id: string;
-  name: string;
-  filters: {
-    query?: string;
-    statusFilter: LeadStatus | "all";
-    temperatureFilter: Lead["temperature"] | "all";
-    dateFilter: "all" | "today" | "overdue";
-    tagFilter?: string | "all";
-  };
-};
-type PipelineStage = {
-  id: LeadStatus;
-  title: string;
-  kind: "open" | "closed";
-};
-
-function readCrmTheme(): CrmTheme {
-  if (typeof window === "undefined") return "dark";
-  return window.localStorage.getItem("origocrm:theme") === "light" ? "light" : "dark";
-}
-
-const defaultClosedStageIds = new Set<LeadStatus>(["fechado"]);
-const defaultPipelineStageIds = new Set<LeadStatus>(defaultPipelineColumns.map((column) => column.id));
-const canonicalStageAliases: Record<string, LeadStatus> = {
-  novo_lead: "novo",
-  novos_leads: "novo",
-  primeiro_contato: "contatado",
-  primeiro_contacto: "contatado",
-  contato_inicial: "contatado",
-  follow_up: "respondeu",
-  followup: "respondeu",
-  acompanhamento: "respondeu",
-  reuniao_agendada: "proposta",
-  reuniao: "proposta",
-  proposta_enviada: "proposta",
-  fechado: "fechado",
-  fechados: "fechado",
-  ganho: "fechado",
-};
-
-function normalizeStageKey(value: string) {
-  return value
-    .replace(/^custom[_-]/i, "")
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "_")
-    .replace(/^_+|_+$/g, "");
-}
-
-function getCanonicalStageId(value: string) {
-  const key = normalizeStageKey(value);
-  return canonicalStageAliases[key];
-}
-
-function resolvePipelineStageId(id: string, title: string) {
-  if (defaultPipelineStageIds.has(id)) return id;
-  return getCanonicalStageId(title) ?? getCanonicalStageId(id) ?? id;
-}
-
-const emptyLead: LeadInput = {
-  name: "",
-  phone: "",
-  company: "",
-  source: "",
-  status: "novo",
-  estimated_value: null,
-  owner_name: "",
-  temperature: "morno",
-  outcome_reason: "",
-  sla_hours: 24,
-};
-
-function readSavedPipelineFilters() {
-  if (typeof window === "undefined") {
-    return {
-      statusFilter: "all" as LeadStatus | "all",
-      temperatureFilter: "all" as Lead["temperature"] | "all",
-      dateFilter: "all" as "all" | "today" | "overdue",
-      tagFilter: "all",
-    };
-  }
-
-  try {
-    const raw = window.localStorage.getItem("origocrm:pipeline-filters");
-    if (!raw) {
-      return {
-        statusFilter: "all" as LeadStatus | "all",
-        temperatureFilter: "all" as Lead["temperature"] | "all",
-        dateFilter: "all" as "all" | "today" | "overdue",
-        tagFilter: "all",
-      };
-    }
-    const parsed = JSON.parse(raw) as {
-      statusFilter?: LeadStatus | "all";
-      temperatureFilter?: Lead["temperature"] | "all";
-      dateFilter?: "all" | "today" | "overdue";
-      tagFilter?: string | "all";
-    };
-    const statusFilter =
-      parsed.statusFilter && parsed.statusFilter !== "all"
-        ? resolvePipelineStageId(parsed.statusFilter, parsed.statusFilter)
-        : "all";
-
-    return {
-      statusFilter,
-      temperatureFilter: parsed.temperatureFilter ?? "all",
-      dateFilter: parsed.dateFilter ?? "all",
-      tagFilter: parsed.tagFilter ?? "all",
-    };
-  } catch {
-    return {
-      statusFilter: "all" as LeadStatus | "all",
-      temperatureFilter: "all" as Lead["temperature"] | "all",
-      dateFilter: "all" as "all" | "today" | "overdue",
-      tagFilter: "all",
-    };
-  }
-}
-
-function readSavedPipelineFilterPresets(): SavedPipelineFilter[] {
-  if (typeof window === "undefined") return [];
-
-  try {
-    const raw = window.localStorage.getItem("origocrm:pipeline-filter-presets");
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? (parsed as SavedPipelineFilter[]) : [];
-  } catch {
-    return [];
-  }
-}
-
-function getDefaultPipelineStages(): PipelineStage[] {
-  return defaultPipelineColumns.map((column) => ({
-    id: column.id,
-    title: column.title,
-    kind: column.id === "fechado" ? "closed" : "open",
-  }));
-}
-
-function normalizePipelineStages(input: unknown): PipelineStage[] {
-  const defaults = getDefaultPipelineStages();
-  if (!Array.isArray(input)) return defaults;
-
-  const stages = input
-    .map((item) => {
-      if (!item || typeof item !== "object") return null;
-      const stage = item as Partial<PipelineStage>;
-      if (!stage.id || !stage.title) return null;
-      const title = String(stage.title).trim() || String(stage.id);
-      return {
-        id: resolvePipelineStageId(String(stage.id), title),
-        title,
-        kind: (stage.kind === "closed" ? "closed" : "open") as NonNullable<PipelineStage["kind"]>,
-      };
-    })
-    .filter((stage): stage is PipelineStage => Boolean(stage));
-
-  const unique = stages.filter(
-    (stage, index, all) => all.findIndex((item) => item.id === stage.id) === index,
-  );
-  return unique.length ? unique : defaults;
-}
-
-function readPipelineStages(): PipelineStage[] {
-  if (typeof window === "undefined") return getDefaultPipelineStages();
-
-  try {
-    const raw = window.localStorage.getItem("origocrm:pipeline-stages");
-    return normalizePipelineStages(raw ? JSON.parse(raw) : null);
-  } catch {
-    return getDefaultPipelineStages();
-  }
-}
-
-function createPipelineStageId(title: string, existingStages: PipelineStage[]) {
-  const canonicalId = getCanonicalStageId(title);
-  const existingIds = new Set(existingStages.map((stage) => stage.id));
-  if (canonicalId && !existingIds.has(canonicalId)) return canonicalId;
-
-  const base = title
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "_")
-    .replace(/^_+|_+$/g, "")
-    .slice(0, 32) || "etapa";
-  let next = `custom_${base}`;
-  let suffix = 2;
-
-  while (existingIds.has(next)) {
-    next = `custom_${base}_${suffix}`;
-    suffix += 1;
-  }
-
-  return next;
-}
-
-function groupLeadTagsByLead(leadTags: LeadTag[], tags: CrmTag[]) {
-  const tagsById = new Map(tags.map((tag) => [tag.id, tag]));
-  const grouped = new Map<string, CrmTag[]>();
-
-  for (const relation of leadTags) {
-    const tag = tagsById.get(relation.tag_id);
-    if (!tag) continue;
-    grouped.set(relation.lead_id, [...(grouped.get(relation.lead_id) ?? []), tag]);
-  }
-
-  return grouped;
-}
-
-function pickTagColor(name: string) {
-  const colors = ["#8B5CF6", "#25D366", "#F59E0B", "#0EA5E9", "#F43F5E", "#A78BFA"];
-  const index = Array.from(name).reduce((sum, char) => sum + char.charCodeAt(0), 0) % colors.length;
-  return colors[index];
-}
-
-function BrandLogo({
-  compact = false,
-  className = "",
-}: {
-  compact?: boolean;
-  className?: string;
-}) {
-  return (
-    <div className={`relative overflow-hidden ${className}`}>
-      <Image
-        alt="OrigoCRM"
-        className="object-contain"
-        fill
-        preload={!compact}
-        sizes={compact ? "220px" : "(max-width: 768px) 92vw, 640px"}
-        src="/origocrm-logo.png"
-      />
-    </div>
-  );
-}
+type LeadCreateTab = "summary" | "commercial" | "tasks" | "contact" | "history";
 
 export function CrmApp({
   initialView = "dashboard",
-  initialSettingsTab,
+  initialSettingsTab = "system",
 }: {
   initialView?: View;
   initialSettingsTab?: SettingsTab;
@@ -432,7 +321,7 @@ export function CrmApp({
     }
 
     supabase.auth.getUser().then(({ data }) => {
-      setUser(data.user ? { id: data.user.id, email: data.user.email ?? undefined } : null);
+      setUser(data.user ? { id: data.user.id, email: data.user.email ?? "" } : null);
       setAuthLoading(false);
     });
 
@@ -440,7 +329,7 @@ export function CrmApp({
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
       setUser(
-        session?.user ? { id: session.user.id, email: session.user.email ?? undefined } : null,
+        session?.user ? { id: session.user.id, email: session.user.email ?? "" } : null,
       );
     });
 
@@ -469,106 +358,6 @@ export function CrmApp({
   );
 }
 
-function MissingSupabaseConfig() {
-  return (
-    <main className="flex min-h-screen items-center justify-center bg-[#09090D] px-5 text-white">
-      <section className="w-full max-w-lg rounded-xl border border-white/10 bg-white/[0.04] p-6">
-        <BrandLogo className="mb-5 aspect-[3.13/1] w-full" />
-        <h1 className="text-2xl font-semibold">Supabase nao configurado</h1>
-        <p className="mt-3 text-sm leading-6 text-zinc-400">
-          Configure as variaveis `NEXT_PUBLIC_SUPABASE_URL` e
-          `NEXT_PUBLIC_SUPABASE_ANON_KEY` na Vercel para ativar login e banco real.
-        </p>
-      </section>
-    </main>
-  );
-}
-
-function AuthScreen() {
-  const supabase = useMemo(() => createSupabaseClient(), []);
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [message, setMessage] = useState("");
-
-  async function handleAuth(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!supabase) return;
-
-    setMessage("");
-    setLoading(true);
-
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
-
-    setLoading(false);
-
-    if (error) {
-      setMessage(error.message);
-      return;
-    }
-  }
-
-  return (
-    <main className="relative min-h-screen overflow-hidden bg-[#09090D] px-5 py-8 text-white">
-      <div className="glow-breathe absolute inset-x-0 top-0 h-[34rem] bg-[radial-gradient(ellipse_at_24%_12%,rgba(139,92,246,0.3),transparent_42%),radial-gradient(ellipse_at_86%_18%,rgba(37,211,102,0.13),transparent_34%)]" />
-      <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.022)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.016)_1px,transparent_1px)] bg-[size:72px_72px] opacity-25" />
-      <div className="relative mx-auto grid min-h-[calc(100vh-4rem)] max-w-6xl items-center gap-10 lg:grid-cols-[1fr_0.9fr]">
-        <section className="reveal-up relative flex justify-center lg:justify-start">
-          <div className="absolute -inset-8 bg-[linear-gradient(135deg,rgba(139,92,246,0.2),rgba(37,211,102,0.08),transparent)] blur-3xl" />
-          <BrandLogo className="relative aspect-[3.13/1] w-[min(92vw,640px)]" />
-        </section>
-
-        <section className="reveal-up relative overflow-hidden rounded-2xl border border-[#8B5CF6]/25 bg-white/[0.045] p-6 shadow-2xl shadow-[#8B5CF6]/15 backdrop-blur-xl" style={{ "--delay": "120ms" } as CSSProperties}>
-          <div className="absolute -right-20 -top-24 h-72 w-72 opacity-[0.06]">
-            <Image alt="" className="object-contain" fill sizes="288px" src="/origocrm-icon.png" />
-          </div>
-          <div className="absolute inset-x-0 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(139,92,246,0.85),rgba(37,211,102,0.35),transparent)]" />
-          <div className="relative mb-6">
-            <h2 className="text-2xl font-semibold">Entrar</h2>
-            <p className="mt-2 text-sm text-zinc-400">
-              Acesse com seu usuario autorizado.
-            </p>
-          </div>
-          <form className="relative space-y-4" onSubmit={handleAuth}>
-            <label className="block text-sm text-zinc-300">
-              Email
-              <input
-                className="mt-2 h-12 w-full rounded-lg border border-white/10 bg-black/35 px-4 text-white outline-none ring-[#8B5CF6]/50 transition focus:border-[#8B5CF6] focus:ring-4"
-                onChange={(event) => setEmail(event.target.value)}
-                placeholder="email"
-                required
-                type="email"
-                value={email}
-              />
-            </label>
-            <label className="block text-sm text-zinc-300">
-              Senha
-              <input
-                className="mt-2 h-12 w-full rounded-lg border border-white/10 bg-black/35 px-4 text-white outline-none ring-[#8B5CF6]/50 transition focus:border-[#8B5CF6] focus:ring-4"
-                minLength={6}
-                onChange={(event) => setPassword(event.target.value)}
-                placeholder="minimo 6 caracteres"
-                required
-                type="password"
-                value={password}
-              />
-            </label>
-            <button
-              className="shine-cta flex h-12 w-full items-center justify-center gap-2 rounded-lg bg-[#8B5CF6] px-4 font-medium shadow-xl shadow-[#8B5CF6]/20 transition hover:bg-[#7C3AED] disabled:opacity-60"
-              disabled={loading}
-              type="submit"
-            >
-              {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-              Entrar
-            </button>
-          </form>
-          {message && <p className="relative mt-4 text-sm text-zinc-300">{message}</p>}
-        </section>
-      </div>
-    </main>
-  );
-}
-
 function Workspace({
   user,
   onLogout,
@@ -578,13 +367,18 @@ function Workspace({
   user: AuthUser;
   onLogout: () => void;
   initialView: View;
-  initialSettingsTab?: SettingsTab;
+  initialSettingsTab: SettingsTab;
 }) {
   const supabase = useMemo(() => createSupabaseClient(), []);
   const router = useRouter();
   const pathname = usePathname();
   const routedView = pathViews[pathname] ?? initialView;
-  const view = routedView === "whatsapp" || routedView === "templates" ? "settings" : routedView;
+  const view =
+    routedView === "whatsapp" || routedView === "templates"
+      ? "settings"
+      : routedView === "leads"
+        ? "pipeline"
+        : routedView;
   const settingsInitialTab =
     routedView === "whatsapp" ? "whatsapp" : routedView === "templates" ? "templates" : initialSettingsTab;
   const savedFilters = useMemo(() => readSavedPipelineFilters(), []);
@@ -599,7 +393,6 @@ function Workspace({
   const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null);
   const [leadFormOpen, setLeadFormOpen] = useState(false);
   const [prospectingOpen, setProspectingOpen] = useState(false);
-  const [editingLead, setEditingLead] = useState<Lead | null>(null);
   const [leadPendingDelete, setLeadPendingDelete] = useState<Lead | null>(null);
   const [templatePendingDelete, setTemplatePendingDelete] = useState<MessageTemplate | null>(null);
   const [pipelineStagesOpen, setPipelineStagesOpen] = useState(false);
@@ -609,6 +402,8 @@ function Workspace({
   const [savedFilterPresets, setSavedFilterPresets] = useState<SavedPipelineFilter[]>(initialFilterPresets);
   const [toast, setToast] = useState<Toast | null>(null);
   const [crmTheme, setCrmTheme] = useState<CrmTheme>(() => readCrmTheme());
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [crmViewMode, setCrmViewMode] = useState<CrmViewMode>(() => (routedView === "leads" ? "list" : "kanban"));
   const [recentLeadId, setRecentLeadId] = useState<string | null>(null);
   const [remoteLeads, setRemoteLeads] = useState<Lead[]>([]);
   const [remoteArchivedLeads, setRemoteArchivedLeads] = useState<Lead[]>([]);
@@ -623,6 +418,14 @@ function Workspace({
   const [organizationContext, setOrganizationContext] = useState<OrganizationContext | null>(null);
   const [organizationReady, setOrganizationReady] = useState(false);
   const organizationId = organizationContext?.organization.id ?? null;
+  const currentRole: CrmRole = organizationContext?.member.role ?? "owner";
+  const currentPlanSlug: PlanSlug = organizationContext?.subscription?.plan_slug ?? "manual";
+  const currentPermissions = useMemo(() => getPermissionsForRole(currentRole), [currentRole]);
+  const canCreateLead = currentPermissions.has("lead:create");
+  const canDeleteLeads = currentPermissions.has("lead:delete");
+  const canUpdatePipeline = currentPermissions.has("pipeline:update");
+  const canUseProspecting = currentPermissions.has("prospecting:use") && planHasFeature(currentPlanSlug, "prospecting");
+  const canManageTemplates = currentPermissions.has("template:manage");
   const leads = remoteLeads;
   const archivedLeads = remoteArchivedLeads;
   const templates = remoteTemplates;
@@ -668,7 +471,7 @@ function Workspace({
 
       if (result.success && result.data) {
         setOrganizationContext(result.data);
-      } else if (result.error && !result.error.includes("Base SaaS pendente")) {
+      } else if (!result.success && !result.error.includes("Base SaaS pendente")) {
         setToast({
           id: newId("toast"),
           text: result.error,
@@ -726,7 +529,7 @@ function Workspace({
       ) {
         setToast({
           id: newId("toast"),
-          text: "Nao foi possivel carregar os dados do Supabase",
+          text: "Não foi possível carregar os dados do Supabase",
         });
       }
 
@@ -772,7 +575,7 @@ function Workspace({
     window.localStorage.setItem("origocrm:theme", crmTheme);
   }, [crmTheme]);
 
-  const showLeadHeaderControls = view === "pipeline" || view === "leads";
+  const showLeadHeaderControls = view === "pipeline";
 
   const filteredLeads = useMemo(() => {
     const search = showLeadHeaderControls ? query.trim().toLowerCase() : "";
@@ -853,18 +656,25 @@ function Workspace({
   }
 
   function navigateView(nextView: View) {
-    if (nextView !== "pipeline" && nextView !== "leads") setQuery("");
+    if (nextView === "leads") {
+      setCrmViewMode("list");
+      if (pathname !== viewPaths.pipeline) router.push(viewPaths.pipeline);
+      return;
+    }
+    if (nextView === "pipeline") setCrmViewMode("kanban");
+    if (nextView !== "pipeline") setQuery("");
     const nextPath = viewPaths[nextView];
     if (pathname !== nextPath) router.push(nextPath);
   }
 
   function saveCurrentFilterPreset() {
     const name = window.prompt("Nome para este filtro:");
-    if (!name?.trim()) return;
+    const trimmedName = name?.trim();
+    if (!trimmedName) return;
 
     const preset: SavedPipelineFilter = {
       id: newId("filter"),
-      name: name.trim(),
+      name: trimmedName,
       filters: { query, statusFilter, temperatureFilter, dateFilter, tagFilter },
     };
     setSavedFilterPresets((items) => [preset, ...items.filter((item) => item.name !== preset.name)].slice(0, 12));
@@ -952,7 +762,8 @@ function Workspace({
   async function recordAuditLog(input: AuditLogInput) {
     const auditLog: AuditLog = {
       id: newId("audit"),
-      user_id: user.id,
+      user_id: null,
+      organization_id: organizationId,
       entity_type: input.entity_type,
       entity_id: input.entity_id ?? null,
       action: input.action,
@@ -977,6 +788,11 @@ function Workspace({
   }
 
   async function saveLead(input: LeadInput, id?: string) {
+    if (!can(currentRole, id ? "lead:update" : "lead:create")) {
+      showToast(id ? "Você não tem permissão para editar leads" : "Você não tem permissão para criar leads");
+      return null;
+    }
+
     const timestamp = new Date().toISOString();
 
     if (id) {
@@ -986,7 +802,7 @@ function Workspace({
       if (!result.success) {
         setRemoteLeads(previous);
         showToast(result.error ?? "Erro ao atualizar lead");
-        return;
+        return null;
       }
       await recordAuditLog({
         entity_type: "lead",
@@ -995,14 +811,14 @@ function Workspace({
         summary: `Lead atualizado: ${input.name}`,
         metadata: { status: input.status, temperature: input.temperature, owner_name: input.owner_name },
       });
-      return;
+      return (result.data as Lead | undefined) ?? null;
     }
 
     const result = await createLeadAction(input);
 
     if (!result.success) {
       showToast(result.error ?? "Erro ao criar lead");
-      return;
+      return null;
     }
 
     if (result.data) {
@@ -1015,7 +831,10 @@ function Workspace({
         summary: `Lead criado: ${createdLead.name}`,
         metadata: { status: createdLead.status, source: createdLead.source },
       });
+      return createdLead;
     }
+
+    return null;
   }
 
   async function createLeadTag(name: string) {
@@ -1027,7 +846,8 @@ function Workspace({
 
     const optimisticTag: CrmTag = {
       id: newId("tag"),
-      user_id: user.id,
+      user_id: null,
+      organization_id: organizationId,
       name: trimmed,
       color: pickTagColor(trimmed),
       created_at: new Date().toISOString(),
@@ -1053,6 +873,7 @@ function Workspace({
 
     const optimistic: LeadTag = {
       user_id: user.id,
+      organization_id: organizationId,
       lead_id: lead.id,
       tag_id: tagId,
       created_at: new Date().toISOString(),
@@ -1095,7 +916,21 @@ function Workspace({
     });
   }
 
+  function requestDeleteLead(lead: Lead) {
+    if (!canDeleteLeads) {
+      showToast("Você não tem permissão para excluir leads");
+      return;
+    }
+
+    setLeadPendingDelete(lead);
+  }
+
   async function deleteLead(lead: Lead) {
+    if (!canDeleteLeads) {
+      showToast("Você não tem permissão para excluir leads");
+      return;
+    }
+
     const previousLeads = remoteLeads;
     const previousArchivedLeads = remoteArchivedLeads;
     const previousTasks = remoteTasks;
@@ -1118,7 +953,7 @@ function Workspace({
       next.delete(lead.id);
       return next;
     });
-    showToast("Lead excluido");
+    showToast("Lead excluído");
 
     const result = await deleteLeadAction(lead.id);
 
@@ -1137,7 +972,7 @@ function Workspace({
       entity_type: "lead",
       entity_id: lead.id,
       action: "lead.deleted",
-      summary: `Lead excluido: ${lead.name}`,
+      summary: `Lead excluído: ${lead.name}`,
       metadata: { phone: lead.phone, company: lead.company, status: lead.status },
     });
   }
@@ -1174,18 +1009,23 @@ function Workspace({
   }
 
   function requestLeadStatusChange(id: string, status: LeadStatus) {
+    if (!canUpdatePipeline) {
+      showToast("Você não tem permissão para alterar o funil");
+      return;
+    }
+
     const before = leads.find((lead) => lead.id === id);
     if (!before) return;
 
     void updateLeadStatus(id, status, before.outcome_reason ?? null);
   }
 
-  async function updateLeadStatus(id: string, status: LeadStatus, outcomeReason?: string | null) {
+  async function updateLeadStatus(id: string, status: LeadStatus, outcomeReason: string | null) {
     const before = leads.find((lead) => lead.id === id);
     if (!before) return;
 
     const previousInteractions = remoteInteractions;
-    const reason = outcomeReason?.trim() ?? before.outcome_reason?.trim() ?? "";
+    const reason = outcomeReason?.trim() || before.outcome_reason?.trim() || "";
 
     patchLeadOptimistic(id, {
       status,
@@ -1211,7 +1051,7 @@ function Workspace({
       entity_id: id,
       action: "lead.status_changed",
       summary: `Status alterado para ${status}`,
-      metadata: { previous_status: before?.status, next_status: status },
+      metadata: { previous_status: before.status, next_status: status },
     });
   }
 
@@ -1225,6 +1065,11 @@ function Workspace({
   }
 
   async function bulkArchiveSelectedLeads() {
+    if (!canDeleteLeads) {
+      showToast("Você não tem permissão para excluir leads");
+      return;
+    }
+
     const selected = selectedPipelineLeads;
     if (selected.length === 0) return;
 
@@ -1254,7 +1099,7 @@ function Workspace({
 
     if (failed) {
       setRemoteLeads(previousLeads);
-      showToast(failed.error ?? "Erro ao atribuir responsavel");
+      showToast(failed.error ?? "Erro ao atribuir responsável");
       return;
     }
 
@@ -1262,12 +1107,12 @@ function Workspace({
       entity_type: "lead",
       entity_id: null,
       action: "lead.bulk_owner_assigned",
-      summary: `Responsavel atribuido a ${selected.length} leads`,
+      summary: `Responsável atribuído a ${selected.length} leads`,
       metadata: { lead_ids: Array.from(selectedIds), owner_name: ownerName },
     });
     setBulkOwnerName("");
     setSelectedPipelineLeadIds(new Set());
-    showToast("Responsavel atribuido");
+    showToast("Responsável atribuído");
   }
 
   async function bulkMoveSelectedLeads(status: LeadStatus) {
@@ -1296,12 +1141,17 @@ function Workspace({
       id: newId("task"),
       lead_id: lead.id,
       user_id: user.id,
+      organization_id: organizationId,
       type: "followup",
       title: `Follow-up com ${lead.name}`,
       notes: null,
       due_at: nextFollowupAt,
       status: "open",
       completed_at: null,
+      google_event_id: null,
+      google_calendar_id: null,
+      google_synced_at: null,
+      google_sync_error: null,
       created_at: now,
       updated_at: now,
     };
@@ -1339,7 +1189,7 @@ function Workspace({
         supabase.from("interactions").insert(withOrganizationPayload({ ...interaction, user_id: user.id })),
       ]);
       if (interactionError) showToast("Erro ao salvar follow-up");
-      if (!taskResult.success) showToast("Follow-up salvo; aplique a migracao de tarefas no Supabase");
+      if (!taskResult.success) showToast("Follow-up salvo; aplique a migração de tarefas no Supabase");
       if (taskResult.success && !interactionError) {
         await recordAuditLog({
           entity_type: "task",
@@ -1359,12 +1209,17 @@ function Workspace({
       id: newId("task"),
       lead_id: leadId,
       user_id: user.id,
+      organization_id: organizationId,
       type: input.type,
       title: input.title.trim(),
       notes: input.notes?.trim() || null,
       due_at: input.due_at,
       status: "open",
       completed_at: null,
+      google_event_id: null,
+      google_calendar_id: null,
+      google_synced_at: null,
+      google_sync_error: null,
       created_at: now,
       updated_at: now,
     };
@@ -1381,9 +1236,9 @@ function Workspace({
 
     setRemoteTasks((items) => [task, ...items]);
     const shouldUpdateLeadFollowup =
-      Boolean(lead) &&
+      lead !== null &&
       task.type === "followup" &&
-      (!lead?.next_followup_at ||
+      (!lead.next_followup_at ||
         new Date(task.due_at).getTime() <= new Date(lead.next_followup_at).getTime());
     if (shouldUpdateLeadFollowup && lead) {
       patchLeadOptimistic(lead.id, { next_followup_at: task.due_at, updated_at: now });
@@ -1411,7 +1266,7 @@ function Workspace({
         setRemoteTasks(previousTasks);
         setRemoteLeads(previousLeads);
         setRemoteInteractions(previousInteractions);
-        showToast("Erro ao criar tarefa. Verifique a migracao de tarefas no Supabase");
+        showToast("Erro ao criar tarefa. Verifique a migração de tarefas no Supabase");
         return;
       }
 
@@ -1579,6 +1434,7 @@ function Workspace({
 
     if (supabase) {
       const taskResult = await updateTaskAction(task.id, {
+        id: task.id,
         lead_id: input.lead_id ?? null,
         type: input.type,
         title: input.title.trim(),
@@ -1638,6 +1494,8 @@ function Workspace({
     const interaction: Interaction = {
       id: newId("interaction"),
       lead_id: lead.id,
+      user_id: user.id,
+      organization_id: organizationId,
       note: `Temperatura alterada para ${temperature}`,
       message: `Temperatura alterada para ${temperature}`,
       type: "note",
@@ -1681,6 +1539,8 @@ function Workspace({
     const interaction: Interaction = {
       id: newId("interaction"),
       lead_id: leadId,
+      user_id: user.id,
+      organization_id: organizationId,
       note: input.note,
       message: input.note,
       type: input.type,
@@ -1690,12 +1550,12 @@ function Workspace({
     addInteractionOptimistic(interaction);
     if (supabase) {
       const { error } = await supabase.from("interactions").insert(withOrganizationPayload({ ...interaction, user_id: user.id }));
-      if (error) showToast("Erro ao registrar interacao");
+      if (error) showToast("Erro ao registrar interação");
       else await recordAuditLog({
         entity_type: "lead",
         entity_id: leadId,
         action: "interaction.created",
-        summary: "Interacao registrada",
+        summary: "Interação registrada",
         metadata: { type: input.type, channel: input.channel },
       });
     }
@@ -1716,7 +1576,7 @@ function Workspace({
     addInteractionOptimistic(interaction);
     showToast("Enviando pela Evolution");
 
-    setSelectedLeadId(nextLead?.id ?? null);
+    setSelectedLeadId(nextLead?.id ?? lead.id);
 
     const result = await sendWhatsAppMessage(lead.id, lead.phone, message, nextFollowupAt);
 
@@ -1741,8 +1601,13 @@ function Workspace({
   }
 
   async function addTemplate(title: string, body: string) {
+    if (!canManageTemplates) {
+      showToast("Você não tem permissão para gerenciar mensagens prontas");
+      return;
+    }
+
     if (!supabase) {
-      showToast("Supabase nao configurado");
+      showToast("Supabase não configurado");
       return;
     }
 
@@ -1770,8 +1635,13 @@ function Workspace({
   }
 
   async function deleteTemplate(template: MessageTemplate) {
+    if (!canManageTemplates) {
+      showToast("Você não tem permissão para gerenciar mensagens prontas");
+      return;
+    }
+
     if (!supabase) {
-      showToast("Supabase nao configurado");
+      showToast("Supabase não configurado");
       return;
     }
 
@@ -1819,185 +1689,43 @@ function Workspace({
       )}
 
       <div className="relative flex min-h-screen flex-col lg:flex-row">
-        <aside className="crm-sidebar relative overflow-hidden border-b border-white/10 bg-[#07070B]/95 px-4 py-4 shadow-2xl shadow-black/30 backdrop-blur-xl lg:w-72 lg:border-b-0 lg:border-r">
-          <div className="pointer-events-none absolute -left-16 top-10 h-52 w-52 opacity-[0.05]">
-            <Image alt="" className="object-contain" fill sizes="208px" src="/origocrm-icon.png" />
-          </div>
-          <div className="absolute inset-y-0 right-0 hidden w-px bg-[linear-gradient(180deg,transparent,rgba(139,92,246,0.7),rgba(37,211,102,0.22),transparent)] lg:block" />
-          <div className="relative flex items-center justify-between gap-3 lg:block">
-            <div>
-              <BrandLogo compact className="aspect-[3.13/1] w-56 max-w-full" />
-              <div className="mt-3 max-w-full truncate text-xs text-zinc-500">{user.email}</div>
-            </div>
-            <button
-              className="rounded-lg border border-white/10 p-2 text-zinc-400 transition hover:bg-white/[0.06] hover:text-white lg:hidden"
-              onClick={logout}
-              title="Sair"
-            >
-              <LogOut className="h-4 w-4" />
-            </button>
-          </div>
-          <nav className="relative mt-4 grid grid-cols-4 gap-2 lg:grid-cols-1">
-            {[
-              ["dashboard", "Dashboard", BarChart3],
-              ["pipeline", "CRM", Sparkles],
-              ["tasks", "Tarefas", CalendarClock],
-              ["leads", "Leads", UserRound],
-              ["conversations", "Conversas", MessageCircle],
-              ["settings", "Configuracoes", Settings],
-            ].map(([key, label, Icon]) => (
-              <button
-                className={`flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm transition lg:justify-start ${
-                  view === key
-                    ? "bg-[#8B5CF6] text-white shadow-lg shadow-[#8B5CF6]/25"
-                    : "text-zinc-400 hover:bg-white/[0.06] hover:text-white"
-                }`}
-                key={key as string}
-                onClick={() => navigateView(key as View)}
-              >
-                <Icon className="h-4 w-4" />
-                <span className="hidden sm:inline">{label as string}</span>
-              </button>
-            ))}
-          </nav>
-          <button
-            className="shine-cta relative mt-3 flex w-full items-center justify-center gap-2 rounded-lg border border-[#8B5CF6]/35 bg-[#8B5CF6]/10 px-3 py-2 text-sm text-[#DDD6FE] shadow-lg shadow-[#8B5CF6]/10 transition hover:bg-[#8B5CF6]/20"
-            onClick={() => setProspectingOpen(true)}
-            type="button"
-          >
-            <Sparkles className="h-4 w-4" />
-            <span className="hidden sm:inline lg:inline">Prospecção</span>
-          </button>
-          <button
-            className="mt-4 hidden w-full items-center justify-center gap-2 rounded-lg border border-white/10 px-3 py-2 text-sm text-zinc-400 transition hover:bg-white/[0.06] hover:text-white lg:flex"
-            onClick={logout}
-          >
-            <LogOut className="h-4 w-4" />
-            Sair
-          </button>
-        </aside>
+        <CrmSidebar
+          canUseProspecting={canUseProspecting}
+          collapsed={sidebarCollapsed}
+          user={user}
+          view={view}
+          onLogout={logout}
+          onNavigate={navigateView}
+          onOpenProspecting={() => setProspectingOpen(true)}
+          onToggleCollapsed={() => setSidebarCollapsed((current) => !current)}
+        />
 
         <section className="crm-content relative flex-1 overflow-hidden">
-          <header className="crm-content-header relative flex flex-col gap-4 border-b border-white/10 bg-black/20 px-5 py-4 shadow-xl shadow-black/10 backdrop-blur-xl xl:flex-row xl:items-center xl:justify-between">
-            <div className="absolute inset-x-0 bottom-0 h-px bg-[linear-gradient(90deg,transparent,rgba(139,92,246,0.55),rgba(37,211,102,0.18),transparent)]" />
-            <div>
-              <h1 className="text-2xl font-semibold">{viewTitles[view]}</h1>
-              <p className="mt-1 text-sm text-zinc-500">{getViewSubtitle(view)}</p>
-            </div>
-            <div className="flex flex-col gap-3 sm:flex-row">
-              {showLeadHeaderControls && (
-                <>
-                  <div className="relative">
-                    <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" />
-                    <input
-                      className="h-11 w-full rounded-lg border border-white/10 bg-white/[0.04] pl-9 pr-3 text-sm outline-none transition placeholder:text-zinc-600 focus:border-[#8B5CF6] sm:w-72"
-                      onChange={(event) => setQuery(event.target.value)}
-                      placeholder="Buscar lead"
-                      value={query}
-                    />
-                  </div>
-                  <select
-                    className="h-11 rounded-lg border border-white/10 bg-white/[0.04] px-3 text-sm text-zinc-300 outline-none transition focus:border-[#8B5CF6]"
-                    onChange={(event) => setStatusFilter(event.target.value as LeadStatus | "all")}
-                    value={statusFilter}
-                  >
-                    <option value="all">Todas etapas</option>
-                    {visiblePipelineStages.map((column) => (
-                      <option key={column.id} value={column.id}>
-                        {column.title}
-                      </option>
-                    ))}
-                  </select>
-                  <select
-                    className="h-11 rounded-lg border border-white/10 bg-white/[0.04] px-3 text-sm text-zinc-300 outline-none transition focus:border-[#8B5CF6]"
-                    onChange={(event) =>
-                      setTemperatureFilter(event.target.value as Lead["temperature"] | "all")
-                    }
-                    value={temperatureFilter ?? "all"}
-                  >
-                    <option value="all">Temperatura</option>
-                    <option value="frio">Frio</option>
-                    <option value="morno">Morno</option>
-                    <option value="quente">Quente</option>
-                  </select>
-                  <select
-                    className="h-11 rounded-lg border border-white/10 bg-white/[0.04] px-3 text-sm text-zinc-300 outline-none transition focus:border-[#8B5CF6]"
-                    onChange={(event) => setDateFilter(event.target.value as "all" | "today" | "overdue")}
-                    value={dateFilter}
-                  >
-                    <option value="all">Todas datas</option>
-                    <option value="today">Criados hoje</option>
-                    <option value="overdue">Follow-up atrasado</option>
-                  </select>
-                  <select
-                    className="h-11 rounded-lg border border-white/10 bg-white/[0.04] px-3 text-sm text-zinc-300 outline-none transition focus:border-[#8B5CF6]"
-                    onChange={(event) => setTagFilter(event.target.value)}
-                    value={tagFilter}
-                  >
-                    <option value="all">Todas tags</option>
-                    {tags.map((tag) => (
-                      <option key={tag.id} value={tag.id}>
-                        {tag.name}
-                      </option>
-                    ))}
-                  </select>
-                  {view === "pipeline" && (
-                    <>
-                      <select
-                        className="h-11 rounded-lg border border-white/10 bg-white/[0.04] px-3 text-sm text-zinc-300 outline-none transition focus:border-[#8B5CF6]"
-                        defaultValue=""
-                        onChange={(event) => {
-                          if (!event.target.value) return;
-                          applyFilterPreset(event.target.value);
-                          event.target.value = "";
-                        }}
-                      >
-                        <option value="">Filtros salvos</option>
-                        {savedFilterPresets.map((preset) => (
-                          <option key={preset.id} value={preset.id}>
-                            {preset.name}
-                          </option>
-                        ))}
-                      </select>
-                      <button
-                        className="h-11 rounded-lg border border-[#8B5CF6]/30 px-4 text-sm text-[#DDD6FE] transition hover:bg-[#8B5CF6]/10"
-                        onClick={saveCurrentFilterPreset}
-                        type="button"
-                      >
-                        Salvar filtro
-                      </button>
-                      <button
-                        className="h-11 rounded-lg border border-white/10 px-4 text-sm text-zinc-300 transition hover:bg-white/[0.06]"
-                        onClick={() => setPipelineStagesOpen(true)}
-                        type="button"
-                      >
-                        Editar funil
-                      </button>
-                    </>
-                  )}
-                  <button
-                    className="h-11 rounded-lg border border-white/10 px-4 text-sm text-zinc-300 transition hover:bg-white/[0.06]"
-                    onClick={exportFilteredLeads}
-                    type="button"
-                  >
-                    Exportar CSV
-                  </button>
-                </>
-              )}
-              {showLeadHeaderControls && (
-                <button
-                  className="shine-cta flex h-11 items-center justify-center gap-2 rounded-lg bg-[#8B5CF6] px-4 text-sm font-medium shadow-lg shadow-[#8B5CF6]/20 transition hover:bg-[#7C3AED]"
-                  onClick={() => {
-                    setEditingLead(null);
-                    setLeadFormOpen(true);
-                  }}
-                >
-                  <Plus className="h-4 w-4" />
-                  Novo lead
-                </button>
-              )}
-            </div>
-          </header>
+          <CrmContentHeader
+            canCreateLead={canCreateLead}
+            canUpdatePipeline={canUpdatePipeline}
+            crmViewMode={crmViewMode}
+            dateFilter={dateFilter}
+            query={query}
+            savedFilterPresets={savedFilterPresets}
+            statusFilter={statusFilter}
+            tagFilter={tagFilter}
+            tags={tags}
+            temperatureFilter={temperatureFilter}
+            view={view}
+            visiblePipelineStages={visiblePipelineStages}
+            onApplyFilterPreset={applyFilterPreset}
+            onCreateLead={() => setLeadFormOpen(true)}
+            onCrmViewModeChange={setCrmViewMode}
+            onDateFilterChange={setDateFilter}
+            onExportLeads={exportFilteredLeads}
+            onOpenPipelineStages={() => setPipelineStagesOpen(true)}
+            onQueryChange={setQuery}
+            onSaveFilterPreset={saveCurrentFilterPreset}
+            onStatusFilterChange={setStatusFilter}
+            onTagFilterChange={setTagFilter}
+            onTemperatureFilterChange={setTemperatureFilter}
+          />
 
           <div className="crm-content-body reveal-up relative p-5">
             {loading ? (
@@ -2021,29 +1749,40 @@ function Workspace({
                     whatsappMessages={whatsappMessages}
                   />
                 )}
-                {view === "pipeline" && (
-                  <Pipeline
-                    bulkOwnerName={bulkOwnerName}
-                    columns={visiblePipelineStages}
-                    dispatchCountsByLeadId={dispatchCountsByLeadId}
-                    leadTags={tagsByLeadId}
-                    leads={filteredLeads}
-                    onBulkArchive={() => void bulkArchiveSelectedLeads()}
-                    onBulkAssignOwner={() => void bulkAssignOwner()}
-                    onBulkMove={(status) => void bulkMoveSelectedLeads(status)}
-                    onBulkSchedule={(days) => void bulkScheduleSelectedLeads(days)}
-                    onBulkOwnerNameChange={setBulkOwnerName}
-                    onClearSelection={() => setSelectedPipelineLeadIds(new Set())}
-                    onLeadClick={(lead) => setSelectedLeadId(lead.id)}
-                    onLeadDelete={(lead) => setLeadPendingDelete(lead)}
-                    onQuickSchedule={(lead) => scheduleFollowup(lead, addDays(1))}
-                    onQuickWhatsApp={(lead) => setSelectedLeadId(lead.id)}
-                    onStatusChange={requestLeadStatusChange}
-                    recentLeadId={recentLeadId}
-                    selectedLeadIds={selectedPipelineLeadIds}
-                    onToggleLeadSelection={togglePipelineLeadSelection}
-                  />
-                )}
+                {view === "pipeline" &&
+                  (crmViewMode === "kanban" ? (
+                    <Pipeline
+                      bulkOwnerName={bulkOwnerName}
+                      canDeleteLeads={canDeleteLeads}
+                      canMoveLeads={canUpdatePipeline}
+                      columns={visiblePipelineStages}
+                      dispatchCountsByLeadId={dispatchCountsByLeadId}
+                      leadTags={tagsByLeadId}
+                      leads={filteredLeads}
+                      onBulkArchive={() => void bulkArchiveSelectedLeads()}
+                      onBulkAssignOwner={() => void bulkAssignOwner()}
+                      onBulkMove={(status) => void bulkMoveSelectedLeads(status)}
+                      onBulkSchedule={(days) => void bulkScheduleSelectedLeads(days)}
+                      onBulkOwnerNameChange={setBulkOwnerName}
+                      onClearSelection={() => setSelectedPipelineLeadIds(new Set())}
+                      onLeadClick={(lead) => setSelectedLeadId(lead.id)}
+                      onLeadDelete={requestDeleteLead}
+                      onQuickSchedule={(lead) => scheduleFollowup(lead, addDays(1))}
+                      onQuickWhatsApp={(lead) => setSelectedLeadId(lead.id)}
+                      onStatusChange={requestLeadStatusChange}
+                      recentLeadId={recentLeadId}
+                      selectedLeadIds={selectedPipelineLeadIds}
+                      onToggleLeadSelection={togglePipelineLeadSelection}
+                    />
+                  ) : (
+                    <LeadList
+                      leadTags={tagsByLeadId}
+                      leads={filteredLeads}
+                      onEdit={(lead) => setSelectedLeadId(lead.id)}
+                      onDelete={requestDeleteLead}
+                      onOpen={(lead) => setSelectedLeadId(lead.id)}
+                    />
+                  ))}
                 {view === "tasks" && (
                   <TasksView
                     leads={leads}
@@ -2057,25 +1796,17 @@ function Workspace({
                     tasks={tasks}
                   />
                 )}
-                {view === "leads" && (
-                  <LeadList
-                    leadTags={tagsByLeadId}
-                    leads={filteredLeads}
-                    onEdit={(lead) => {
-                      setEditingLead(lead);
-                      setLeadFormOpen(true);
-                    }}
-                    onDelete={(lead) => setLeadPendingDelete(lead)}
-                    onOpen={(lead) => setSelectedLeadId(lead.id)}
-                  />
-                )}
                 {view === "conversations" && (
                   <Conversations
+                    availableTags={tags}
                     columns={visiblePipelineStages}
+                    leadTags={tagsByLeadId}
                     leads={leads}
                     organizationId={organizationId}
                     templates={templates}
                     onAudit={recordAuditLog}
+                    onAssignTag={(lead, tagId) => void assignTagToLead(lead, tagId)}
+                    onCreateTag={createLeadTag}
                     onLeadCreated={(lead) => {
                       setRemoteLeads((items) =>
                         items.some((item) => item.id === lead.id)
@@ -2096,9 +1827,11 @@ function Workspace({
                     crmTheme={crmTheme}
                     initialTab={settingsInitialTab}
                     leads={leads}
+                    memberRole={currentRole}
                     onAddTemplate={addTemplate}
                     onDeleteTemplate={(template) => setTemplatePendingDelete(template)}
                     onThemeChange={setCrmTheme}
+                    organizationContext={organizationContext}
                     tasks={tasks}
                     templates={templates}
                     user={user}
@@ -2114,13 +1847,23 @@ function Workspace({
       </div>
 
       {leadFormOpen && (
-        <LeadForm
+        <LeadCreateModal
+          availableTags={tags}
           columns={visiblePipelineStages}
-          lead={editingLead}
           onClose={() => setLeadFormOpen(false)}
-          onSave={async (input) => {
-            await saveLead(input, editingLead?.id);
+          onSave={async (input, tagIds, newTagName) => {
+            const createdLead = await saveLead(input);
+            if (!createdLead) return null;
+            for (const tagId of tagIds) {
+              await assignTagToLead(createdLead, tagId);
+            }
+            if (newTagName.trim()) {
+              const tag = await createLeadTag(newTagName);
+              if (tag) await assignTagToLead(createdLead, tag.id);
+            }
             setLeadFormOpen(false);
+            setSelectedLeadId(createdLead.id);
+            return createdLead;
           }}
         />
       )}
@@ -2137,7 +1880,7 @@ function Workspace({
           onCompleteTask={completeTask}
           onCreateTask={createTask}
           onClose={() => setSelectedLeadId(null)}
-          onDelete={(lead) => setLeadPendingDelete(lead)}
+          onDelete={requestDeleteLead}
           onCreateTag={(name) => createLeadTag(name)}
           onAssignTag={(tagId) => assignTagToLead(selectedLead, tagId)}
           onRemoveTag={(tagId) => removeTagFromLead(selectedLead, tagId)}
@@ -2189,21 +1932,31 @@ function Workspace({
           }}
           onClose={() => setProspectingOpen(false)}
           onSendProspectingMessage={async (phoneNumber, message) => {
-            const result = await sendWhatsAppConversationMessage(phoneNumber, message, null);
+            const result = await sendWhatsAppConversationMessage(phoneNumber, message, null, {
+              nextFollowupAt: null,
+              moveStatus: null,
+            });
             if (result.message) {
               setRemoteWhatsAppMessages((items) => upsertWhatsAppMessage(items, result.message as WhatsAppMessage));
             }
-            return { success: result.success, error: result.error };
+            return { success: result.success, error: result.error ?? "" };
           }}
           onCampaignCompleted={async (campaign) => {
             const result = await createProspectingCampaignAction(campaign);
             if (!result.success) {
-              showToast(result.error ?? "Campanha enviada, mas nao foi salva no historico");
+              showToast(result.error ?? "Campanha enviada, mas não foi salva no histórico");
               return;
             }
             showToast("Campanha registrada no CRM");
           }}
-          onValidateWhatsAppNumbers={checkWhatsAppNumbers}
+          onValidateWhatsAppNumbers={async (phoneNumbers) => {
+            const result = await checkWhatsAppNumbers(phoneNumbers);
+            return {
+              success: result.success,
+              numbers: result.numbers ?? [],
+              error: result.error ?? "",
+            };
+          }}
           templates={templates}
         />
       )}
@@ -2242,9 +1995,9 @@ function Dashboard({
   const [whatsappStatus, setWhatsappStatus] = useState<{
     connected: boolean;
     state: string;
-    phoneNumber?: string | null;
-    profileName?: string | null;
-    error?: string;
+    phoneNumber: string | null;
+    profileName: string | null;
+    error: string;
   } | null>(null);
   const dashboardClosedStageIds = useMemo(
     () => new Set(columns.filter((column) => column.kind === "closed").map((column) => column.id)),
@@ -2264,14 +2017,16 @@ function Dashboard({
           state: data.state ?? "indefinido",
           phoneNumber: data.phoneNumber ?? null,
           profileName: data.profileName ?? null,
-          error: data.error ?? (!response.ok ? "Nao foi possivel consultar a Evolution" : undefined),
+          error: data.error ?? (!response.ok ? "Não foi possível consultar a Evolution" : undefined),
         });
       } catch {
         if (mounted) {
           setWhatsappStatus({
             connected: false,
             state: "error",
-            error: "Nao foi possivel consultar a Evolution",
+            phoneNumber: null,
+            profileName: null,
+            error: "Não foi possível consultar a Evolution",
           });
         }
       }
@@ -2320,7 +2075,7 @@ function Dashboard({
         if (task.status !== "open") return false;
         if (!task.lead_id) return ownerFilter === "all";
         const lead = leadById.get(task.lead_id);
-        return Boolean(lead) && (ownerFilter === "all" || lead?.owner_name === ownerFilter);
+        return lead ? ownerFilter === "all" || lead.owner_name === ownerFilter : false;
       }),
     [leadById, ownerFilter, tasks],
   );
@@ -2352,6 +2107,7 @@ function Dashboard({
         )
         .map((lead) => ({
           lead,
+          task: null,
           dueAt: lead.next_followup_at ?? "",
           title: "Follow-up pendente",
         })),
@@ -2432,10 +2188,10 @@ function Dashboard({
   );
   const lastWebhook = whatsappLogs[0] ?? null;
   const riskRows = [
-    ...hotLeadsWithoutAction.slice(0, 2).map((lead) => ({ lead, reason: "Quente sem proxima acao" })),
-    ...stuckProposals.slice(0, 2).map((lead) => ({ lead, reason: "Proposta parada ha 3+ dias" })),
-    ...noOwner.slice(0, 2).map((lead) => ({ lead, reason: "Sem responsavel" })),
-    ...noNextContact.slice(0, 2).map((lead) => ({ lead, reason: "Sem proximo contato" })),
+    ...hotLeadsWithoutAction.slice(0, 2).map((lead) => ({ lead, reason: "Quente sem próxima ação" })),
+    ...stuckProposals.slice(0, 2).map((lead) => ({ lead, reason: "Proposta parada há 3+ dias" })),
+    ...noOwner.slice(0, 2).map((lead) => ({ lead, reason: "Sem responsável" })),
+    ...noNextContact.slice(0, 2).map((lead) => ({ lead, reason: "Sem próximo contato" })),
   ].filter((item, index, items) => items.findIndex((candidate) => candidate.lead.id === item.lead.id) === index);
   const stagePerformance = columns.map((column) => {
     const stageLeads = scopedLeads.filter((lead) => lead.status === column.id);
@@ -2458,7 +2214,7 @@ function Dashboard({
   const funnelStages = stagePerformance.slice(0, 5);
   const maxFunnelCount = Math.max(1, ...funnelStages.map((stage) => stage.count));
   const whatsappOperationalStats = [
-    { label: "Nao lidas", value: conversationsWithPendingReplies.length, tone: "bg-[#25D366]" },
+    { label: "Não lidas", value: conversationsWithPendingReplies.length, tone: "bg-[#25D366]" },
     { label: "Sem lead", value: unlinkedConversations.length, tone: "bg-amber-400" },
     { label: "Respondidas", value: groupedMessages.length - conversationsWithPendingReplies.length, tone: "bg-[#8B5CF6]" },
     { label: "Falhas", value: failedMessages.length, tone: "bg-red-400" },
@@ -2472,7 +2228,7 @@ function Dashboard({
       tasks.filter((task) => {
         if (!task.lead_id) return ownerFilter === "all";
         const lead = leadById.get(task.lead_id);
-        return Boolean(lead) && (ownerFilter === "all" || lead?.owner_name === ownerFilter);
+        return lead ? ownerFilter === "all" || lead.owner_name === ownerFilter : false;
       }),
     [leadById, ownerFilter, tasks],
   );
@@ -2489,6 +2245,24 @@ function Dashboard({
       taskPerformanceStats.overdue +
       taskPerformanceStats.completed,
   );
+  const leadScoreStats = useMemo(() => {
+    const scores = scopedLeads.map((lead) => calculateLeadScore(lead, dashboardClosedStageIds));
+    return [
+      { label: "Críticos", value: scores.filter((score) => score.label === "Crítico").length, tone: "bg-red-400" },
+      { label: "Altos", value: scores.filter((score) => score.label === "Alto").length, tone: "bg-[#25D366]" },
+      { label: "Médios", value: scores.filter((score) => score.label === "Médio").length, tone: "bg-amber-400" },
+      { label: "Baixos", value: scores.filter((score) => score.label === "Baixo").length, tone: "bg-sky-400" },
+    ];
+  }, [dashboardClosedStageIds, scopedLeads]);
+  const totalLeadScoreStats = Math.max(1, leadScoreStats.reduce((total, item) => total + item.value, 0));
+  const scorePriorityLeads = useMemo(
+    () =>
+      [...operationalLeads]
+        .map((lead) => ({ lead, score: calculateLeadScore(lead, dashboardClosedStageIds) }))
+        .sort((a, b) => b.score.score - a.score.score)
+        .slice(0, 3),
+    [dashboardClosedStageIds, operationalLeads],
+  );
 
   return (
     <div className="space-y-5">
@@ -2496,7 +2270,7 @@ function Dashboard({
         <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
           <div>
             <h2 className="text-lg font-semibold">Central do dia</h2>
-            <p className="mt-1 text-sm text-zinc-500">Prioridades comerciais, WhatsApp e riscos em uma unica fila de decisao.</p>
+            <p className="mt-1 text-sm text-zinc-500">Prioridades comerciais, WhatsApp e riscos em uma única fila de decisão.</p>
           </div>
           <div className="flex flex-col gap-2 sm:flex-row">
             <select
@@ -2504,7 +2278,7 @@ function Dashboard({
               onChange={(event) => setOwnerFilter(event.target.value)}
               value={ownerFilter}
             >
-              <option value="all">Todos responsaveis</option>
+              <option value="all">Todos responsáveis</option>
               {owners.map((owner) => (
                 <option key={owner} value={owner}>
                   {owner}
@@ -2525,11 +2299,11 @@ function Dashboard({
       </section>
 
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
-        <DashboardPriorityCard description="Acoes fora do prazo" label="Follow-ups vencidos" value={overdueFollowups.length} tone="danger" />
+        <DashboardPriorityCard description="Ações fora do prazo" label="Follow-ups vencidos" value={overdueFollowups.length} tone="danger" />
         <DashboardPriorityCard description="Entradas que pedem resposta" label="Respostas novas" onClick={onViewConversations} value={conversationsWithPendingReplies.length} tone="success" />
         <DashboardPriorityCard description="Contatos para converter" label="Conversas sem lead" onClick={onViewConversations} value={unlinkedConversations.length} tone="warning" />
-        <DashboardPriorityCard description="Saida bloqueada" label="Mensagens com falha" onClick={onViewConversations} value={failedMessages.length} tone="danger" />
-        <DashboardPriorityCard description="Sem proximo passo" label="Quentes sem acao" value={hotLeadsWithoutAction.length} tone="warning" />
+        <DashboardPriorityCard description="Saída bloqueada" label="Mensagens com falha" onClick={onViewConversations} value={failedMessages.length} tone="danger" />
+        <DashboardPriorityCard description="Sem próximo passo" label="Quentes sem ação" value={hotLeadsWithoutAction.length} tone="warning" />
       </div>
 
       <div className="grid items-start gap-5 xl:grid-cols-[1.15fr_0.85fr]">
@@ -2537,7 +2311,7 @@ function Dashboard({
           <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
             <div>
               <h2 className="text-lg font-semibold">Performance visual</h2>
-              <p className="mt-1 text-sm text-zinc-500">Etapas, atividade recente e conversao do funil.</p>
+              <p className="mt-1 text-sm text-zinc-500">Etapas, atividade recente e conversão do funil.</p>
             </div>
             <span className="rounded-full border border-white/10 px-3 py-1 text-xs text-zinc-400">
               Atividade 7 dias
@@ -2547,11 +2321,17 @@ function Dashboard({
             <DashboardStageChart stages={stagePerformance} maxCount={maxStageCount} />
             <DashboardActivityChart days={activityDays} maxTotal={maxActivityTotal} />
           </div>
+          <DashboardScoreChart
+            onOpen={onOpen}
+            scorePriorityLeads={scorePriorityLeads}
+            stats={leadScoreStats}
+            total={totalLeadScoreStats}
+          />
         </section>
 
         <section className="self-start rounded-lg border border-white/10 bg-white/[0.03] p-5">
           <h2 className="text-lg font-semibold">Funil e WhatsApp</h2>
-          <p className="mt-1 text-sm text-zinc-500">Visao rapida da distribuicao operacional.</p>
+          <p className="mt-1 text-sm text-zinc-500">Visão rapida da distribuição operacional.</p>
           <DashboardFunnelChart stages={funnelStages} maxCount={maxFunnelCount} />
           <div className="mt-5 rounded-lg border border-white/10 bg-black/20 p-4">
             <div className="flex items-center justify-between gap-3">
@@ -2587,7 +2367,7 @@ function Dashboard({
           <div className="flex items-center justify-between gap-3">
             <div>
               <h2 className="text-lg font-semibold">Tarefas de hoje</h2>
-              <p className="mt-1 text-sm text-zinc-500">Operacionais e comerciais em uma fila de execucao.</p>
+              <p className="mt-1 text-sm text-zinc-500">Operacionais e comerciais em uma fila de execução.</p>
             </div>
             <span className="rounded-full border border-white/10 px-2 py-1 text-xs text-zinc-400">
               {todayAgenda.length}
@@ -2654,13 +2434,13 @@ function Dashboard({
             Riscos comerciais
           </h2>
           <div className="mt-4 grid gap-3 md:grid-cols-2">
-            <DashboardCompactMetric label="Leads quentes sem proxima acao" value={hotLeadsWithoutAction.length} />
-            <DashboardCompactMetric label="Propostas paradas ha 3+ dias" value={stuckProposals.length} />
-            <DashboardCompactMetric label="Leads sem responsavel" value={noOwner.length} />
-            <DashboardCompactMetric label="Leads ativos sem proximo contato" value={noNextContact.length} />
+            <DashboardCompactMetric label="Leads quentes sem próxima ação" value={hotLeadsWithoutAction.length} />
+            <DashboardCompactMetric label="Propostas paradas há 3+ dias" value={stuckProposals.length} />
+            <DashboardCompactMetric label="Leads sem responsável" value={noOwner.length} />
+            <DashboardCompactMetric label="Leads ativos sem próximo contato" value={noNextContact.length} />
           </div>
           <div className="mt-4 space-y-2">
-            {riskRows.length === 0 && <DashboardEmpty text="Nenhum risco comercial critico para este filtro." />}
+            {riskRows.length === 0 && <DashboardEmpty text="Nenhum risco comercial crítico para este filtro." />}
             {riskRows.slice(0, 5).map(({ lead, reason }) => (
               <DashboardRiskLeadRow
                 key={lead.id}
@@ -2675,7 +2455,7 @@ function Dashboard({
 
         <section className="rounded-lg border border-white/10 bg-white/[0.03] p-5">
           <h2 className="text-lg font-semibold">Performance leve</h2>
-          <p className="mt-1 text-sm text-zinc-500">Periodo selecionado e carteira aberta.</p>
+          <p className="mt-1 text-sm text-zinc-500">Período selecionado e carteira aberta.</p>
           <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
             <DashboardCompactMetric label="Leads criados" value={createdInPeriod} />
             <DashboardCompactMetric label="Respostas" value={repliesInPeriod} />
@@ -2729,518 +2509,6 @@ function buildDashboardActivityDays({
   });
 }
 
-function DashboardPriorityCard({
-  label,
-  value,
-  tone,
-  description,
-  onClick,
-}: {
-  label: string;
-  value: number;
-  tone: "danger" | "success" | "warning";
-  description: string;
-  onClick?: () => void;
-}) {
-  const toneClass = {
-    danger: "border-red-400/25 bg-red-500/10 text-red-200",
-    success: "border-[#25D366]/25 bg-[#25D366]/10 text-[#9AF0B8]",
-    warning: "border-amber-400/25 bg-amber-500/10 text-amber-100",
-  }[tone];
-  const Element = onClick ? "button" : "div";
-
-  return (
-    <Element
-      className={`rounded-lg border p-4 text-left transition ${toneClass} ${onClick ? "hover:brightness-110" : ""}`}
-      onClick={onClick}
-      type={onClick ? "button" : undefined}
-    >
-      <div className="text-xs uppercase text-current/70">{label}</div>
-      <div className="mt-2 text-3xl font-semibold">{value}</div>
-      <div className="mt-1 text-xs text-current/70">{description}</div>
-    </Element>
-  );
-}
-
-function DashboardCompactMetric({ label, value }: { label: string; value: string | number }) {
-  return (
-    <div className="rounded-lg border border-white/10 bg-black/20 p-3">
-      <div className="text-xs text-zinc-500">{label}</div>
-      <div className="mt-1 text-xl font-semibold text-zinc-100">{value}</div>
-    </div>
-  );
-}
-
-function DashboardTaskChart({
-  stats,
-  total,
-}: {
-  stats: { open: number; completed: number; overdue: number; commercial: number; operational: number };
-  total: number;
-}) {
-  const active = Math.max(0, stats.open - stats.overdue);
-  const segments = [
-    { label: "Em execucao", value: active, tone: "bg-[#8B5CF6]" },
-    { label: "Atrasadas", value: stats.overdue, tone: "bg-red-400" },
-    { label: "Concluidas", value: stats.completed, tone: "bg-[#25D366]" },
-  ];
-  const typeTotal = Math.max(1, stats.commercial + stats.operational);
-
-  return (
-    <div className="mt-4 rounded-lg border border-white/10 bg-black/20 p-4">
-      <div className="flex items-center justify-between gap-3">
-        <div>
-          <div className="text-sm font-medium text-zinc-100">Execucao de tarefas</div>
-          <div className="mt-1 text-xs text-zinc-500">Status atual e origem da demanda.</div>
-        </div>
-        <div className="text-right text-xs text-zinc-500">
-          <div>{stats.commercial} comerciais</div>
-          <div>{stats.operational} operacionais</div>
-        </div>
-      </div>
-      <div className="mt-4 flex h-3 overflow-hidden rounded-full bg-white/10">
-        {segments.map((segment) => (
-          <div
-            className={segment.tone}
-            key={segment.label}
-            style={{ width: `${segment.value === 0 ? 0 : Math.max(4, (segment.value / total) * 100)}%` }}
-            title={`${segment.label}: ${segment.value}`}
-          />
-        ))}
-      </div>
-      <div className="mt-4 grid grid-cols-3 gap-2">
-        {segments.map((segment) => (
-          <DashboardMiniLegend key={segment.label} label={segment.label} tone={segment.tone} value={segment.value} />
-        ))}
-      </div>
-      <div className="mt-4 grid grid-cols-2 gap-2">
-        <div className="rounded-lg border border-[#25D366]/20 bg-[#25D366]/10 p-3">
-          <div className="text-xs text-[#9AF0B8]">Comerciais</div>
-          <div className="mt-2 h-2 overflow-hidden rounded-full bg-black/30">
-            <div className="h-full bg-[#25D366]" style={{ width: `${(stats.commercial / typeTotal) * 100}%` }} />
-          </div>
-        </div>
-        <div className="rounded-lg border border-[#8B5CF6]/20 bg-[#8B5CF6]/10 p-3">
-          <div className="text-xs text-[#DDD6FE]">Operacionais</div>
-          <div className="mt-2 h-2 overflow-hidden rounded-full bg-black/30">
-            <div className="h-full bg-[#8B5CF6]" style={{ width: `${(stats.operational / typeTotal) * 100}%` }} />
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function DashboardStageChart({
-  stages,
-  maxCount,
-}: {
-  stages: Array<{ id: LeadStatus; title: string; count: number; value: number; hot: number }>;
-  maxCount: number;
-}) {
-  return (
-    <div className="rounded-lg border border-white/10 bg-black/20 p-4">
-      <div className="flex items-center justify-between gap-3">
-        <div>
-          <div className="text-sm font-medium text-zinc-100">Leads por etapa</div>
-          <div className="mt-1 text-xs text-zinc-500">Volume, valor aberto e temperatura.</div>
-        </div>
-      </div>
-      <div className="mt-4 max-h-72 space-y-3 overflow-y-auto pr-1">
-        {stages.map((stage) => (
-          <div key={stage.id}>
-            <div className="mb-1 flex items-center justify-between gap-3 text-xs">
-              <span className="truncate text-zinc-300">{stage.title}</span>
-              <span className="shrink-0 text-zinc-500">
-                {stage.count} - {formatCurrency(stage.value) ?? "R$ 0"}
-              </span>
-            </div>
-            <div className="h-2 overflow-hidden rounded-full bg-white/10">
-              <div
-                className="h-full rounded-full bg-[#8B5CF6]"
-                style={{ width: `${Math.max(stage.count ? 8 : 0, (stage.count / maxCount) * 100)}%` }}
-              />
-            </div>
-            {stage.hot > 0 && <div className="mt-1 text-[11px] text-amber-200">{stage.hot} quente(s)</div>}
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function DashboardActivityChart({
-  days,
-  maxTotal,
-}: {
-  days: DashboardActivityDay[];
-  maxTotal: number;
-}) {
-  return (
-    <div className="rounded-lg border border-white/10 bg-black/20 p-4">
-      <div className="text-sm font-medium text-zinc-100">Atividade dos ultimos 7 dias</div>
-      <div className="mt-1 text-xs text-zinc-500">Leads criados, respostas e contatos feitos.</div>
-      <div className="mt-5 grid h-36 grid-cols-7 items-end gap-2">
-        {days.map((day) => {
-          const total = day.created + day.replies + day.contacts;
-
-          return (
-            <div className="flex h-full flex-col items-center justify-end gap-2" key={day.key}>
-              <div className="flex h-28 items-end gap-0.5">
-                <div
-                  className="w-2 rounded-t bg-sky-400"
-                  style={{ height: `${day.created ? Math.max(6, (day.created / maxTotal) * 112) : 2}px` }}
-                  title={`Leads criados: ${day.created}`}
-                />
-                <div
-                  className="w-2 rounded-t bg-[#25D366]"
-                  style={{ height: `${day.replies ? Math.max(6, (day.replies / maxTotal) * 112) : 2}px` }}
-                  title={`Respostas: ${day.replies}`}
-                />
-                <div
-                  className="w-2 rounded-t bg-[#8B5CF6]"
-                  style={{ height: `${day.contacts ? Math.max(6, (day.contacts / maxTotal) * 112) : 2}px` }}
-                  title={`Contatos: ${day.contacts}`}
-                />
-              </div>
-              <div className="text-[11px] text-zinc-500">{day.label}</div>
-              <span className="sr-only">{total} atividades</span>
-            </div>
-          );
-        })}
-      </div>
-      <div className="mt-3 flex flex-wrap gap-3 text-[11px] text-zinc-500">
-        <DashboardMiniLegend label="Leads" tone="bg-sky-400" value={days.reduce((total, day) => total + day.created, 0)} />
-        <DashboardMiniLegend label="Respostas" tone="bg-[#25D366]" value={days.reduce((total, day) => total + day.replies, 0)} />
-        <DashboardMiniLegend label="Contatos" tone="bg-[#8B5CF6]" value={days.reduce((total, day) => total + day.contacts, 0)} />
-      </div>
-    </div>
-  );
-}
-
-function DashboardFunnelChart({
-  stages,
-  maxCount,
-}: {
-  stages: Array<{ id: LeadStatus; title: string; count: number; value: number; hot: number }>;
-  maxCount: number;
-}) {
-  return (
-    <div className="mt-4 space-y-3">
-      {stages.map((stage, index) => (
-        <div className="rounded-lg border border-white/10 bg-black/20 p-3" key={stage.id}>
-          <div className="flex items-center justify-between gap-3">
-            <div className="flex min-w-0 items-center gap-2">
-              <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-white/10 text-xs text-zinc-400">
-                {index + 1}
-              </span>
-              <span className="truncate text-sm font-medium text-zinc-100">{stage.title}</span>
-            </div>
-            <span className="text-sm font-semibold text-zinc-100">{stage.count}</span>
-          </div>
-          <div className="mt-3 h-2 overflow-hidden rounded-full bg-white/10">
-            <div
-              className="h-full rounded-full bg-[#25D366]"
-              style={{ width: `${Math.max(stage.count ? 10 : 0, (stage.count / maxCount) * 100)}%` }}
-            />
-          </div>
-        </div>
-      ))}
-      {stages.length === 0 && <DashboardEmpty text="Nenhuma etapa configurada." />}
-    </div>
-  );
-}
-
-function DashboardMiniLegend({
-  label,
-  tone,
-  value,
-}: {
-  label: string;
-  tone: string;
-  value: number;
-}) {
-  return (
-    <div className="flex items-center gap-2 text-xs text-zinc-500">
-      <span className={`h-2.5 w-2.5 rounded-full ${tone}`} />
-      <span>{label}</span>
-      <span className="font-medium text-zinc-300">{value}</span>
-    </div>
-  );
-}
-
-function DashboardWhatsAppHealth({
-  status,
-  lastWebhook,
-  recentErrors,
-  recentInboundMessages,
-  unreadConversations,
-  unlinkedConversations,
-  failedMessages,
-  onViewConversations,
-}: {
-  status: {
-    connected: boolean;
-    state: string;
-    phoneNumber?: string | null;
-    profileName?: string | null;
-    error?: string;
-  } | null;
-  lastWebhook: WhatsAppLog | null;
-  recentErrors: WhatsAppLog[];
-  recentInboundMessages: WhatsAppMessage[];
-  unreadConversations: number;
-  unlinkedConversations: number;
-  failedMessages: number;
-  onViewConversations: () => void;
-}) {
-  return (
-    <section className="rounded-lg border border-white/10 bg-white/[0.03] p-5">
-      <div className="flex items-center justify-between gap-3">
-        <div>
-          <h2 className="text-lg font-semibold">Saude do WhatsApp</h2>
-          <p className="mt-1 text-sm text-zinc-500">Status da Evolution, inbox e ultimas entradas.</p>
-        </div>
-        <button
-          className="rounded-lg border border-white/10 px-3 py-2 text-xs text-zinc-300 transition hover:bg-white/[0.06]"
-          onClick={onViewConversations}
-          type="button"
-        >
-          Abrir inbox
-        </button>
-      </div>
-      <div className="mt-4 rounded-lg border border-white/10 bg-black/20 p-4">
-        <div className="flex items-center justify-between gap-3">
-          <span className="text-sm text-zinc-400">Evolution</span>
-          <span
-            className={`rounded-full px-2 py-1 text-xs ${
-              status?.connected
-                ? "bg-[#25D366]/10 text-[#9AF0B8]"
-                : "bg-red-500/10 text-red-200"
-            }`}
-          >
-            {status?.connected ? "Conectado" : "Desconectado"}
-          </span>
-        </div>
-        <div className="mt-2 text-xs text-zinc-500">
-          {status?.phoneNumber || status?.profileName || status?.state || "Consultando status..."}
-        </div>
-        {status?.error && <div className="mt-2 text-xs text-red-300">{status.error}</div>}
-        <div className="mt-3 text-xs text-zinc-500">
-          Ultimo webhook:{" "}
-          {lastWebhook ? new Date(lastWebhook.created_at).toLocaleString("pt-BR") : "sem registro"}
-        </div>
-      </div>
-      <div className="mt-4 grid gap-3 sm:grid-cols-3 xl:grid-cols-1">
-        <DashboardCompactMetric label="Nao lidas" value={unreadConversations} />
-        <DashboardCompactMetric label="Sem lead" value={unlinkedConversations} />
-        <DashboardCompactMetric label="Falhas de mensagem" value={failedMessages} />
-      </div>
-      <div className="mt-4 space-y-3">
-        {recentInboundMessages.length === 0 && <DashboardEmpty text="Nenhuma mensagem recebida recentemente." />}
-        {recentInboundMessages.map((message) => (
-          <button
-            className="w-full rounded-lg border border-white/10 bg-black/20 p-3 text-left transition hover:bg-white/[0.05]"
-            key={message.id}
-            onClick={onViewConversations}
-            type="button"
-          >
-            <div className="flex items-center justify-between gap-3 text-xs text-zinc-500">
-              <span>{message.contact_name || message.phone_number}</span>
-              <span>
-                {new Date(message.created_at).toLocaleTimeString("pt-BR", {
-                  hour: "2-digit",
-                  minute: "2-digit",
-                })}
-              </span>
-            </div>
-            <p className="mt-1 line-clamp-2 text-sm text-zinc-300">
-              {message.content || "Mensagem sem texto"}
-            </p>
-          </button>
-        ))}
-      </div>
-      {recentErrors.length > 0 && (
-        <div className="mt-4 rounded-lg border border-red-400/20 bg-red-500/10 p-3">
-          <div className="text-xs font-medium text-red-200">Erros recentes da Evolution</div>
-          <div className="mt-2 space-y-1">
-            {recentErrors.slice(0, 2).map((log) => (
-              <div className="truncate text-xs text-red-100/80" key={log.id}>
-                {log.error_message || log.event_type}
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-    </section>
-  );
-}
-
-function DashboardEmpty({ text }: { text: string }) {
-  return (
-    <div className="rounded-lg border border-dashed border-white/10 p-4 text-sm text-zinc-500">
-      {text}
-    </div>
-  );
-}
-
-function DashboardLeadRow({
-  lead,
-  dueAt,
-  title,
-  onCompleteTask,
-  onOpen,
-  onQuickWhatsApp,
-  onQuickSchedule,
-}: {
-  lead: Lead;
-  dueAt: string;
-  title: string;
-  onCompleteTask?: () => void;
-  onOpen: () => void;
-  onQuickWhatsApp: () => void;
-  onQuickSchedule: () => void;
-}) {
-  const followup = getDueAtLabel(dueAt);
-
-  return (
-    <div className="rounded-lg border border-white/10 bg-black/20 p-4">
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-        <button className="min-w-0 text-left" onClick={onOpen} type="button">
-          <div className="font-medium text-white">{lead.name}</div>
-          <div className="mt-1 text-sm text-zinc-500">{lead.company || "Sem empresa"}</div>
-          <div className="mt-2 text-sm text-zinc-300">{title}</div>
-          <div className={`mt-2 text-xs ${followup.tone}`}>{followup.text}</div>
-        </button>
-        <div className="flex flex-wrap gap-2">
-          {onCompleteTask && (
-            <button
-              className="flex h-9 items-center gap-2 rounded-lg border border-[#25D366]/25 bg-[#25D366]/10 px-3 text-xs text-[#9AF0B8] transition hover:bg-[#25D366]/20"
-              onClick={onCompleteTask}
-              type="button"
-            >
-              <CheckCheck className="h-4 w-4" />
-              Concluir
-            </button>
-          )}
-          <button
-            className="h-9 rounded-lg border border-white/10 px-3 text-xs text-zinc-300 transition hover:bg-white/[0.06]"
-            onClick={onOpen}
-            type="button"
-          >
-            Abrir
-          </button>
-          <button
-            className="h-9 rounded-lg border border-[#25D366]/25 bg-[#25D366]/10 px-3 text-xs text-[#9AF0B8] transition hover:bg-[#25D366]/20"
-            onClick={onQuickWhatsApp}
-            type="button"
-          >
-            WhatsApp
-          </button>
-          <button
-            className="h-9 rounded-lg border border-[#8B5CF6]/25 bg-[#8B5CF6]/10 px-3 text-xs text-[#DDD6FE] transition hover:bg-[#8B5CF6]/20"
-            onClick={onQuickSchedule}
-            type="button"
-          >
-            Reagendar
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function DashboardOperationalTaskRow({
-  task,
-  dueAt,
-  title,
-  onCompleteTask,
-}: {
-  task?: Task;
-  dueAt: string;
-  title: string;
-  onCompleteTask?: () => void;
-}) {
-  const due = getDueAtLabel(dueAt);
-  const repeat = task ? getTaskRepeat(task) : "none";
-  const visibleNotes = stripTaskMetadata(task?.notes);
-
-  return (
-    <div className="rounded-lg border border-[#8B5CF6]/20 bg-[#8B5CF6]/[0.06] p-4">
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="rounded-full border border-[#8B5CF6]/25 bg-[#8B5CF6]/10 px-2 py-0.5 text-[11px] text-[#DDD6FE]">
-              Operacional
-            </span>
-            {task && (
-              <span className="rounded-full border border-white/10 px-2 py-0.5 text-[11px] text-zinc-400">
-                {taskTypeLabel(task.type)}
-              </span>
-            )}
-            {repeat !== "none" && (
-              <span className="rounded-full border border-amber-400/25 bg-amber-500/10 px-2 py-0.5 text-[11px] text-amber-200">
-                Repete {taskRepeatLabel(repeat).toLowerCase()}
-              </span>
-            )}
-          </div>
-          <div className="mt-2 font-medium text-white">{title}</div>
-          <div className={`mt-2 text-xs ${due.tone}`}>{due.text}</div>
-          {visibleNotes && <div className="mt-2 line-clamp-2 text-xs text-zinc-500">{visibleNotes}</div>}
-        </div>
-        {onCompleteTask && (
-          <button
-            className="flex h-9 items-center justify-center gap-2 rounded-lg border border-[#25D366]/25 bg-[#25D366]/10 px-3 text-xs text-[#9AF0B8] transition hover:bg-[#25D366]/20"
-            onClick={onCompleteTask}
-            type="button"
-          >
-            <CheckCheck className="h-4 w-4" />
-            Concluir
-          </button>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function DashboardRiskLeadRow({
-  lead,
-  reason,
-  onOpen,
-  onQuickSchedule,
-}: {
-  lead: Lead;
-  reason: string;
-  onOpen: () => void;
-  onQuickSchedule: () => void;
-}) {
-  return (
-    <div className="rounded-lg border border-white/10 bg-black/20 p-3">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <button className="min-w-0 text-left" onClick={onOpen} type="button">
-          <div className="truncate text-sm font-medium text-zinc-100">{lead.name}</div>
-          <div className="mt-1 truncate text-xs text-zinc-500">{reason} - {lead.company || "Sem empresa"}</div>
-        </button>
-        <div className="flex gap-2">
-          <button
-            className="h-8 rounded-lg border border-white/10 px-3 text-xs text-zinc-300 transition hover:bg-white/[0.06]"
-            onClick={onOpen}
-            type="button"
-          >
-            Abrir
-          </button>
-          <button
-            className="h-8 rounded-lg border border-[#8B5CF6]/25 bg-[#8B5CF6]/10 px-3 text-xs text-[#DDD6FE] transition hover:bg-[#8B5CF6]/20"
-            onClick={onQuickSchedule}
-            type="button"
-          >
-            Reagendar
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 function TasksView({
   tasks,
@@ -3266,8 +2534,14 @@ function TasksView({
   const [scope, setScope] = useState<TaskScope>("open");
   const [owner, setOwner] = useState("all");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
-  const [taskEditor, setTaskEditor] = useState<{ task?: Task; lead?: Lead | null } | null>(null);
+  const [taskEditor, setTaskEditor] = useState<TaskEditorState | null>(null);
+  const [googleEventEditor, setGoogleEventEditor] = useState<GoogleCalendarEvent | null | "new">(null);
+  const [googleEventDeleteTarget, setGoogleEventDeleteTarget] = useState<GoogleCalendarEvent | null>(null);
+  const [googleEventActionLoading, setGoogleEventActionLoading] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<{ task: Task; lead: Lead | null } | null>(null);
+  const [googleEvents, setGoogleEvents] = useState<GoogleCalendarEvent[]>([]);
+  const [googleEventsLoading, setGoogleEventsLoading] = useState(false);
+  const [googleEventsFeedback, setGoogleEventsFeedback] = useState("");
   const owners = Array.from(
     new Set(leads.map((lead) => lead.owner_name?.trim()).filter((item): item is string => Boolean(item))),
   ).sort((a, b) => a.localeCompare(b));
@@ -3314,6 +2588,32 @@ function TasksView({
   const commercialCount = scopedTasks.filter(isCommercialTask).length;
   const agendaCount = agendaRows.length;
 
+  const refreshGoogleEvents = useCallback(async () => {
+    setGoogleEventsLoading(true);
+    setGoogleEventsFeedback("");
+    try {
+      const response = await fetch("/api/integrations/google/events", { cache: "no-store" });
+      const data = await response.json();
+      setGoogleEvents((data.events as GoogleCalendarEvent[] | undefined) ?? []);
+      if (!response.ok || data.error) {
+        setGoogleEventsFeedback(data.error ?? "Não foi possível carregar a agenda Google.");
+      } else if (!data.connected) {
+        setGoogleEventsFeedback("Conecte o Google Calendar em Configurações > CRM para listar eventos aqui.");
+      }
+    } catch {
+      setGoogleEventsFeedback("Não foi possível carregar a agenda Google.");
+    } finally {
+      setGoogleEventsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    const timeout = window.setTimeout(() => {
+      void refreshGoogleEvents();
+    }, 0);
+    return () => window.clearTimeout(timeout);
+  }, [refreshGoogleEvents]);
+
   function toggleTask(id: string) {
     setSelectedIds((current) => {
       const next = new Set(current);
@@ -3331,10 +2631,75 @@ function TasksView({
   }
 
   function saveTask(input: TaskInput) {
+    const editor = taskEditor;
+    if (!editor) return;
     const lead = input.lead_id ? leads.find((item) => item.id === input.lead_id) ?? null : null;
-    if (taskEditor?.task) onUpdateTask(taskEditor.task, taskEditor.lead ?? null, input);
+    if (editor.task) onUpdateTask(editor.task, editor.lead ?? null, input);
     else onCreateTask(lead, input);
     setTaskEditor(null);
+  }
+
+  async function saveGoogleEvent(input: GoogleCalendarEventDraft, event?: GoogleCalendarEvent) {
+    setGoogleEventActionLoading(true);
+    setGoogleEventsFeedback("");
+    const payload = {
+      title: input.title.trim(),
+      description: input.description.trim() || null,
+      startsAt: fromDateTimeLocal(input.startsAt),
+      endsAt: fromDateTimeLocal(input.endsAt),
+      location: input.location.trim() || null,
+      attendees: input.attendees
+        .split(/[,\n;]/)
+        .map((email) => email.trim())
+        .filter(Boolean),
+      createMeet: input.createMeet,
+      durationMinutes: 30,
+    };
+
+    try {
+      const response = await fetch(event ? `/api/integrations/google/events/${encodeURIComponent(event.id)}` : "/api/integrations/google/events", {
+        method: event ? "PATCH" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const data = await response.json();
+
+      if (!response.ok || data.error) {
+        setGoogleEventsFeedback(data.error ?? "Não foi possível salvar o evento Google.");
+        return;
+      }
+
+      setGoogleEventEditor(null);
+      await refreshGoogleEvents();
+    } catch {
+      setGoogleEventsFeedback("Não foi possível salvar o evento Google.");
+    } finally {
+      setGoogleEventActionLoading(false);
+    }
+  }
+
+  async function deleteGoogleEvent(event: GoogleCalendarEvent) {
+    setGoogleEventActionLoading(true);
+    setGoogleEventsFeedback("");
+    try {
+      const response = await fetch(`/api/integrations/google/events/${encodeURIComponent(event.id)}`, {
+        method: "DELETE",
+      });
+      const data = await response.json();
+
+      if (!response.ok || data.error) {
+        setGoogleEventsFeedback(data.error ?? "Não foi possível excluir o evento Google.");
+        return;
+      }
+
+      setGoogleEventDeleteTarget(null);
+      setGoogleEvents((items) => items.filter((item) => item.id !== event.id));
+      await refreshGoogleEvents();
+    } catch {
+      setGoogleEventsFeedback("Não foi possível excluir o evento Google.");
+    } finally {
+      setGoogleEventActionLoading(false);
+    }
   }
 
   return (
@@ -3344,8 +2709,8 @@ function TasksView({
           ["open", "Abertas"],
           ["overdue", "Vencidas"],
           ["today", "Hoje"],
-          ["upcoming", "Proximas"],
-          ["completed", "Concluidas"],
+          ["upcoming", "Próximas"],
+          ["completed", "Concluídas"],
         ] as Array<[TaskScope, string]>).map(([key, label]) => (
           <button
             className={`rounded-lg border p-4 text-left transition ${
@@ -3368,7 +2733,7 @@ function TasksView({
           <div>
             <h2 className="text-lg font-semibold">Tarefas</h2>
             <p className="mt-1 text-sm text-zinc-500">
-              {commercialCount} comerciais e {operationalCount} operacionais. Conclua, edite, exclua ou reagende proximas acoes.
+              {commercialCount} comerciais e {operationalCount} operacionais. Conclua, edite, exclua ou reagende próximas ações.
             </p>
           </div>
           <div className="flex flex-col gap-2 sm:flex-row">
@@ -3377,7 +2742,7 @@ function TasksView({
               onChange={(event) => setOwner(event.target.value)}
               value={owner}
             >
-              <option value="all">Todos responsaveis</option>
+              <option value="all">Todos responsáveis</option>
               {owners.map((item) => (
                 <option key={item} value={item}>{item}</option>
               ))}
@@ -3461,9 +2826,9 @@ function TasksView({
                       )}
                       {visibleNotes && <div className="mt-2 line-clamp-2 text-xs leading-5 text-zinc-500">{visibleNotes}</div>}
                     </div>
-                    <div>
-                      <div className={`text-sm ${due.tone}`}>{due.text}</div>
-                      <div className="mt-1 text-xs text-zinc-500">{lead?.owner_name || "Sem responsavel"}</div>
+                      <div>
+                        <div className={`text-sm ${due.tone}`}>{due.text}</div>
+                      <div className="mt-1 text-xs text-zinc-500">{lead?.owner_name || "Sem responsável"}</div>
                     </div>
                     <div className="flex flex-wrap gap-2 lg:justify-end">
                       {lead && (
@@ -3482,7 +2847,7 @@ function TasksView({
                             onClick={() => onRescheduleTask(task, lead, addDays(1))}
                             type="button"
                           >
-                            Amanha
+                            Amanhã
                           </button>
                           <button
                             className="h-9 rounded-lg border border-[#25D366]/25 bg-[#25D366]/10 px-3 text-xs text-[#9AF0B8] transition hover:bg-[#25D366]/20"
@@ -3536,7 +2901,7 @@ function TasksView({
           <div>
             <h2 className="text-lg font-semibold">Agenda comercial</h2>
             <p className="mt-1 text-sm text-zinc-500">
-              Follow-ups salvos nos leads do CRM. Use esta fila para acompanhar os agendamentos ainda nao convertidos em tarefa.
+              Follow-ups salvos nos leads do CRM. Use esta fila para acompanhar os agendamentos ainda não convertidos em tarefa.
             </p>
           </div>
           <span className="w-fit rounded-full border border-white/10 px-3 py-1 text-xs text-zinc-400">
@@ -3574,7 +2939,7 @@ function TasksView({
                     </div>
                     <div>
                       <div className={`text-sm ${due.tone}`}>{due.text}</div>
-                      <div className="mt-1 text-xs text-zinc-500">{lead.owner_name || "Sem responsavel"}</div>
+                      <div className="mt-1 text-xs text-zinc-500">{lead.owner_name || "Sem responsável"}</div>
                     </div>
                     <div className="flex flex-wrap gap-2 lg:justify-end">
                       <button
@@ -3626,12 +2991,154 @@ function TasksView({
           )}
         </div>
       </section>
+
+      <section className="rounded-lg border border-white/10 bg-white/[0.03] p-4">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <h2 className="text-lg font-semibold">Agenda Google</h2>
+            <p className="mt-1 text-sm text-zinc-500">
+              Eventos da agenda conectada. Criar ou editar tarefas no Origo sincroniza novos eventos automaticamente.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button
+              className="flex h-9 items-center justify-center gap-2 rounded-lg bg-[#8B5CF6] px-3 text-xs font-semibold text-white transition hover:bg-[#7C3AED]"
+              onClick={() => setGoogleEventEditor("new")}
+              type="button"
+            >
+              <Plus className="h-4 w-4" />
+              Criar evento
+            </button>
+            <button
+              className="flex h-9 items-center justify-center gap-2 rounded-lg border border-white/10 px-3 text-xs text-zinc-300 transition hover:bg-white/[0.06] disabled:opacity-60"
+              disabled={googleEventsLoading}
+              onClick={() => void refreshGoogleEvents()}
+              type="button"
+            >
+              {googleEventsLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+              Atualizar agenda
+            </button>
+          </div>
+        </div>
+
+        <div className="mt-4 overflow-hidden rounded-lg border border-white/10">
+          {googleEventsLoading ? (
+            <div className="flex items-center gap-2 p-6 text-sm text-zinc-500">
+              <Loader2 className="h-4 w-4 animate-spin text-[#8B5CF6]" />
+              Carregando eventos do Google...
+            </div>
+          ) : googleEvents.length === 0 ? (
+            <div className="p-6 text-sm text-zinc-500">
+              {googleEventsFeedback || "Nenhum evento futuro encontrado na agenda conectada."}
+            </div>
+          ) : (
+            <div className="max-h-[26rem] divide-y divide-white/10 overflow-y-auto">
+              {googleEvents.map((event) => {
+                const startsAt = event.startsAt ? new Date(event.startsAt) : null;
+                const validDate = startsAt && !Number.isNaN(startsAt.getTime());
+                return (
+                  <div className="grid gap-3 bg-black/20 p-4 lg:grid-cols-[1.4fr_1fr_auto] lg:items-center" key={event.id}>
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="rounded-full border border-[#8B5CF6]/25 bg-[#8B5CF6]/10 px-2 py-0.5 text-[11px] text-[#DDD6FE]">
+                          Google Calendar
+                        </span>
+                        <span className="font-medium text-zinc-100">{event.title}</span>
+                      </div>
+                      {event.description && <div className="mt-1 line-clamp-2 text-sm text-zinc-500">{event.description}</div>}
+                    </div>
+                    <div className="text-sm text-zinc-400">
+                      {validDate ? startsAt.toLocaleString("pt-BR") : "Sem data"}
+                    </div>
+                    <div className="flex flex-wrap gap-2 lg:justify-end">
+                      {event.hangoutLink && (
+                        <a
+                          className="flex h-9 items-center gap-1 rounded-lg border border-[#25D366]/25 bg-[#25D366]/10 px-3 text-xs text-[#9AF0B8] transition hover:bg-[#25D366]/20"
+                          href={event.hangoutLink}
+                          rel="noreferrer"
+                          target="_blank"
+                        >
+                          <ExternalLink className="h-3.5 w-3.5" />
+                          Meet
+                        </a>
+                      )}
+                      {event.htmlLink && (
+                        <a
+                          className="flex h-9 items-center gap-1 rounded-lg border border-white/10 px-3 text-xs text-zinc-300 transition hover:bg-white/[0.06]"
+                          href={event.htmlLink}
+                          rel="noreferrer"
+                          target="_blank"
+                        >
+                          <ExternalLink className="h-3.5 w-3.5" />
+                          Abrir Google
+                        </a>
+                      )}
+                      <button
+                        className="flex h-9 items-center gap-1 rounded-lg border border-[#25D366]/25 bg-[#25D366]/10 px-3 text-xs text-[#9AF0B8] transition hover:bg-[#25D366]/20"
+                        onClick={() =>
+                          setTaskEditor({
+                            lead: null,
+                            draft: {
+                              lead_id: null,
+                              type: "meeting",
+                              title: event.title,
+                              notes: event.description ?? "Criado a partir da Agenda Google",
+                              due_at: event.startsAt ?? new Date().toISOString(),
+                            },
+                          })
+                        }
+                        type="button"
+                      >
+                        <Plus className="h-3.5 w-3.5" />
+                        Nova tarefa
+                      </button>
+                      <button
+                        className="flex h-9 items-center gap-1 rounded-lg border border-white/10 px-3 text-xs text-zinc-300 transition hover:bg-white/[0.06]"
+                        onClick={() => setGoogleEventEditor(event)}
+                        type="button"
+                      >
+                        <Edit3 className="h-3.5 w-3.5" />
+                        Editar
+                      </button>
+                      <button
+                        className="flex h-9 items-center gap-1 rounded-lg border border-red-400/20 bg-red-500/10 px-3 text-xs text-red-200 transition hover:bg-red-500/20"
+                        onClick={() => setGoogleEventDeleteTarget(event)}
+                        type="button"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                        Excluir
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </section>
       {taskEditor && (
         <TaskEditorModal
           leads={sortedLeads}
           onClose={() => setTaskEditor(null)}
           onSave={saveTask}
+          draft={taskEditor.draft}
           task={taskEditor.task}
+        />
+      )}
+      {googleEventEditor && (
+        <GoogleEventEditorModal
+          event={googleEventEditor === "new" ? undefined : googleEventEditor}
+          loading={googleEventActionLoading}
+          onClose={() => setGoogleEventEditor(null)}
+          onSave={(input) => void saveGoogleEvent(input, googleEventEditor === "new" ? undefined : googleEventEditor)}
+        />
+      )}
+      {googleEventDeleteTarget && (
+        <ConfirmDeleteGoogleEvent
+          event={googleEventDeleteTarget}
+          loading={googleEventActionLoading}
+          onCancel={() => setGoogleEventDeleteTarget(null)}
+          onConfirm={() => void deleteGoogleEvent(googleEventDeleteTarget)}
         />
       )}
       {deleteTarget && (
@@ -3648,123 +3155,6 @@ function TasksView({
   );
 }
 
-function TaskEditorModal({
-  leads,
-  task,
-  onClose,
-  onSave,
-}: {
-  leads: Lead[];
-  task?: Task;
-  onClose: () => void;
-  onSave: (input: TaskInput) => void;
-}) {
-  const [leadId, setLeadId] = useState(task?.lead_id ?? "");
-  const [type, setType] = useState<Task["type"]>(task?.type ?? "other");
-  const [title, setTitle] = useState(task?.title ?? "");
-  const [notes, setNotes] = useState(stripTaskMetadata(task?.notes));
-  const [dueAt, setDueAt] = useState(toDateTimeLocal(task?.due_at ?? new Date().toISOString()));
-  const [repeat, setRepeat] = useState<TaskRepeat>(task ? getTaskRepeat(task) : "none");
-
-  return (
-    <Modal onClose={onClose} title={task ? "Editar tarefa" : "Criar nova tarefa"}>
-      <form
-        className="space-y-4"
-        onSubmit={(event) => {
-          event.preventDefault();
-          if (!title.trim()) return;
-          onSave({
-            lead_id: leadId || null,
-            type,
-            title: title.trim(),
-            notes: buildTaskNotes(notes, repeat),
-            due_at: fromDateTimeLocal(dueAt),
-          });
-        }}
-      >
-        <div className="grid gap-3 sm:grid-cols-2">
-          <Input label="Titulo" onChange={setTitle} required value={title} />
-          <label className="block text-sm text-zinc-300">
-            Tipo
-            <select
-              className="mt-2 h-11 w-full rounded-lg border border-white/10 bg-black/30 px-3 text-sm text-zinc-100 outline-none transition focus:border-[#8B5CF6]"
-              onChange={(event) => setType(event.target.value as Task["type"])}
-              value={type}
-            >
-              <option value="other">Operacional</option>
-              <option value="followup">Follow-up</option>
-              <option value="whatsapp">WhatsApp</option>
-              <option value="call">Ligacao</option>
-              <option value="email">Email</option>
-              <option value="meeting">Reuniao</option>
-            </select>
-          </label>
-          <label className="block text-sm text-zinc-300">
-            Lead vinculado
-            <select
-              className="mt-2 h-11 w-full rounded-lg border border-white/10 bg-black/30 px-3 text-sm text-zinc-100 outline-none transition focus:border-[#8B5CF6]"
-              onChange={(event) => setLeadId(event.target.value)}
-              value={leadId}
-            >
-              <option value="">Sem lead</option>
-              {leads.map((lead) => (
-                <option key={lead.id} value={lead.id}>
-                  {lead.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="block text-sm text-zinc-300">
-            Quando
-            <input
-              className="mt-2 h-11 w-full rounded-lg border border-white/10 bg-black/30 px-3 text-sm text-zinc-100 outline-none transition focus:border-[#8B5CF6]"
-              onChange={(event) => setDueAt(event.target.value)}
-              required
-              type="datetime-local"
-              value={dueAt}
-            />
-          </label>
-          <label className="block text-sm text-zinc-300 sm:col-span-2">
-            Repetir
-            <select
-              className="mt-2 h-11 w-full rounded-lg border border-white/10 bg-black/30 px-3 text-sm text-zinc-100 outline-none transition focus:border-[#8B5CF6]"
-              onChange={(event) => setRepeat(event.target.value as TaskRepeat)}
-              value={repeat}
-            >
-              <option value="none">Nao repetir</option>
-              <option value="daily">Diariamente</option>
-              <option value="weekly">Semanalmente</option>
-              <option value="monthly">Mensalmente</option>
-            </select>
-          </label>
-        </div>
-        <label className="block text-sm text-zinc-300">
-          Observacao
-          <textarea
-            className="mt-2 min-h-28 w-full rounded-lg border border-white/10 bg-black/30 p-3 text-sm outline-none transition focus:border-[#8B5CF6]"
-            onChange={(event) => setNotes(event.target.value)}
-            placeholder="Detalhe o que precisa ser feito, contexto ou criterio de conclusao"
-            value={notes}
-          />
-        </label>
-        <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-          <button
-            className="h-10 rounded-lg border border-white/10 px-4 text-sm text-zinc-300 transition hover:bg-white/[0.06]"
-            onClick={onClose}
-            type="button"
-          >
-            Cancelar
-          </button>
-          <button className="flex h-10 items-center justify-center gap-2 rounded-lg bg-[#8B5CF6] px-4 text-sm font-semibold text-white transition hover:bg-[#7C3AED]">
-            <Save className="h-4 w-4" />
-            Salvar tarefa
-          </button>
-        </div>
-      </form>
-    </Modal>
-  );
-}
-
 function groupMessagesByPhone(messages: WhatsAppMessage[]) {
   const grouped = new Map<string, WhatsAppMessage[]>();
   for (const message of [...messages].sort(
@@ -3775,1260 +3165,28 @@ function groupMessagesByPhone(messages: WhatsAppMessage[]) {
   return Array.from(grouped.values());
 }
 
-const pipelineMeta: Record<string, { accent: string; description: string; empty: string }> = {
-  novo: {
-    accent: "bg-sky-400",
-    description: "Entradas recentes para qualificar",
-    empty: "Nenhum lead novo",
-  },
-  contatado: {
-    accent: "bg-[#8B5CF6]",
-    description: "Contato iniciado e aguardando retorno",
-    empty: "Nenhum contato em andamento",
-  },
-  respondeu: {
-    accent: "bg-[#25D366]",
-    description: "Leads que ja responderam",
-    empty: "Nenhuma resposta registrada",
-  },
-  proposta: {
-    accent: "bg-amber-400",
-    description: "Negociacoes com proposta enviada",
-    empty: "Nenhuma proposta ativa",
-  },
-  fechado: {
-    accent: "bg-zinc-300",
-    description: "Oportunidades concluidas",
-    empty: "Nenhum lead fechado",
-  },
-};
-
-function getPipelineMeta(id: LeadStatus, title: string) {
-  return pipelineMeta[id] ?? {
-    accent: "bg-zinc-400",
-    description: "Etapa personalizada",
-    empty: `Nenhum lead em ${title.toLowerCase()}`,
-  };
-}
-
-function Pipeline({
-  leads,
-  leadTags,
-  dispatchCountsByLeadId,
-  columns,
-  recentLeadId,
-  selectedLeadIds,
-  bulkOwnerName,
-  onLeadClick,
-  onLeadDelete,
-  onStatusChange,
-  onToggleLeadSelection,
-  onClearSelection,
-  onBulkMove,
-  onBulkSchedule,
-  onBulkArchive,
-  onBulkOwnerNameChange,
-  onBulkAssignOwner,
-  onQuickWhatsApp,
-  onQuickSchedule,
-}: {
-  leads: Lead[];
-  leadTags: Map<string, CrmTag[]>;
-  dispatchCountsByLeadId: Map<string, number>;
-  columns: PipelineStage[];
-  recentLeadId: string | null;
-  selectedLeadIds: Set<string>;
-  bulkOwnerName: string;
-  onLeadClick: (lead: Lead) => void;
-  onLeadDelete: (lead: Lead) => void;
-  onStatusChange: (id: string, status: LeadStatus) => void;
-  onToggleLeadSelection: (id: string) => void;
-  onClearSelection: () => void;
-  onBulkMove: (status: LeadStatus) => void;
-  onBulkSchedule: (days: number) => void;
-  onBulkArchive: () => void;
-  onBulkOwnerNameChange: (value: string) => void;
-  onBulkAssignOwner: () => void;
-  onQuickWhatsApp: (lead: Lead) => void;
-  onQuickSchedule: (lead: Lead) => void;
-}) {
-  const closedStageIds = useMemo(
-    () => new Set(columns.filter((column) => column.kind === "closed").map((column) => column.id)),
-    [columns],
-  );
-  const sensors = useSensors(
-    useSensor(PointerSensor),
-    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
-  );
-
-  function handleDragEnd(event: DragEndEvent) {
-    const { active, over } = event;
-    if (!over) return;
-
-    const activeLead = leads.find((lead) => lead.id === active.id);
-    if (!activeLead) return;
-
-    const overId = String(over.id);
-    const column = columns.find((item) => item.id === overId);
-    const overLead = leads.find((lead) => lead.id === overId);
-    const nextStatus = (column?.id ?? overLead?.status) as LeadStatus | undefined;
-
-    if (nextStatus && nextStatus !== activeLead.status) onStatusChange(activeLead.id, nextStatus);
-  }
-
-  const selectedCount = leads.filter((lead) => selectedLeadIds.has(lead.id)).length;
-
-  return (
-    <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
-      <div className="space-y-4">
-        <PipelineOverview closedStageIds={closedStageIds} leads={leads} />
-        <PipelineBulkActions
-          bulkOwnerName={bulkOwnerName}
-          columns={columns}
-          onArchive={onBulkArchive}
-          onAssignOwner={onBulkAssignOwner}
-          onClear={onClearSelection}
-          onMove={onBulkMove}
-          onOwnerNameChange={onBulkOwnerNameChange}
-          onSchedule={onBulkSchedule}
-          selectedCount={selectedCount}
-        />
-        <div className="flex items-start gap-3 overflow-x-auto pb-4">
-          {columns.map((column) => {
-            const columnLeads = sortPipelineLeadsByUrgency(
-              leads.filter((lead) => lead.status === column.id),
-              closedStageIds,
-            );
-            return (
-              <PipelineColumn
-                key={column.id}
-                id={column.id}
-                dispatchCountsByLeadId={dispatchCountsByLeadId}
-                leads={columnLeads}
-                leadTags={leadTags}
-                onLeadClick={onLeadClick}
-                onLeadDelete={onLeadDelete}
-                onQuickSchedule={onQuickSchedule}
-                onQuickWhatsApp={onQuickWhatsApp}
-                columns={columns}
-                closedStageIds={closedStageIds}
-                onStatusChange={onStatusChange}
-                onToggleLeadSelection={onToggleLeadSelection}
-                recentLeadId={recentLeadId}
-                selectedLeadIds={selectedLeadIds}
-                title={column.title}
-              />
-            );
-          })}
-        </div>
-      </div>
-    </DndContext>
-  );
-}
-
-function PipelineBulkActions({
-  selectedCount,
-  columns,
-  bulkOwnerName,
-  onOwnerNameChange,
-  onAssignOwner,
-  onMove,
-  onSchedule,
-  onArchive,
-  onClear,
-}: {
-  selectedCount: number;
-  columns: PipelineStage[];
-  bulkOwnerName: string;
-  onOwnerNameChange: (value: string) => void;
-  onAssignOwner: () => void;
-  onMove: (status: LeadStatus) => void;
-  onSchedule: (days: number) => void;
-  onArchive: () => void;
-  onClear: () => void;
-}) {
-  const disabled = selectedCount === 0;
-
-  return (
-    <section className="rounded-lg border border-white/10 bg-white/[0.035] p-3">
-      <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-        <div className="text-sm text-zinc-400">
-          <span className="font-medium text-zinc-100">{selectedCount}</span> selecionados
-        </div>
-        <div className="flex flex-col gap-2 md:flex-row md:flex-wrap md:items-center md:justify-end">
-          <select
-            className="h-10 rounded-lg border border-white/10 bg-black/30 px-3 text-sm text-zinc-200 outline-none transition focus:border-[#8B5CF6] disabled:opacity-50"
-            defaultValue=""
-            disabled={disabled}
-            onChange={(event) => {
-              if (!event.target.value) return;
-              onMove(event.target.value as LeadStatus);
-              event.target.value = "";
-            }}
-          >
-            <option value="">Mover etapa</option>
-            {columns.map((column) => (
-              <option key={column.id} value={column.id}>
-                {column.title}
-              </option>
-            ))}
-          </select>
-          <button
-            className="h-10 rounded-lg border border-white/10 px-3 text-sm text-zinc-300 transition hover:bg-white/[0.06] disabled:opacity-50"
-            disabled={disabled}
-            onClick={() => onSchedule(1)}
-            type="button"
-          >
-            Follow-up amanha
-          </button>
-          <div className="flex min-w-0 gap-2">
-            <input
-              className="h-10 min-w-0 rounded-lg border border-white/10 bg-black/30 px-3 text-sm text-zinc-200 outline-none transition placeholder:text-zinc-600 focus:border-[#8B5CF6] disabled:opacity-50"
-              disabled={disabled}
-              onChange={(event) => onOwnerNameChange(event.target.value)}
-              placeholder="Responsavel"
-              value={bulkOwnerName}
-            />
-            <button
-              className="h-10 rounded-lg border border-white/10 px-3 text-sm text-zinc-300 transition hover:bg-white/[0.06] disabled:opacity-50"
-              disabled={disabled || !bulkOwnerName.trim()}
-              onClick={onAssignOwner}
-              type="button"
-            >
-              Atribuir
-            </button>
-          </div>
-          <button
-            className="h-10 rounded-lg border border-red-400/20 bg-red-500/10 px-3 text-sm text-red-300 transition hover:bg-red-500/20 disabled:opacity-50"
-            disabled={disabled}
-            onClick={onArchive}
-            type="button"
-          >
-            Excluir
-          </button>
-          <button
-            className="h-10 rounded-lg border border-white/10 px-3 text-sm text-zinc-500 transition hover:bg-white/[0.06] disabled:opacity-50"
-            disabled={disabled}
-            onClick={onClear}
-            type="button"
-          >
-            Limpar
-          </button>
-        </div>
-      </div>
-    </section>
-  );
-}
-
-function PipelineStagesModal({
-  stages,
-  leads,
-  onClose,
-  onAddStage,
-  onMoveStage,
-  onRenameStage,
-  onRemoveStage,
-  onUpdateStageKind,
-}: {
-  stages: PipelineStage[];
-  leads: Lead[];
-  onClose: () => void;
-  onAddStage: (title: string) => void;
-  onMoveStage: (id: LeadStatus, direction: -1 | 1) => void;
-  onRenameStage: (id: LeadStatus, title: string) => void;
-  onRemoveStage: (id: LeadStatus) => void;
-  onUpdateStageKind: (id: LeadStatus, kind: NonNullable<PipelineStage["kind"]>) => void;
-}) {
-  const [newStageTitle, setNewStageTitle] = useState("");
-
-  function leadCount(stageId: LeadStatus) {
-    return leads.filter((lead) => lead.status === stageId).length;
-  }
-
-  return (
-    <Modal onClose={onClose} title="Editar funil">
-      <div className="space-y-4">
-        <div className="space-y-3">
-          {stages.map((stage) => {
-            const count = leadCount(stage.id);
-            const canRemove = count === 0 && stages.length > 1;
-            const stageIndex = stages.findIndex((item) => item.id === stage.id);
-
-            return (
-              <div
-                className="grid gap-3 rounded-lg border border-white/10 bg-white/[0.035] p-3 xl:grid-cols-[auto_1fr_auto_auto_auto] xl:items-center"
-                key={stage.id}
-              >
-                <div className="flex gap-2">
-                  <button
-                    className="flex h-10 w-10 items-center justify-center rounded-lg border border-white/10 text-zinc-300 transition hover:bg-white/[0.06] disabled:opacity-40"
-                    disabled={stageIndex === 0}
-                    onClick={() => onMoveStage(stage.id, -1)}
-                    title="Subir etapa"
-                    type="button"
-                  >
-                    <ArrowUp className="h-4 w-4" />
-                  </button>
-                  <button
-                    className="flex h-10 w-10 items-center justify-center rounded-lg border border-white/10 text-zinc-300 transition hover:bg-white/[0.06] disabled:opacity-40"
-                    disabled={stageIndex === stages.length - 1}
-                    onClick={() => onMoveStage(stage.id, 1)}
-                    title="Descer etapa"
-                    type="button"
-                  >
-                    <ArrowDown className="h-4 w-4" />
-                  </button>
-                </div>
-                <input
-                  className="h-10 rounded-lg border border-white/10 bg-black/30 px-3 text-sm text-zinc-100 outline-none transition focus:border-[#8B5CF6]"
-                  onChange={(event) => onRenameStage(stage.id, event.target.value)}
-                  value={stage.title}
-                />
-                <select
-                  className="h-10 rounded-lg border border-white/10 bg-black/30 px-3 text-sm text-zinc-200 outline-none transition focus:border-[#8B5CF6]"
-                  onChange={(event) => onUpdateStageKind(stage.id, event.target.value as NonNullable<PipelineStage["kind"]>)}
-                  value={stage.kind ?? "open"}
-                >
-                  <option value="open">Em aberto</option>
-                  <option value="closed">Conclusao</option>
-                </select>
-                <span className="rounded-full border border-white/10 px-2 py-1 text-xs text-zinc-500">
-                  {count} leads
-                </span>
-                <button
-                  className="flex h-10 items-center justify-center gap-2 rounded-lg border border-red-400/20 bg-red-500/10 px-3 text-sm text-red-300 transition hover:bg-red-500/20 disabled:opacity-40"
-                  disabled={!canRemove}
-                  onClick={() => onRemoveStage(stage.id)}
-                  type="button"
-                >
-                  <Trash2 className="h-4 w-4" />
-                  Remover
-                </button>
-              </div>
-            );
-          })}
-        </div>
-        <form
-          className="grid gap-3 sm:grid-cols-[1fr_auto]"
-          onSubmit={(event) => {
-            event.preventDefault();
-            onAddStage(newStageTitle);
-            setNewStageTitle("");
-          }}
-        >
-          <input
-            className="h-11 rounded-lg border border-white/10 bg-black/30 px-3 text-sm text-zinc-100 outline-none transition placeholder:text-zinc-600 focus:border-[#8B5CF6]"
-            onChange={(event) => setNewStageTitle(event.target.value)}
-            placeholder="Nome da nova etapa"
-            value={newStageTitle}
-          />
-          <button
-            className="flex h-11 items-center justify-center gap-2 rounded-lg bg-[#8B5CF6] px-4 text-sm font-medium transition hover:bg-[#7C3AED]"
-            type="submit"
-          >
-            <Plus className="h-4 w-4" />
-            Adicionar etapa
-          </button>
-        </form>
-      </div>
-    </Modal>
-  );
-}
-
-function PipelineOverview({ leads, closedStageIds }: { leads: Lead[]; closedStageIds: Set<LeadStatus> }) {
-  const pendingFollowups = leads.filter((lead) => isFollowupDue(lead, closedStageIds)).length;
-  const activeDeals = leads.filter((lead) => !isLeadClosed(lead, closedStageIds)).length;
-  const replied = leads.filter((lead) => lead.status === "respondeu").length;
-  const closed = leads.filter((lead) => isLeadClosed(lead, closedStageIds)).length;
-  const closeRate = leads.length ? Math.round((closed / leads.length) * 100) : 0;
-  const openValue = leads
-    .filter((lead) => !isLeadClosed(lead, closedStageIds))
-    .reduce((total, lead) => total + (lead.estimated_value ?? 0), 0);
-
-  return (
-    <div className="grid gap-3 md:grid-cols-5">
-      <PipelineStat label="Leads ativos" value={activeDeals.toString()} tone="border-[#8B5CF6]/30" />
-      <PipelineStat label="Follow-up hoje" value={pendingFollowups.toString()} tone="border-amber-400/30" />
-      <PipelineStat label="Responderam" value={replied.toString()} tone="border-[#25D366]/30" />
-      <PipelineStat label="Taxa de fechamento" value={`${closeRate}%`} tone="border-white/10" />
-      <PipelineStat label="Valor aberto" value={formatCurrency(openValue) ?? "R$ 0"} tone="border-[#25D366]/30" />
-    </div>
-  );
-}
-
-function PipelineStat({ label, value, tone }: { label: string; value: string; tone: string }) {
-  return (
-    <div className={`rounded-xl border ${tone} bg-white/[0.035] p-4`}>
-      <div className="text-xs uppercase tracking-wide text-zinc-500">{label}</div>
-      <div className="mt-2 text-2xl font-semibold text-white">{value}</div>
-    </div>
-  );
-}
-
-function isLeadClosed(lead: Lead, closedStageIds: Set<LeadStatus> = defaultClosedStageIds) {
-  return closedStageIds.has(lead.status);
-}
-
-function isFollowupDue(lead: Lead, closedStageIds: Set<LeadStatus> = defaultClosedStageIds) {
-  if (!lead.next_followup_at || isLeadClosed(lead, closedStageIds)) return false;
-  const dueAt = new Date(lead.next_followup_at);
-  const todayEnd = new Date();
-  todayEnd.setHours(23, 59, 59, 999);
-  return dueAt.getTime() <= todayEnd.getTime();
-}
-
-function isFollowupOverdue(lead: Lead, closedStageIds: Set<LeadStatus> = defaultClosedStageIds) {
-  if (!lead.next_followup_at || isLeadClosed(lead, closedStageIds)) return false;
-  return new Date(lead.next_followup_at).getTime() < startOfDay(new Date()).getTime();
-}
-
-function isTaskDueToday(task: Task) {
-  const dueAt = new Date(task.due_at);
-  if (Number.isNaN(dueAt.getTime())) return false;
-  const todayEnd = new Date();
-  todayEnd.setHours(23, 59, 59, 999);
-  return dueAt.getTime() <= todayEnd.getTime();
-}
-
-function isTaskDueOnDate(task: Task, date: Date) {
-  const dueAt = new Date(task.due_at);
-  if (Number.isNaN(dueAt.getTime())) return false;
-  return startOfDay(dueAt).getTime() === startOfDay(date).getTime();
-}
-
-function isTaskOverdue(task: Task) {
-  const dueAt = new Date(task.due_at);
-  if (Number.isNaN(dueAt.getTime())) return false;
-  return dueAt.getTime() < startOfDay(new Date()).getTime();
-}
-
-function endOfDay(date: Date) {
-  const next = new Date(date);
-  next.setHours(23, 59, 59, 999);
-  return next;
-}
-
-function isLeadCreatedToday(lead: Lead) {
-  return startOfDay(new Date(lead.created_at)).getTime() === startOfDay(new Date()).getTime();
-}
-
-function getFollowupLabel(lead: Lead, closedStageIds: Set<LeadStatus> = defaultClosedStageIds) {
-  if (isLeadClosed(lead, closedStageIds)) return { text: "Concluido", tone: "text-zinc-500" };
-  if (!lead.next_followup_at) return { text: "Sem follow-up", tone: "text-zinc-500" };
-
-  const dueAt = new Date(lead.next_followup_at);
-  const today = new Date();
-  const diffDays = Math.ceil(
-    (startOfDay(dueAt).getTime() - startOfDay(today).getTime()) / 86400000,
-  );
-
-  if (diffDays < 0) return { text: "Follow-up atrasado", tone: "text-red-300" };
-  if (diffDays === 0) return { text: "Follow-up hoje", tone: "text-amber-300" };
-  if (diffDays === 1) return { text: "Follow-up amanha", tone: "text-[#25D366]" };
-  return {
-    text: `Follow-up ${dueAt.toLocaleDateString("pt-BR")}`,
-    tone: "text-zinc-400",
-  };
-}
-
-function getDueAtLabel(value: string) {
-  const dueAt = new Date(value);
-  if (Number.isNaN(dueAt.getTime())) return { text: "Data invalida", tone: "text-red-300" };
-
-  const today = new Date();
-  const diffDays = Math.ceil(
-    (startOfDay(dueAt).getTime() - startOfDay(today).getTime()) / 86400000,
-  );
-  const time = dueAt.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
-
-  if (diffDays < 0) return { text: `Atrasado desde ${dueAt.toLocaleDateString("pt-BR")}`, tone: "text-red-300" };
-  if (diffDays === 0) return { text: `Hoje as ${time}`, tone: "text-amber-300" };
-  if (diffDays === 1) return { text: `Amanha as ${time}`, tone: "text-[#25D366]" };
-  return {
-    text: `${dueAt.toLocaleDateString("pt-BR")} as ${time}`,
-    tone: "text-zinc-400",
-  };
-}
-
-function taskTypeLabel(type: Task["type"]) {
-  if (type === "followup") return "Follow-up";
-  if (type === "call") return "Ligacao";
-  if (type === "email") return "Email";
-  if (type === "whatsapp") return "WhatsApp";
-  if (type === "meeting") return "Reuniao";
-  return "Outro";
-}
-
-function taskRepeatLabel(repeat: TaskRepeat) {
-  if (repeat === "daily") return "Diaria";
-  if (repeat === "weekly") return "Semanal";
-  if (repeat === "monthly") return "Mensal";
-  return "Nao repetir";
-}
-
-function getTaskRepeat(task: Pick<Task, "notes">): TaskRepeat {
-  const match = task.notes?.match(/\[\[repeat:(none|daily|weekly|monthly)\]\]/);
-  return (match?.[1] as TaskRepeat | undefined) ?? "none";
-}
-
-function stripTaskMetadata(notes?: string | null) {
-  return (notes ?? "").replace(/\s*\[\[repeat:(none|daily|weekly|monthly)\]\]\s*/g, "").trim();
-}
-
-function buildTaskNotes(notes: string, repeat: TaskRepeat) {
-  const cleanNotes = stripTaskMetadata(notes);
-  if (repeat === "none") return cleanNotes || null;
-  return `${cleanNotes}${cleanNotes ? "\n" : ""}[[repeat:${repeat}]]`;
-}
-
-function formatGoogleCalendarDate(date: Date) {
-  return date.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
-}
-
-function buildGoogleCalendarUrl(input: {
-  title: string;
-  startsAt: string;
-  details?: string | null;
-  lead?: Lead | null;
-}) {
-  const startsAt = new Date(input.startsAt);
-  if (Number.isNaN(startsAt.getTime())) return null;
-
-  const endsAt = new Date(startsAt);
-  endsAt.setMinutes(endsAt.getMinutes() + 30);
-
-  const details = [
-    input.details,
-    input.lead ? `Lead: ${input.lead.name}` : null,
-    input.lead?.phone ? `Telefone: ${input.lead.phone}` : null,
-    input.lead?.company ? `Empresa: ${input.lead.company}` : null,
-  ].filter(Boolean).join("\n");
-
-  const params = new URLSearchParams({
-    action: "TEMPLATE",
-    text: input.title || "Tarefa OrigoCRM",
-    dates: `${formatGoogleCalendarDate(startsAt)}/${formatGoogleCalendarDate(endsAt)}`,
-    details,
-  });
-
-  return `https://calendar.google.com/calendar/render?${params.toString()}`;
-}
-
-function openGoogleCalendarEvent(input: {
-  title: string;
-  startsAt: string;
-  details?: string | null;
-  lead?: Lead | null;
-}) {
-  const url = buildGoogleCalendarUrl(input);
-  if (!url || typeof window === "undefined") return;
-  window.open(url, "_blank", "noopener,noreferrer");
-}
-
-function getNextRecurringDueAt(value: string, repeat: TaskRepeat) {
-  if (repeat === "none") return null;
-
-  const dueAt = new Date(value);
-  if (Number.isNaN(dueAt.getTime())) return null;
-
-  if (repeat === "daily") dueAt.setDate(dueAt.getDate() + 1);
-  if (repeat === "weekly") dueAt.setDate(dueAt.getDate() + 7);
-  if (repeat === "monthly") dueAt.setMonth(dueAt.getMonth() + 1);
-
-  return dueAt.toISOString();
-}
-
-function isCommercialTask(task: Task) {
-  return Boolean(task.lead_id);
-}
-
-function getLastContactLabel(lead: Lead) {
-  if (!lead.last_contact_at) return "Sem contato";
-
-  const contactedAt = new Date(lead.last_contact_at);
-  const today = new Date();
-  const diffDays = Math.floor(
-    (startOfDay(today).getTime() - startOfDay(contactedAt).getTime()) / 86400000,
-  );
-
-  if (diffDays <= 0) return "Contato hoje";
-  if (diffDays === 1) return "Contato ontem";
-  return `Contato ha ${diffDays} dias`;
-}
-
-function startOfDay(date: Date) {
-  const next = new Date(date);
-  next.setHours(0, 0, 0, 0);
-  return next;
-}
-
-function formatPhoneCompact(phone: string) {
-  const normalized = normalizePhone(phone);
-  if (normalized.length <= 4) return normalized || phone;
-  return `${normalized.slice(0, -4)}-${normalized.slice(-4)}`;
-}
-
-function getLeadInitials(lead: Lead) {
-  return lead.name
-    .split(" ")
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((part) => part[0])
-    .join("")
-    .toUpperCase();
-}
-
-function getColumnHealth(leads: Lead[], closedStageIds: Set<LeadStatus> = defaultClosedStageIds) {
-  const due = leads.filter((lead) => isFollowupDue(lead, closedStageIds)).length;
-  if (due > 0) return `${due} com follow-up`;
-  return leads.length ? "Em dia" : "Sem itens";
-}
-
-function getPipelineColumnStats(leads: Lead[], closedStageIds: Set<LeadStatus> = defaultClosedStageIds) {
-  const value = leads.reduce((total, lead) => total + (lead.estimated_value ?? 0), 0);
-  const overdue = leads.filter((lead) => isFollowupOverdue(lead, closedStageIds)).length;
-  const hot = leads.filter((lead) => (lead.temperature ?? "morno") === "quente").length;
-  const noAction = leads.filter(
-    (lead) => !isLeadClosed(lead, closedStageIds) && lead.status !== "novo" && !lead.next_followup_at,
-  ).length;
-
-  return { value, overdue, hot, noAction };
-}
-
-function getLeadUrgencyScore(lead: Lead, closedStageIds: Set<LeadStatus> = defaultClosedStageIds) {
-  let score = 0;
-  if (isFollowupOverdue(lead, closedStageIds)) score += 100;
-  else if (isFollowupDue(lead, closedStageIds)) score += 70;
-  if ((lead.temperature ?? "morno") === "quente") score += 35;
-  if (lead.status === "proposta") score += 20;
-  if (!isLeadClosed(lead, closedStageIds) && lead.status !== "novo" && !lead.next_followup_at) score += 25;
-  if (!lead.owner_name) score += 8;
-  return score;
-}
-
-function sortPipelineLeadsByUrgency(leads: Lead[], closedStageIds: Set<LeadStatus> = defaultClosedStageIds) {
-  return [...leads].sort((a, b) => {
-    const scoreDiff = getLeadUrgencyScore(b, closedStageIds) - getLeadUrgencyScore(a, closedStageIds);
-    if (scoreDiff !== 0) return scoreDiff;
-
-    const nextFollowupA = a.next_followup_at ? new Date(a.next_followup_at).getTime() : Number.MAX_SAFE_INTEGER;
-    const nextFollowupB = b.next_followup_at ? new Date(b.next_followup_at).getTime() : Number.MAX_SAFE_INTEGER;
-    if (nextFollowupA !== nextFollowupB) return nextFollowupA - nextFollowupB;
-
-    return new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime();
-  });
-}
-
-function getSourceLabel(source: string) {
-  return source?.trim() || "Origem nao informada";
-}
-
-function formatCurrency(value?: number | null) {
-  if (!value) return null;
-  return value.toLocaleString("pt-BR", {
-    style: "currency",
-    currency: "BRL",
-    maximumFractionDigits: 0,
-  });
-}
-
-function leadToInput(lead: Lead): LeadInput {
-  return {
-    name: lead.name,
-    phone: lead.phone,
-    company: lead.company,
-    source: lead.source,
-    status: lead.status,
-    estimated_value: lead.estimated_value ?? null,
-    owner_name: lead.owner_name ?? "",
-    temperature: lead.temperature ?? "morno",
-    outcome_reason: lead.outcome_reason ?? "",
-    sla_hours: lead.sla_hours ?? 24,
-  };
-}
-
-function getTemperatureLabel(temperature?: Lead["temperature"] | null) {
-  if (temperature === "quente") return { text: "Quente", tone: "border-red-400/25 bg-red-500/10 text-red-200" };
-  if (temperature === "frio") return { text: "Frio", tone: "border-sky-400/25 bg-sky-500/10 text-sky-200" };
-  return { text: "Morno", tone: "border-amber-400/25 bg-amber-500/10 text-amber-100" };
-}
-
-function getSlaLabel(lead: Lead, closedStageIds: Set<LeadStatus> = defaultClosedStageIds) {
-  if (!lead.last_contact_at || !lead.sla_hours || isLeadClosed(lead, closedStageIds)) return null;
-
-  const expiresAt = new Date(lead.last_contact_at).getTime() + lead.sla_hours * 60 * 60 * 1000;
-  const remainingHours = Math.ceil((expiresAt - Date.now()) / 3600000);
-
-  if (remainingHours < 0) return { text: "SLA vencido", tone: "text-red-300" };
-  if (remainingHours <= 4) return { text: `SLA ${remainingHours}h`, tone: "text-amber-300" };
-  return { text: `SLA ${remainingHours}h`, tone: "text-zinc-500" };
-}
-
-function PipelineColumn({
-  id,
-  title,
-  leads,
-  dispatchCountsByLeadId,
-  leadTags,
-  columns,
-  closedStageIds,
-  recentLeadId,
-  selectedLeadIds,
-  onLeadClick,
-  onLeadDelete,
-  onQuickWhatsApp,
-  onQuickSchedule,
-  onStatusChange,
-  onToggleLeadSelection,
-}: {
-  id: LeadStatus;
-  title: string;
-  leads: Lead[];
-  dispatchCountsByLeadId: Map<string, number>;
-  leadTags: Map<string, CrmTag[]>;
-  columns: PipelineStage[];
-  closedStageIds: Set<LeadStatus>;
-  recentLeadId: string | null;
-  selectedLeadIds: Set<string>;
-  onLeadClick: (lead: Lead) => void;
-  onLeadDelete: (lead: Lead) => void;
-  onQuickWhatsApp: (lead: Lead) => void;
-  onQuickSchedule: (lead: Lead) => void;
-  onStatusChange: (id: string, status: LeadStatus) => void;
-  onToggleLeadSelection: (id: string) => void;
-}) {
-  const { setNodeRef, isOver } = useDroppable({ id });
-  const meta = getPipelineMeta(id, title);
-  const stats = getPipelineColumnStats(leads, closedStageIds);
-  const riskCount = stats.overdue + stats.noAction;
-  const dispatchCount = leads.reduce((total, lead) => total + (dispatchCountsByLeadId.get(lead.id) ?? 0), 0);
-
-  return (
-    <div
-      className={`w-[300px] shrink-0 overflow-hidden rounded-lg border transition ${
-        isOver ? "border-[#8B5CF6] bg-[#8B5CF6]/10" : "border-white/10 bg-white/[0.025]"
-      }`}
-      ref={setNodeRef}
-    >
-      <div className="border-b border-white/10 px-3 py-3">
-        <div className="flex items-center justify-between gap-3">
-          <div className="flex min-w-0 items-center gap-2">
-            <span className={`h-2 w-2 shrink-0 rounded-full ${meta.accent}`} />
-            <h2 className="truncate text-sm font-semibold text-zinc-100">{title}</h2>
-          </div>
-          <span className="shrink-0 rounded-full bg-white/[0.06] px-2 py-1 text-xs text-zinc-300">
-            {leads.length}
-          </span>
-        </div>
-        <div className="mt-2 flex items-center justify-between gap-3 text-[11px] text-zinc-500">
-          <span className="truncate">{meta.description}</span>
-          <span className="shrink-0">{getColumnHealth(leads, closedStageIds)}</span>
-        </div>
-        <div className="mt-3 flex flex-wrap items-center gap-1.5 text-[11px]">
-          <span className="rounded-full border border-white/10 bg-black/25 px-2 py-1 text-zinc-300">
-            {formatCurrency(stats.value) ?? "R$ 0"}
-          </span>
-          <span
-            className={`rounded-full border px-2 py-1 ${
-              riskCount > 0
-                ? "border-red-400/25 bg-red-500/10 text-red-200"
-                : "border-white/10 bg-black/25 text-zinc-500"
-            }`}
-          >
-            {riskCount > 0 ? `${riskCount} riscos` : "Sem risco"}
-          </span>
-          {stats.overdue > 0 && (
-            <span className="rounded-full border border-red-400/25 bg-red-500/10 px-2 py-1 text-red-200">
-              {stats.overdue} vencidos
-            </span>
-          )}
-          {stats.hot > 0 && (
-            <span className="rounded-full border border-amber-400/25 bg-amber-500/10 px-2 py-1 text-amber-100">
-              {stats.hot} quentes
-            </span>
-          )}
-          <span className="rounded-full border border-[#25D366]/20 bg-[#25D366]/10 px-2 py-1 text-[#9AF0B8]">
-            {dispatchCount} disparos
-          </span>
-        </div>
-      </div>
-      <SortableContext items={leads.map((lead) => lead.id)} strategy={verticalListSortingStrategy}>
-        <div className="min-h-[320px] space-y-3 p-3">
-          {leads.map((lead) => (
-            <SortableLeadCard
-              key={lead.id}
-              highlighted={recentLeadId === lead.id}
-              lead={lead}
-              dispatchCount={dispatchCountsByLeadId.get(lead.id) ?? 0}
-              leadTags={leadTags.get(lead.id) ?? []}
-              onClick={() => onLeadClick(lead)}
-              onDelete={() => onLeadDelete(lead)}
-              onQuickSchedule={() => onQuickSchedule(lead)}
-              onQuickWhatsApp={() => onQuickWhatsApp(lead)}
-              columns={columns}
-              closedStageIds={closedStageIds}
-              onStatusChange={(status) => onStatusChange(lead.id, status)}
-              onToggleSelection={() => onToggleLeadSelection(lead.id)}
-              selected={selectedLeadIds.has(lead.id)}
-            />
-          ))}
-          {leads.length === 0 && (
-            <div className="flex min-h-32 items-center justify-center rounded-md border border-dashed border-white/10 bg-black/10 p-4 text-center text-sm text-zinc-500">
-              {meta.empty}
-            </div>
-          )}
-        </div>
-      </SortableContext>
-    </div>
-  );
-}
-
-function SortableLeadCard({
-  lead,
-  dispatchCount,
-  leadTags,
-  columns,
-  closedStageIds,
-  highlighted,
-  selected,
-  onClick,
-  onDelete,
-  onQuickWhatsApp,
-  onQuickSchedule,
-  onStatusChange,
-  onToggleSelection,
-}: {
-  lead: Lead;
-  dispatchCount: number;
-  leadTags: CrmTag[];
-  columns: PipelineStage[];
-  closedStageIds: Set<LeadStatus>;
-  highlighted: boolean;
-  selected: boolean;
-  onClick: () => void;
-  onDelete: () => void;
-  onQuickWhatsApp: () => void;
-  onQuickSchedule: () => void;
-  onStatusChange: (status: LeadStatus) => void;
-  onToggleSelection: () => void;
-}) {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
-    id: lead.id,
-  });
-
-  return (
-    <div
-      ref={setNodeRef}
-      style={{ transform: CSS.Transform.toString(transform), transition }}
-      {...attributes}
-      {...listeners}
-    >
-      <LeadCard
-        dragging={isDragging}
-        columns={columns}
-        closedStageIds={closedStageIds}
-        highlighted={highlighted}
-        lead={lead}
-        dispatchCount={dispatchCount}
-        leadTags={leadTags}
-        onClick={onClick}
-        onDelete={onDelete}
-        onQuickSchedule={onQuickSchedule}
-        onQuickWhatsApp={onQuickWhatsApp}
-        onStatusChange={onStatusChange}
-        onToggleSelection={onToggleSelection}
-        selected={selected}
-        showQuickActions
-      />
-    </div>
-  );
-}
-
-function LeadCard({
-  lead,
-  dispatchCount = 0,
-  leadTags = [],
-  columns,
-  closedStageIds,
-  onClick,
-  onDelete,
-  selected = false,
-  dragging = false,
-  highlighted = false,
-  showQuickActions = false,
-  onStatusChange,
-  onToggleSelection,
-  onQuickWhatsApp,
-  onQuickSchedule,
-}: {
-  lead: Lead;
-  dispatchCount?: number;
-  leadTags?: CrmTag[];
-  columns?: PipelineStage[];
-  closedStageIds?: Set<LeadStatus>;
-  onClick: () => void;
-  onDelete?: () => void;
-  selected?: boolean;
-  dragging?: boolean;
-  highlighted?: boolean;
-  showQuickActions?: boolean;
-  onStatusChange?: (status: LeadStatus) => void;
-  onToggleSelection?: () => void;
-  onQuickWhatsApp?: () => void;
-  onQuickSchedule?: () => void;
-}) {
-  const temperature = getTemperatureLabel(lead.temperature);
-  const value = formatCurrency(lead.estimated_value);
-  const sla = getSlaLabel(lead, closedStageIds);
-  const followup = getFollowupLabel(lead, closedStageIds);
-  const isOverdue = followup.text === "Follow-up atrasado";
-  const isClosed = isLeadClosed(lead, closedStageIds);
-
-  function quick(event: MouseEvent<HTMLButtonElement>, action?: () => void) {
-    event.preventDefault();
-    event.stopPropagation();
-    action?.();
-  }
-
-  return (
-    <div
-      className={`group relative w-full rounded-lg border bg-[#121119] p-3 text-left shadow-lg shadow-black/10 transition hover:border-[#8B5CF6]/60 ${
-        highlighted
-          ? "border-[#8B5CF6] shadow-[#8B5CF6]/30"
-          : isOverdue
-            ? "border-red-400/35"
-            : "border-white/10"
-      } ${dragging ? "opacity-60" : ""}`}
-      onClick={onClick}
-      onKeyDown={(event) => {
-        if (event.key === "Enter" || event.key === " ") onClick();
-      }}
-      role="button"
-      tabIndex={0}
-    >
-      <div className="absolute inset-x-0 top-0 h-0.5 rounded-t-lg bg-white/10">
-        <div
-          className={`h-full rounded-t-lg ${
-            isClosed
-              ? "bg-zinc-400"
-              : isOverdue
-                ? "bg-red-400"
-                : (lead.temperature ?? "morno") === "quente"
-                  ? "bg-amber-300"
-                  : "bg-[#8B5CF6]"
-          }`}
-        />
-      </div>
-      <div className="flex items-start gap-3 pt-1">
-        {onToggleSelection && (
-          <input
-            aria-label={`Selecionar ${lead.name}`}
-            checked={selected}
-            className="mt-2.5 h-4 w-4 shrink-0 accent-[#8B5CF6]"
-            onChange={onToggleSelection}
-            onClick={(event) => event.stopPropagation()}
-            onPointerDown={(event) => event.stopPropagation()}
-            type="checkbox"
-          />
-        )}
-        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white/10 text-xs font-semibold text-zinc-200">
-          {getLeadInitials(lead) || <UserRound className="h-4 w-4" />}
-        </div>
-        <div className="min-w-0 flex-1">
-          <div className="truncate font-medium text-white">{lead.name}</div>
-          <div className="mt-1 truncate text-xs text-zinc-500">
-            {lead.company || "Sem empresa"} / {lead?.owner_name || "Sem responsavel"}
-          </div>
-        </div>
-      </div>
-
-      {onStatusChange && (
-        <div
-          className="mt-3 flex items-center gap-2 rounded-md border border-white/10 bg-black/25 px-2 py-1.5"
-          onClick={(event) => event.stopPropagation()}
-          onPointerDown={(event) => event.stopPropagation()}
-        >
-          <span className="shrink-0 text-[10px] uppercase text-zinc-500">Etapa</span>
-          <select
-            aria-label={`Alterar etapa de ${lead.name}`}
-            className="min-w-0 flex-1 bg-transparent text-xs text-zinc-300 outline-none"
-            onChange={(event) => onStatusChange(event.target.value as LeadStatus)}
-            onClick={(event) => event.stopPropagation()}
-            onPointerDown={(event) => event.stopPropagation()}
-            value={lead.status}
-          >
-            {(columns ?? getDefaultPipelineStages()).map((column) => (
-              <option key={column.id} value={column.id}>
-                {column.title}
-              </option>
-            ))}
-          </select>
-        </div>
-      )}
-
-      <div className="mt-3 flex flex-wrap gap-2">
-        <span className={`rounded-full border px-2 py-1 text-[11px] ${temperature.tone}`}>
-          {temperature.text}
-        </span>
-        {value && (
-          <span className="rounded-full border border-[#25D366]/25 bg-[#25D366]/10 px-2 py-1 text-[11px] text-[#9AF0B8]">
-            {value}
-          </span>
-        )}
-        <span className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-1 text-[11px] text-zinc-400">
-          {getSourceLabel(lead.source)}
-        </span>
-        {leadTags.slice(0, 3).map((tag) => (
-          <span
-            className="rounded-full border px-2 py-1 text-[11px]"
-            key={tag.id}
-            style={{ borderColor: `${tag.color}66`, backgroundColor: `${tag.color}18`, color: tag.color }}
-          >
-            {tag.name}
-          </span>
-        ))}
-        {leadTags.length > 3 && (
-          <span className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-1 text-[11px] text-zinc-500">
-            +{leadTags.length - 3}
-          </span>
-        )}
-        <span className="rounded-full border border-[#25D366]/20 bg-[#25D366]/10 px-2 py-1 text-[11px] text-[#9AF0B8]">
-          {dispatchCount} disparo{dispatchCount === 1 ? "" : "s"}
-        </span>
-      </div>
-
-      <div className="mt-3 grid gap-1.5 text-xs">
-        <div className={`flex items-center justify-between gap-3 ${followup.tone}`}>
-          <span className="flex items-center gap-1.5">
-            <Clock3 className="h-3.5 w-3.5" />
-            {followup.text}
-          </span>
-        </div>
-        <div className="flex items-center justify-between gap-3 text-zinc-500">
-          <span>{formatPhoneCompact(lead.phone)}</span>
-          {sla && <span className={sla.tone}>{sla.text}</span>}
-        </div>
-        <div className="text-zinc-500">{getLastContactLabel(lead)}</div>
-      </div>
-      {showQuickActions && (
-        <div className="mt-4 grid grid-cols-4 gap-2 opacity-100 transition sm:opacity-0 sm:group-hover:opacity-100">
-          <button
-            className="flex h-8 items-center justify-center rounded-md bg-[#25D366] text-black"
-            onClick={(event) => quick(event, onQuickWhatsApp)}
-            title="WhatsApp"
-            type="button"
-          >
-            <MessageCircle className="h-4 w-4" />
-          </button>
-          <button
-            className="flex h-8 items-center justify-center rounded-md border border-white/10 bg-white/[0.06] text-zinc-200"
-            onClick={(event) => quick(event, onClick)}
-            title="Abrir lead"
-            type="button"
-          >
-            <ExternalLink className="h-4 w-4" />
-          </button>
-          <button
-            className="flex h-8 items-center justify-center rounded-md border border-white/10 bg-white/[0.06] text-zinc-200"
-            onClick={(event) => quick(event, onQuickSchedule)}
-            title="Agendar follow-up"
-            type="button"
-          >
-            <Clock3 className="h-4 w-4" />
-          </button>
-          {onDelete && (
-            <button
-              className="flex h-8 items-center justify-center rounded-md border border-red-400/20 bg-red-500/10 text-red-300 transition hover:bg-red-500/20"
-              onClick={(event) => quick(event, onDelete)}
-              title="Excluir lead"
-              type="button"
-            >
-              <Trash2 className="h-4 w-4" />
-            </button>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function LeadList({
-  leads,
-  leadTags,
-  onOpen,
-  onEdit,
-  onDelete,
-}: {
-  leads: Lead[];
-  leadTags: Map<string, CrmTag[]>;
-  onOpen: (lead: Lead) => void;
-  onEdit: (lead: Lead) => void;
-  onDelete: (lead: Lead) => void;
-}) {
-  return (
-    <div className="overflow-hidden rounded-xl border border-white/10">
-      {leads.map((lead) => (
-        <div
-          className="grid gap-3 border-b border-white/10 bg-white/[0.025] p-4 last:border-b-0 md:grid-cols-[1fr_1fr_140px_96px_44px]"
-          key={lead.id}
-        >
-          <button className="text-left" onClick={() => onOpen(lead)}>
-            <div className="font-medium">{lead.name}</div>
-            <div className="text-sm text-zinc-500">{lead.phone}</div>
-          </button>
-          <div>
-            <div className="text-sm text-zinc-300">{lead.company || "Sem empresa"}</div>
-            <div className="text-sm text-zinc-500">{lead.source || "Sem origem"}</div>
-            <div className="mt-2 flex flex-wrap gap-1">
-              {(leadTags.get(lead.id) ?? []).slice(0, 4).map((tag) => (
-                <span
-                  className="rounded-full border px-2 py-0.5 text-[11px]"
-                  key={tag.id}
-                  style={{ borderColor: `${tag.color}66`, backgroundColor: `${tag.color}18`, color: tag.color }}
-                >
-                  {tag.name}
-                </span>
-              ))}
-            </div>
-          </div>
-          <div className="text-sm capitalize text-zinc-400">{lead.status}</div>
-          <button
-            className="flex h-10 items-center justify-center gap-2 rounded-lg border border-white/10 text-sm text-zinc-300 transition hover:bg-white/[0.06]"
-            onClick={() => onEdit(lead)}
-          >
-            <Edit3 className="h-4 w-4" />
-            Editar
-          </button>
-          <button
-            className="flex h-10 items-center justify-center rounded-lg border border-red-400/20 bg-red-500/10 text-red-300 transition hover:bg-red-500/20"
-            onClick={() => onDelete(lead)}
-            title="Excluir lead"
-            type="button"
-          >
-            <Trash2 className="h-4 w-4" />
-          </button>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function Templates({
-  templates,
-  onAddTemplate,
-  onDeleteTemplate,
-}: {
-  templates: MessageTemplate[];
-  onAddTemplate: (title: string, body: string) => void;
-  onDeleteTemplate: (template: MessageTemplate) => void;
-}) {
-  const [title, setTitle] = useState("");
-  const [body, setBody] = useState("");
-
-  return (
-    <div className="grid gap-5 xl:grid-cols-[0.8fr_1.2fr]">
-      <form
-        className="rounded-xl border border-white/10 bg-white/[0.035] p-5"
-        onSubmit={(event) => {
-          event.preventDefault();
-          onAddTemplate(title, body);
-          setTitle("");
-          setBody("");
-        }}
-      >
-        <h2 className="text-lg font-semibold">Nova mensagem pronta</h2>
-        <p className="mt-2 text-sm text-zinc-500">
-          Variaveis: {"{{nome}}, {{empresa}}, {{telefone}}, {{origem}}"}
-        </p>
-        <input
-          className="mt-4 h-11 w-full rounded-lg border border-white/10 bg-black/30 px-3 text-sm outline-none transition focus:border-[#8B5CF6]"
-          onChange={(event) => setTitle(event.target.value)}
-          placeholder="Titulo"
-          required
-          value={title}
-        />
-        <textarea
-          className="mt-3 min-h-36 w-full rounded-lg border border-white/10 bg-black/30 p-3 text-sm outline-none transition focus:border-[#8B5CF6]"
-          onChange={(event) => setBody(event.target.value)}
-          placeholder="Mensagem"
-          required
-          value={body}
-        />
-        <button className="mt-3 flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-[#8B5CF6] text-sm font-medium">
-          <Plus className="h-4 w-4" />
-          Salvar mensagem
-        </button>
-      </form>
-      <div className="grid gap-3">
-        {templates.length === 0 && (
-          <div className="rounded-xl border border-dashed border-white/10 bg-white/[0.025] p-5 text-sm text-zinc-500">
-            Nenhuma mensagem pronta cadastrada.
-          </div>
-        )}
-        {templates.map((template) => (
-          <article className="rounded-xl border border-white/10 bg-white/[0.035] p-5" key={template.id}>
-            <div className="flex items-start justify-between gap-3">
-              <h3 className="font-medium">{template.title}</h3>
-              <button
-                className="rounded-md border border-red-400/20 bg-red-500/10 p-2 text-red-300 transition hover:bg-red-500/20"
-                onClick={() => onDeleteTemplate(template)}
-                title="Excluir mensagem pronta"
-                type="button"
-              >
-                <Trash2 className="h-4 w-4" />
-              </button>
-            </div>
-            <p className="mt-2 text-sm leading-6 text-zinc-400">{template.body}</p>
-          </article>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-type ConversationStatusFilter = "all" | "unread" | "waiting" | "responded" | "converted" | "resolved" | "archived";
-type ConversationLeadFilter = "all" | "without" | "with";
-type ConversationPriorityFilter = "all" | "failed" | "hot" | "unassigned" | "today";
-type ConversationSort = "recent" | "unread" | "oldestWaiting" | "hot";
-type ConversationStatus = Exclude<ConversationStatusFilter, "all">;
-type ConversationCounts = {
-  all: number;
-  unread: number;
-  waiting: number;
-  responded: number;
-  converted: number;
-  resolved: number;
-  archived: number;
-};
-
-const conversationStatusTabs: Array<{
-  id: ConversationStatusFilter;
-  label: string;
-  countKey: keyof ConversationCounts;
-}> = [
-  { id: "all", label: "Todas", countKey: "all" },
-  { id: "unread", label: "Nao lidas", countKey: "unread" },
-  { id: "waiting", label: "Aguardando", countKey: "waiting" },
-  { id: "responded", label: "Respondidas", countKey: "responded" },
-  { id: "converted", label: "Convertidas", countKey: "converted" },
-  { id: "resolved", label: "Resolvidas", countKey: "resolved" },
-  { id: "archived", label: "Arquivadas", countKey: "archived" },
-];
-
 function Conversations({
+  availableTags,
   columns,
+  leadTags,
   leads,
   organizationId,
   templates,
   onAudit,
+  onAssignTag,
+  onCreateTag,
   onLeadCreated,
   onOpenLead,
 }: {
+  availableTags: CrmTag[];
   columns: PipelineStage[];
+  leadTags: Map<string, CrmTag[]>;
   leads: Lead[];
   organizationId: string | null;
   templates: MessageTemplate[];
   onAudit: (input: AuditLogInput) => Promise<void>;
+  onAssignTag: (lead: Lead, tagId: string) => void;
+  onCreateTag: (name: string) => Promise<CrmTag | null>;
   onLeadCreated: (lead: Lead) => void;
   onOpenLead: (lead: Lead) => void;
 }) {
@@ -5052,6 +3210,7 @@ function Conversations({
   const [replyFollowupDays, setReplyFollowupDays] = useState("");
   const [actionError, setActionError] = useState("");
   const [leadModalOpen, setLeadModalOpen] = useState(false);
+  const [detailsOpen, setDetailsOpen] = useState(false);
 
   useEffect(() => {
     if (!supabase) {
@@ -5084,10 +3243,10 @@ function Conversations({
         { event: "*", schema: "public", table: "whatsapp_messages" },
         (payload) => {
           const nextMessage = payload.new as WhatsAppMessage;
-          if (organizationId && nextMessage?.organization_id !== organizationId) return;
+          if (organizationId && nextMessage.organization_id !== organizationId) return;
           if (
             payload.eventType === "INSERT" &&
-            nextMessage?.direction === "inbound" &&
+            nextMessage.direction === "inbound" &&
             nextMessage.phone_number !== selectedPhone
           ) {
             setReadPhones((current) => {
@@ -5108,7 +3267,7 @@ function Conversations({
         { event: "*", schema: "public", table: "whatsapp_conversations" },
         (payload) => {
           const nextConversation = payload.new as WhatsAppConversation;
-          if (organizationId && nextConversation?.organization_id !== organizationId) return;
+          if (organizationId && nextConversation.organization_id !== organizationId) return;
           setStoredConversations((current) => applyConversationRealtimeEvent(current, payload));
         },
       )
@@ -5123,6 +3282,7 @@ function Conversations({
 
   const conversations = useMemo(() => {
     const grouped = new Map<string, WhatsAppMessage[]>();
+    const repeatedOutboundNames = getRepeatedOutboundContactNames(messages);
 
     for (const message of messages) {
       const key = message.phone_number;
@@ -5137,12 +3297,16 @@ function Conversations({
         const lead = leads.find((item) => item.id === (storedConversation?.lead_id ?? linkedLeadId));
         const existingLead = lead ?? findLeadByPhone(leads, phone);
         const activeLead = lead ?? existingLead;
-        const contactMessage = [...items].reverse().find((item) => item.contact_name);
+        const contactMessage = [...items]
+          .reverse()
+          .find((item) => item.direction === "inbound" && getSafeConversationContactName(item.contact_name, repeatedOutboundNames));
         const avatarMessage = [...items].reverse().find((item) => item.contact_avatar_url);
-        const contactName = lead?.name ?? existingLead?.name ?? storedConversation?.contact_name ?? contactMessage?.contact_name ?? phone;
+        const storedContactName = getSafeConversationContactName(storedConversation?.contact_name, repeatedOutboundNames);
+        const inboundContactName = getSafeConversationContactName(contactMessage?.contact_name, repeatedOutboundNames);
+        const contactName = lead?.name ?? existingLead?.name ?? inboundContactName ?? storedContactName ?? phone;
         const pendingInbound = countPendingInboundMessages(items);
         const unreadCount = readPhones.has(phone) ? 0 : Math.max(pendingInbound, storedConversation?.unread_count ?? 0);
-        const status = conversationStatus(lastMessage.direction, Boolean(lead), unreadCount, storedConversation?.status);
+        const status = conversationStatus(lastMessage.direction, Boolean(lead), unreadCount, storedConversation?.status ?? null);
         const failedCount = items.filter((item) => item.status === "failed").length;
         return {
           phone,
@@ -5213,9 +3377,11 @@ function Conversations({
   }, [conversationQuery, conversations, leadFilter, priorityFilter, sortMode, statusFilter]);
 
   const selectedConversation =
-    filteredConversations.find((conversation) => conversation.phone === selectedPhone) ??
-    filteredConversations[0] ??
-    conversations[0];
+    selectedPhone
+      ? filteredConversations.find((conversation) => conversation.phone === selectedPhone) ??
+        conversations.find((conversation) => conversation.phone === selectedPhone) ??
+        null
+      : null;
   const selectedConversationLead = selectedConversation?.activeLead ?? null;
   const filteredTemplates = useMemo(() => {
     const search = templateQuery.trim().toLowerCase();
@@ -5250,25 +3416,42 @@ function Conversations({
 
   function selectConversation(phone: string) {
     setSelectedPhone(phone);
+    setDetailsOpen(false);
     const conversation = conversations.find((item) => item.phone === phone);
-    const currentStatus = conversation?.status;
+    if (!conversation) return;
+    const currentStatus = conversation.status;
     if (currentStatus === "archived" || currentStatus === "resolved") return;
-    markConversationAsRead(phone, conversation?.lead ? "converted" : "responded");
+    markConversationAsRead(phone, conversation.lead ? "converted" : "responded");
   }
 
   function applyTemplate(templateId: string) {
     const template = templates.find((item) => item.id === templateId);
     if (!template || !selectedConversation) return;
 
+    const now = new Date().toISOString();
     const virtualLead: Lead = selectedConversationLead ?? {
       id: "",
+      user_id: null,
+      organization_id: organizationId,
       name: selectedConversation.contactName,
       phone: selectedConversation.phone,
       company: "",
       source: "WhatsApp",
       status: "novo",
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
+      estimated_value: null,
+      owner_name: null,
+      temperature: null,
+      outcome_reason: null,
+      sla_hours: null,
+      last_contact_at: null,
+      next_followup_at: null,
+      lead_score: null,
+      lead_score_label: null,
+      lead_score_reasons: null,
+      lead_score_updated_at: null,
+      archived_at: null,
+      created_at: now,
+      updated_at: now,
     };
 
     const rendered = renderTemplate(template.body, virtualLead);
@@ -5295,7 +3478,7 @@ function Conversations({
     setSending(false);
 
     if (!result.success) {
-      setActionError(result.error ?? "Nao foi possivel enviar a mensagem");
+      setActionError(result.error ?? "Não foi possível enviar a mensagem");
       await onAudit({
         entity_type: "whatsapp",
         entity_id: selectedConversationLead?.id ?? null,
@@ -5343,15 +3526,7 @@ function Conversations({
     event.currentTarget.form?.requestSubmit();
   }
 
-  async function handleSaveLead(input: {
-    name: string;
-    company: string;
-    source: string;
-    status: LeadStatus;
-    temperature: NonNullable<Lead["temperature"]>;
-    ownerName: string;
-    nextFollowupAt: string;
-  }) {
+  async function handleSaveLead(input: ConversationLeadSaveInput) {
     if (!selectedConversation || selectedConversation.lead) return;
 
     setActionError("");
@@ -5370,25 +3545,33 @@ function Conversations({
     setSavingLead(false);
 
     if (!result.success || !result.lead) {
-      setActionError(result.error ?? "Nao foi possivel salvar o lead");
+      setActionError(result.error ?? "Não foi possível salvar o lead");
       return;
     }
 
-    onLeadCreated(result.lead);
+    const savedLead = result.lead;
+    onLeadCreated(savedLead);
+    for (const tagId of input.tagIds) {
+      onAssignTag(savedLead, tagId);
+    }
+    if (input.newTagName.trim()) {
+      const tag = await onCreateTag(input.newTagName);
+      if (tag) onAssignTag(savedLead, tag.id);
+    }
     await onAudit({
       entity_type: "whatsapp",
-      entity_id: result.lead.id,
+      entity_id: savedLead.id,
       action: selectedConversation.existingLead ? "whatsapp.conversation_linked" : "whatsapp.conversation_converted",
       summary: selectedConversation.existingLead
-        ? `Conversa vinculada ao lead ${result.lead.name}`
-        : `Conversa convertida em lead: ${result.lead.name}`,
+        ? `Conversa vinculada ao lead ${savedLead.name}`
+        : `Conversa convertida em lead: ${savedLead.name}`,
       metadata: { phone: selectedConversation.phone, status: input.status, temperature: input.temperature },
     });
     setLeadModalOpen(false);
     setMessages((current) =>
       current.map((message) =>
         message.phone_number === selectedConversation.phone
-          ? { ...message, lead_id: result.lead?.id ?? message.lead_id }
+          ? { ...message, lead_id: savedLead.id ?? message.lead_id }
           : message,
       ),
     );
@@ -5405,6 +3588,7 @@ function Conversations({
       upsertLocalConversation(items, {
         id: selectedConversation.storedConversation?.id ?? newId("conversation"),
         user_id: selectedConversation.storedConversation?.user_id ?? "",
+        organization_id: selectedConversation.storedConversation?.organization_id ?? organizationId,
         lead_id: selectedConversationLead?.id ?? selectedConversation.storedConversation?.lead_id ?? null,
         phone_number: selectedConversation.phone,
         remote_jid: selectedConversation.storedConversation?.remote_jid ?? null,
@@ -5426,7 +3610,7 @@ function Conversations({
 
     if (!result.success) {
       setStoredConversations(previous);
-      setActionError(result.error ?? "Nao foi possivel atualizar a conversa");
+      setActionError(result.error ?? "Não foi possível atualizar a conversa");
       return;
     }
 
@@ -5457,7 +3641,7 @@ function Conversations({
     });
 
     if (!result.success || !result.data) {
-      setActionError(result.error ?? "Nao foi possivel mudar a etapa do lead");
+      setActionError(result.error ?? "Não foi possível mudar a etapa do lead");
       return;
     }
 
@@ -5493,80 +3677,88 @@ function Conversations({
   }
 
   return (
-    <div className="grid h-[calc(100vh-11rem)] min-h-[620px] overflow-hidden rounded-xl border border-white/10 bg-[#101018] xl:grid-cols-[320px_minmax(0,1fr)_320px]">
-      <aside className="flex min-h-0 flex-col border-b border-white/10 bg-white/[0.025] xl:border-b-0 xl:border-r">
-        <div className="shrink-0 border-b border-white/10 p-4">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <h2 className="font-semibold">Inbox WhatsApp</h2>
-              <p className="mt-1 text-xs text-zinc-500">
-                {conversationCounts.unread} nao lidas de {conversations.length} conversas
-              </p>
+    <div
+      className={`crm-conversations -m-5 grid h-[calc(100vh-5.75rem)] min-h-[640px] grid-rows-[auto_minmax(0,1fr)] overflow-hidden ${
+        detailsOpen && selectedConversation ? "xl:grid-cols-[360px_minmax(0,1fr)_320px]" : "xl:grid-cols-[360px_minmax(0,1fr)]"
+      }`}
+    >
+      <div className="crm-conversations-toolbar col-span-full border-b border-white/10 p-4">
+        <div className="flex flex-col gap-3">
+          <div className="flex flex-col gap-3 2xl:flex-row 2xl:items-center 2xl:justify-between">
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="flex h-9 items-center gap-2 rounded-full border border-white/10 bg-black/15 px-3 text-xs text-zinc-500">
+                <MessageCircle className="h-3.5 w-3.5 text-[#8B5CF6]" />
+                <span>
+                  {conversationCounts.unread} não lidas de {conversations.length} conversas
+                </span>
+              </div>
+              <span className="flex h-9 items-center rounded-full border border-[#25D366]/30 bg-[#25D366]/10 px-3 text-xs font-semibold text-[#25D366]">
+                Tempo real
+              </span>
             </div>
-            <span className="rounded-full border border-[#25D366]/30 bg-[#25D366]/10 px-2 py-1 text-xs text-[#25D366]">
-              Tempo real
-            </span>
+            <div className="grid gap-2 lg:grid-cols-[minmax(260px,1fr)_auto] 2xl:min-w-[980px]">
+              <label className="flex h-11 min-w-0 items-center gap-2 rounded-xl border border-white/10 bg-black/25 px-3 text-sm text-zinc-400 shadow-sm transition focus-within:border-[#8B5CF6]/70 focus-within:shadow-[#8B5CF6]/10">
+              <Search className="h-4 w-4" />
+              <input
+                className="min-w-0 flex-1 bg-transparent outline-none placeholder:text-zinc-600"
+                onChange={(event) => setConversationQuery(event.target.value)}
+                placeholder="Buscar nome, telefone ou mensagem"
+                value={conversationQuery}
+              />
+            </label>
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 2xl:flex">
+              <select
+                className="h-11 rounded-xl border border-white/10 bg-black/25 px-3 text-xs font-medium text-zinc-300 outline-none transition focus:border-[#8B5CF6]/70 2xl:w-36"
+                onChange={(event) => setLeadFilter(event.target.value as ConversationLeadFilter)}
+                value={leadFilter}
+              >
+                <option value="all">Todos os leads</option>
+                <option value="without">Sem lead</option>
+                <option value="with">Com lead</option>
+              </select>
+              <select
+                className="h-11 rounded-xl border border-white/10 bg-black/25 px-3 text-xs font-medium text-zinc-300 outline-none transition focus:border-[#8B5CF6]/70 2xl:w-40"
+                onChange={(event) => setPriorityFilter(event.target.value as ConversationPriorityFilter)}
+                value={priorityFilter}
+              >
+                <option value="all">Todas prioridades</option>
+                <option value="failed">Com falha</option>
+                <option value="hot">Lead quente</option>
+                <option value="unassigned">Sem responsável</option>
+                <option value="today">Recebidas hoje</option>
+              </select>
+              <select
+                className="h-11 rounded-xl border border-white/10 bg-black/25 px-3 text-xs font-medium text-zinc-300 outline-none transition focus:border-[#8B5CF6]/70 2xl:w-36"
+                onChange={(event) => setSortMode(event.target.value as ConversationSort)}
+                value={sortMode}
+              >
+                <option value="recent">Mais recentes</option>
+                <option value="unread">Não lidas primeiro</option>
+                <option value="oldestWaiting">Maior espera</option>
+                <option value="hot">Quentes primeiro</option>
+              </select>
+              <button
+                className="h-11 rounded-xl border border-white/10 px-3 text-xs font-semibold text-zinc-400 transition hover:border-[#8B5CF6]/30 hover:bg-white/[0.06] 2xl:w-32"
+                onClick={() => {
+                  setConversationQuery("");
+                  setStatusFilter("all");
+                  setLeadFilter("all");
+                  setPriorityFilter("all");
+                  setSortMode("recent");
+                }}
+                type="button"
+              >
+                Limpar filtros
+              </button>
+              </div>
+            </div>
           </div>
-          <label className="mt-4 flex h-10 items-center gap-2 rounded-lg border border-white/10 bg-black/30 px-3 text-sm text-zinc-400">
-            <Search className="h-4 w-4" />
-            <input
-              className="min-w-0 flex-1 bg-transparent outline-none placeholder:text-zinc-600"
-              onChange={(event) => setConversationQuery(event.target.value)}
-              placeholder="Buscar nome, telefone ou mensagem"
-              value={conversationQuery}
-            />
-          </label>
-          <div className="mt-3 grid grid-cols-2 gap-2">
-            <select
-              className="h-9 rounded-lg border border-white/10 bg-black/30 px-2 text-xs text-zinc-300 outline-none"
-              onChange={(event) => setLeadFilter(event.target.value as ConversationLeadFilter)}
-              value={leadFilter}
-            >
-              <option value="all">Todos os leads</option>
-              <option value="without">Sem lead</option>
-              <option value="with">Com lead</option>
-            </select>
-            <select
-              className="h-9 rounded-lg border border-white/10 bg-black/30 px-2 text-xs text-zinc-300 outline-none"
-              onChange={(event) => setPriorityFilter(event.target.value as ConversationPriorityFilter)}
-              value={priorityFilter}
-            >
-              <option value="all">Todas prioridades</option>
-              <option value="failed">Com falha</option>
-              <option value="hot">Lead quente</option>
-              <option value="unassigned">Sem responsavel</option>
-              <option value="today">Recebidas hoje</option>
-            </select>
-            <select
-              className="h-9 rounded-lg border border-white/10 bg-black/30 px-2 text-xs text-zinc-300 outline-none"
-              onChange={(event) => setSortMode(event.target.value as ConversationSort)}
-              value={sortMode}
-            >
-              <option value="recent">Mais recentes</option>
-              <option value="unread">Nao lidas primeiro</option>
-              <option value="oldestWaiting">Maior espera</option>
-              <option value="hot">Quentes primeiro</option>
-            </select>
-            <button
-              className="h-9 rounded-lg border border-white/10 text-xs text-zinc-400 transition hover:bg-white/[0.06]"
-              onClick={() => {
-                setConversationQuery("");
-                setStatusFilter("all");
-                setLeadFilter("all");
-                setPriorityFilter("all");
-                setSortMode("recent");
-              }}
-              type="button"
-            >
-              Limpar filtros
-            </button>
-          </div>
-          <div className="mt-3 flex flex-wrap gap-2">
+          <div className="flex flex-wrap gap-2 border-t border-white/10 pt-3">
             {conversationStatusTabs.map((tab) => (
               <button
-                className={`rounded-full border px-2.5 py-1 text-[11px] transition ${
+                className={`h-8 rounded-full border px-3 text-[11px] font-semibold transition ${
                   statusFilter === tab.id
-                    ? "border-[#8B5CF6] bg-[#8B5CF6]/20 text-white"
+                    ? "border-[#8B5CF6] bg-[#8B5CF6] text-white shadow-lg shadow-[#8B5CF6]/20"
                     : "border-white/10 text-zinc-400 hover:bg-white/[0.06]"
                 }`}
                 key={tab.id}
@@ -5578,6 +3770,8 @@ function Conversations({
             ))}
           </div>
         </div>
+      </div>
+      <aside className="crm-conversations-list flex min-h-0 flex-col border-b border-white/10 xl:border-b-0 xl:border-r">
         <div className="min-h-0 flex-1 overflow-y-auto">
           {filteredConversations.length === 0 && (
             <div className="p-5 text-center text-sm text-zinc-500">
@@ -5586,13 +3780,16 @@ function Conversations({
           )}
           {filteredConversations.map((conversation) => (
             <button
-              className={`block w-full border-b border-white/10 p-4 text-left transition hover:bg-white/[0.05] ${
+              className={`relative block w-full border-b border-white/10 p-3 text-left transition hover:bg-white/[0.05] ${
                 selectedConversation?.phone === conversation.phone ? "bg-[#8B5CF6]/15" : ""
               }`}
               key={conversation.phone}
               onClick={() => selectConversation(conversation.phone)}
               type="button"
             >
+              {selectedConversation?.phone === conversation.phone && (
+                <span className="absolute bottom-3 left-0 top-3 w-1 rounded-r-full bg-[#8B5CF6]" />
+              )}
               <div className="flex items-center justify-between gap-3">
                 <div className="flex min-w-0 items-center gap-3">
                   <ContactAvatar
@@ -5601,8 +3798,11 @@ function Conversations({
                     size="sm"
                   />
                   <div className="min-w-0">
-                    <div className="truncate font-medium">{conversation.contactName}</div>
-                    <div className="mt-0.5 truncate text-xs text-zinc-500">{conversation.phone}</div>
+                    <div className="truncate font-semibold">{conversation.contactName}</div>
+                    <div className="mt-0.5 flex items-center gap-1 truncate text-xs text-zinc-500">
+                      <span className="h-1.5 w-1.5 rounded-full bg-[#25D366]" />
+                      {conversation.phone}
+                    </div>
                   </div>
                 </div>
                 <span className="shrink-0 text-xs text-zinc-500">
@@ -5612,7 +3812,7 @@ function Conversations({
                   })}
                 </span>
               </div>
-              <div className="mt-3 flex items-center justify-between gap-3">
+              <div className="mt-2 flex items-center justify-between gap-3">
                 <p className="truncate text-sm text-zinc-500">
                   {getWhatsAppMessageDisplay(conversation.lastMessage)}
                 </p>
@@ -5622,7 +3822,7 @@ function Conversations({
                   </span>
                 )}
               </div>
-              <div className="mt-3 flex items-center gap-2">
+              <div className="mt-2 flex flex-wrap items-center gap-1.5">
                 <span className="rounded-full border border-white/10 px-2 py-1 text-[11px] text-zinc-400">
                   {conversation.statusLabel}
                 </span>
@@ -5657,49 +3857,55 @@ function Conversations({
         </div>
       </aside>
 
-      <section className="flex min-h-0 flex-col bg-black/10">
+      <section className="crm-conversations-chat flex min-h-0 flex-col">
         <div className="shrink-0 border-b border-white/10 p-4">
-          <div className="flex items-center justify-between gap-4">
-          <div className="flex min-w-0 items-center gap-3">
-            {selectedConversation && (
+          {selectedConversation ? (
+          <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+            <div className="flex min-w-0 items-center gap-3">
               <ContactAvatar
                 avatarUrl={selectedConversation.avatarUrl}
                 label={selectedConversation.contactName}
               />
-            )}
-            <div className="min-w-0">
-              <div className="flex flex-wrap items-center gap-2">
-                <div className="truncate font-semibold">
-                  {selectedConversation?.contactName ?? selectedConversation?.phone}
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="truncate font-semibold">
+                    {selectedConversation.contactName || selectedConversation.phone}
+                  </div>
+                  {selectedConversation && (
+                    <span className="rounded-full border border-white/10 px-2 py-1 text-[11px] text-zinc-400">
+                      {selectedConversation.statusLabel}
+                    </span>
+                  )}
                 </div>
+                <div className="mt-1 truncate text-sm text-zinc-500">{selectedConversation.phone}</div>
                 {selectedConversation && (
-                  <span className="rounded-full border border-white/10 px-2 py-1 text-[11px] text-zinc-400">
-                    {selectedConversation.statusLabel}
-                  </span>
+                  <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-zinc-500">
+                    <span>{selectedConversationLead ? getStageTitle(columns, selectedConversationLead.status) : "sem lead"}</span>
+                    <span>-</span>
+                    <span>Última interação {new Date(selectedConversation.lastMessage.created_at).toLocaleString("pt-BR")}</span>
+                    <a
+                      className="text-[#25D366] transition hover:text-[#6EE7A8]"
+                      href={`https://wa.me/${selectedConversation.phone}`}
+                      rel="noreferrer"
+                      target="_blank"
+                    >
+                      WhatsApp Web
+                    </a>
+                  </div>
                 )}
               </div>
-              <div className="mt-1 truncate text-sm text-zinc-500">{selectedConversation?.phone}</div>
-              {selectedConversation && (
-                <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-zinc-500">
-                  <span>{selectedConversationLead?.status ?? "sem lead"}</span>
-                  <span>-</span>
-                  <span>Ultima interacao {new Date(selectedConversation.lastMessage.created_at).toLocaleString("pt-BR")}</span>
-                  <a
-                    className="text-[#25D366] transition hover:text-[#6EE7A8]"
-                    href={`https://wa.me/${selectedConversation.phone}`}
-                    rel="noreferrer"
-                    target="_blank"
-                  >
-                    Abrir WhatsApp Web
-                  </a>
-                </div>
-              )}
             </div>
-          </div>
-          {selectedConversation && (
-            <div className="flex shrink-0 items-center gap-2">
+            <div className="flex shrink-0 flex-wrap items-center gap-2">
               <button
-                className="flex h-10 items-center justify-center gap-2 rounded-lg border border-[#25D366]/25 px-3 text-sm text-[#25D366] transition hover:bg-[#25D366]/10 disabled:opacity-60"
+                className="flex h-10 items-center justify-center gap-2 rounded-lg border border-[#8B5CF6]/25 bg-[#8B5CF6]/10 px-3 text-sm font-semibold text-[#DDD6FE] transition hover:bg-[#8B5CF6]/15"
+                onClick={() => setDetailsOpen((current) => !current)}
+                type="button"
+              >
+                <Eye className="h-4 w-4" />
+                {detailsOpen ? "Ocultar detalhes" : "Ver detalhes"}
+              </button>
+              <button
+                className="flex h-10 items-center justify-center gap-2 rounded-lg border border-[#25D366]/25 bg-[#25D366]/10 px-3 text-sm font-semibold text-[#25D366] transition hover:bg-[#25D366]/15 disabled:opacity-60"
                 disabled={conversationActionLoading === "resolved"}
                 onClick={() => void updateSelectedConversationStatus("resolved")}
                 type="button"
@@ -5708,7 +3914,7 @@ function Conversations({
                 Resolver
               </button>
               <button
-                className="flex h-10 items-center justify-center gap-2 rounded-lg border border-white/10 px-3 text-sm text-zinc-300 transition hover:bg-white/[0.06] disabled:opacity-60"
+                className="flex h-10 items-center justify-center gap-2 rounded-lg border border-white/10 px-3 text-sm font-semibold text-zinc-300 transition hover:bg-white/[0.06] disabled:opacity-60"
                 disabled={conversationActionLoading === "archived"}
                 onClick={() => void updateSelectedConversationStatus("archived")}
                 type="button"
@@ -5717,131 +3923,173 @@ function Conversations({
                 Arquivar
               </button>
             </div>
-          )}
           </div>
-        </div>
-        <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4">
-          {selectedConversation?.messages.map((message) => (
-            <div
-              className={`flex ${message.direction === "outbound" ? "justify-end" : "justify-start"}`}
-              key={message.id}
-            >
-              <div
-                className={`max-w-[76%] rounded-lg px-3 py-2.5 text-sm leading-5 ${
-                  message.direction === "outbound"
-                    ? "bg-[#25D366] text-black"
-                    : "border border-white/10 bg-white/[0.06] text-zinc-100"
-                }`}
-              >
-                <div>{getWhatsAppMessageDisplay(message)}</div>
-                <div
-                  className={`mt-2 flex items-center justify-end gap-1 text-[11px] ${
-                    message.direction === "outbound" ? "text-black/60" : "text-zinc-500"
-                  }`}
-                >
-                  <span>{new Date(message.created_at).toLocaleString("pt-BR")}</span>
-                  <span>-</span>
-                  {messageStatusIcon(message.status)}
-                  <span>{messageStatusLabel(message.status)}</span>
-                </div>
-                {message.status === "failed" && message.direction === "outbound" && (
-                  <button
-                    className="mt-2 rounded-md border border-black/20 px-2 py-1 text-xs text-black/70 transition hover:bg-black/10"
-                    onClick={() => void sendReply(getWhatsAppMessageDisplay(message))}
-                    type="button"
-                  >
-                    Tentar novamente
-                  </button>
-                )}
+          ) : (
+            <div className="flex min-h-16 items-center justify-between gap-4">
+              <div>
+                <div className="font-semibold">Selecione uma conversa</div>
+                <p className="mt-1 text-sm text-zinc-500">Escolha um contato da lista para visualizar e responder mensagens.</p>
               </div>
             </div>
-          ))}
+          )}
         </div>
-        <form className="shrink-0 border-t border-white/10 p-4" onSubmit={handleReply}>
-          {actionError && <p className="mb-3 text-sm text-red-300">{actionError}</p>}
-          <div className="mb-3 grid gap-2 lg:grid-cols-[160px_180px_150px_1fr]">
-            <input
-              className="h-10 rounded-lg border border-white/10 bg-black/30 px-3 text-sm text-zinc-300 outline-none transition placeholder:text-zinc-600 focus:border-[#8B5CF6]"
-              onChange={(event) => setTemplateQuery(event.target.value)}
-              placeholder="Buscar template"
-              value={templateQuery}
-            />
-            <select
-              className="h-10 rounded-lg border border-white/10 bg-black/30 px-3 text-sm text-zinc-300 outline-none transition focus:border-[#8B5CF6]"
-              disabled={filteredTemplates.length === 0}
-              onChange={(event) => {
-                applyTemplate(event.target.value);
-                event.target.value = "";
-              }}
-              value=""
-            >
-              <option value="">Aplicar template</option>
-              {filteredTemplates.map((template) => (
-                <option key={template.id} value={template.id}>
-                  {template.title}
-                </option>
-              ))}
-            </select>
-            <select
-              className="h-10 rounded-lg border border-white/10 bg-black/30 px-3 text-sm text-zinc-300 outline-none transition focus:border-[#8B5CF6]"
-              disabled={!selectedConversationLead}
-              onChange={(event) => setReplyMoveStatus(event.target.value as LeadStatus)}
-              value={replyMoveStatus}
-            >
-              <option value="">Mover etapa</option>
-              {columns.map((column) => (
-                <option key={column.id} value={column.id}>
-                  {column.title}
-                </option>
-              ))}
-            </select>
-            <div className="flex items-center gap-2 text-xs text-zinc-500">
-              <select
-                className="h-10 rounded-lg border border-white/10 bg-black/30 px-3 text-sm text-zinc-300 outline-none transition focus:border-[#8B5CF6]"
-                disabled={!selectedConversationLead}
-                onChange={(event) => setReplyFollowupDays(event.target.value)}
-                value={replyFollowupDays}
-              >
-                <option value="">Sem follow-up</option>
-                <option value="1">Amanha</option>
-                <option value="2">2 dias</option>
-                <option value="5">5 dias</option>
-              </select>
-              <span>{replyText.length}/1024</span>
-              <span>Enter envia</span>
-            </div>
-          </div>
-          <div className="mb-3 flex flex-wrap items-center gap-2">
-            <span className="text-xs text-zinc-500">
-              Variaveis: {"{{nome}}"}, {"{{empresa}}"}, {"{{telefone}}"}
-            </span>
-          </div>
-          {replyText.includes("{{") && (
-            <div className="mb-3 rounded-lg border border-[#8B5CF6]/20 bg-[#8B5CF6]/10 p-3 text-xs text-zinc-300">
-              Preview: {previewTemplateText(replyText, selectedConversation)}
+        <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-5">
+          {!selectedConversation && (
+            <div className="flex h-full items-center justify-center">
+              <div className="text-center">
+                <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full border border-[#8B5CF6]/20 bg-[#8B5CF6]/10 text-[#8B5CF6]">
+                  <MessageCircle className="h-6 w-6" />
+                </div>
+                <h2 className="mt-4 text-lg font-semibold">Selecione uma conversa</h2>
+                <p className="mt-2 text-sm text-zinc-500">A conversa, histórico e composer aparecem aqui.</p>
+              </div>
             </div>
           )}
-          <div className="flex flex-col gap-3 sm:flex-row">
-            <textarea
-              className="min-h-12 flex-1 resize-none rounded-lg border border-white/10 bg-black/30 px-4 py-3 text-sm outline-none transition focus:border-[#8B5CF6]"
-              maxLength={1024}
-              onChange={(event) => setReplyText(event.target.value)}
-              onKeyDown={handleReplyKeyDown}
-              placeholder="Responder pelo WhatsApp"
-              value={replyText}
+          {selectedConversationLead && (
+            <ConversationSystemEvent
+              detail={`Etapa atual: ${getStageTitle(columns, selectedConversationLead.status)}${
+                selectedConversationLead.next_followup_at
+                  ? ` | Proximo follow-up ${new Date(selectedConversationLead.next_followup_at).toLocaleString("pt-BR")}`
+                  : ""
+              }`}
+              title="Lead vinculado ao CRM"
             />
-            <button
-              className="flex h-12 items-center justify-center gap-2 rounded-lg bg-[#25D366] px-5 text-sm font-semibold text-black transition hover:bg-[#20bd5a] disabled:opacity-60"
-              disabled={sending || !replyText.trim()}
-              type="submit"
-            >
-              {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-              {sending ? "Enviando" : "Enviar"}
-            </button>
+          )}
+          {selectedConversation?.messages.map((message, index, allMessages) => {
+            const previous = allMessages[index - 1];
+            const shouldShowDate = !previous || !isSameDay(previous.created_at, new Date(message.created_at));
+            return (
+              <div key={message.id}>
+                {shouldShowDate && <ConversationDateDivider value={message.created_at} />}
+                <div className={`flex ${message.direction === "outbound" ? "justify-end" : "justify-start"}`}>
+                  <div
+                    className={`max-w-[72%] rounded-2xl px-3.5 py-2.5 text-sm leading-5 shadow-sm ${
+                      message.direction === "outbound"
+                        ? "rounded-br-md bg-[#25D366] text-black shadow-[#25D366]/10"
+                        : "rounded-bl-md border border-white/10 bg-white/[0.07] text-zinc-100"
+                    }`}
+                  >
+                    <div>{getWhatsAppMessageDisplay(message)}</div>
+                    <div
+                      className={`mt-2 flex items-center justify-end gap-1 text-[11px] ${
+                        message.direction === "outbound" ? "text-black/60" : "text-zinc-500"
+                      }`}
+                    >
+                      <span>{new Date(message.created_at).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}</span>
+                      <span>-</span>
+                      {messageStatusIcon(message.status)}
+                      <span>{messageStatusLabel(message.status)}</span>
+                    </div>
+                    {message.status === "failed" && message.direction === "outbound" && (
+                      <button
+                        className="mt-2 rounded-md border border-black/20 px-2 py-1 text-xs text-black/70 transition hover:bg-black/10"
+                        onClick={() => void sendReply(getWhatsAppMessageDisplay(message))}
+                        type="button"
+                      >
+                        Tentar novamente
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        <form className="shrink-0 border-t border-white/10 bg-black/10 p-4" onSubmit={handleReply}>
+          <div className="rounded-2xl border border-white/10 bg-black/20 p-3 shadow-sm">
+            {actionError && (
+              <p className="mb-3 rounded-xl border border-red-400/20 bg-red-500/10 px-3 py-2 text-sm text-red-300">
+                {actionError}
+              </p>
+            )}
+            <div className="flex flex-col gap-3 2xl:flex-row 2xl:items-center 2xl:justify-between">
+              <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-[170px_190px_160px_160px]">
+                <input
+                  className="h-10 rounded-xl border border-white/10 bg-black/30 px-3 text-sm text-zinc-300 outline-none transition placeholder:text-zinc-600 focus:border-[#8B5CF6]"
+                  onChange={(event) => setTemplateQuery(event.target.value)}
+                  placeholder="Buscar template"
+                  value={templateQuery}
+                />
+                <select
+                  className="h-10 rounded-xl border border-white/10 bg-black/30 px-3 text-sm text-zinc-300 outline-none transition focus:border-[#8B5CF6]"
+                  disabled={filteredTemplates.length === 0}
+                  onChange={(event) => {
+                    applyTemplate(event.target.value);
+                    event.target.value = "";
+                  }}
+                  value=""
+                >
+                  <option value="">Aplicar template</option>
+                  {filteredTemplates.map((template) => (
+                    <option key={template.id} value={template.id}>
+                      {template.title}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  className="h-10 rounded-xl border border-white/10 bg-black/30 px-3 text-sm text-zinc-300 outline-none transition focus:border-[#8B5CF6]"
+                  disabled={!selectedConversationLead}
+                  onChange={(event) => setReplyMoveStatus(event.target.value as LeadStatus)}
+                  value={replyMoveStatus}
+                >
+                  <option value="">Mover etapa</option>
+                  {columns.map((column) => (
+                    <option key={column.id} value={column.id}>
+                      {column.title}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  className="h-10 rounded-xl border border-white/10 bg-black/30 px-3 text-sm text-zinc-300 outline-none transition focus:border-[#8B5CF6]"
+                  disabled={!selectedConversationLead}
+                  onChange={(event) => setReplyFollowupDays(event.target.value)}
+                  value={replyFollowupDays}
+                >
+                  <option value="">Sem follow-up</option>
+                  <option value="1">Amanhã</option>
+                  <option value="2">2 dias</option>
+                  <option value="5">5 dias</option>
+                </select>
+              </div>
+              <div className="flex flex-wrap items-center gap-2 text-xs text-zinc-500">
+                <span className="rounded-full border border-white/10 px-2.5 py-1">
+                  {replyText.length}/1024
+                </span>
+                <span className="rounded-full border border-white/10 px-2.5 py-1">Enter envia</span>
+                <span className="rounded-full border border-[#8B5CF6]/20 bg-[#8B5CF6]/10 px-2.5 py-1 text-[#C4B5FD]">
+                  Variáveis: {"{{nome}}"}, {"{{empresa}}"}, {"{{telefone}}"}
+                </span>
+              </div>
+            </div>
+            {replyText.includes("{{") && (
+              <div className="mt-3 rounded-xl border border-[#8B5CF6]/20 bg-[#8B5CF6]/10 p-3 text-xs text-zinc-300">
+                Preview: {previewTemplateText(replyText, selectedConversation ?? undefined)}
+              </div>
+            )}
+            <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-end">
+              <textarea
+                className="min-h-12 flex-1 resize-none rounded-xl border border-white/10 bg-black/30 px-4 py-3 text-sm outline-none transition placeholder:text-zinc-600 focus:border-[#8B5CF6]"
+                maxLength={1024}
+                onChange={(event) => setReplyText(event.target.value)}
+                onKeyDown={handleReplyKeyDown}
+                placeholder="Responder pelo WhatsApp"
+                disabled={!selectedConversation}
+                value={replyText}
+              />
+              <button
+                className="flex h-12 min-w-[132px] items-center justify-center gap-2 rounded-xl bg-[#25D366] px-5 text-sm font-bold text-black shadow-lg shadow-[#25D366]/10 transition hover:bg-[#20bd5a] disabled:opacity-60"
+                disabled={sending || !selectedConversation || !replyText.trim()}
+                type="submit"
+              >
+                {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                {sending ? "Enviando" : "Enviar"}
+              </button>
+            </div>
           </div>
         </form>
       </section>
-      <aside className="flex min-h-0 flex-col border-t border-white/10 bg-white/[0.025] xl:border-l xl:border-t-0">
+      {detailsOpen && selectedConversation && (
+      <aside className="crm-conversations-detail flex min-h-0 flex-col border-t border-white/10 xl:border-l xl:border-t-0">
         <div className="border-b border-white/10 p-4">
           <div className="text-sm font-semibold text-zinc-100">Contato comercial</div>
           <p className="mt-1 text-xs text-zinc-500">Dados para operar a venda sem sair da conversa.</p>
@@ -5862,14 +4110,14 @@ function Conversations({
             <div className="grid gap-2 text-sm">
               <ConversationInfoRow
                 label="Lead"
-                value={selectedConversation.lead ? "Vinculado" : selectedConversation.existingLead ? "Existente nao vinculado" : "Sem lead"}
+                value={selectedConversation.lead ? "Vinculado" : selectedConversation.existingLead ? "Existente não vinculado" : "Sem lead"}
               />
               <ConversationInfoRow label="Etapa" value={selectedConversationLead?.status ?? "-"} />
               <ConversationInfoRow
                 label="Temperatura"
                 value={selectedConversationLead ? getTemperatureLabel(selectedConversationLead.temperature).text : "-"}
               />
-              <ConversationInfoRow label="Responsavel" value={selectedConversationLead?.owner_name || "Nao definido"} />
+              <ConversationInfoRow label="Responsável" value={selectedConversationLead?.owner_name || "Não definido"} />
               <ConversationInfoRow
                 label="Proximo follow-up"
                 value={
@@ -5879,7 +4127,7 @@ function Conversations({
                 }
               />
               <ConversationInfoRow
-                label="Ultima interacao"
+                label="Última interação"
                 value={new Date(selectedConversation.lastMessage.created_at).toLocaleString("pt-BR")}
               />
             </div>
@@ -5937,12 +4185,15 @@ function Conversations({
           <div className="p-4 text-sm text-zinc-500">Selecione uma conversa.</div>
         )}
       </aside>
+      )}
       {leadModalOpen && selectedConversation && (
         <ConversationLeadModal
+          availableTags={availableTags}
           columns={columns}
           initialName={selectedConversation.contactName}
           phoneNumber={selectedConversation.phone}
           saving={savingLead}
+          selectedLeadTags={selectedConversation.existingLead ? leadTags.get(selectedConversation.existingLead.id) ?? [] : []}
           existingLead={selectedConversation.existingLead ?? null}
           onClose={() => setLeadModalOpen(false)}
           onSave={handleSaveLead}
@@ -5952,391 +4203,13 @@ function Conversations({
   );
 }
 
-function ConversationLeadModal({
-  columns,
-  initialName,
-  phoneNumber,
-  saving,
-  existingLead,
-  onClose,
-  onSave,
-}: {
-  columns: PipelineStage[];
-  initialName: string;
-  phoneNumber: string;
-  saving: boolean;
-  existingLead: Lead | null;
-  onClose: () => void;
-  onSave: (input: {
-    name: string;
-    company: string;
-    source: string;
-    status: LeadStatus;
-    temperature: NonNullable<Lead["temperature"]>;
-    ownerName: string;
-    nextFollowupAt: string;
-  }) => void;
-}) {
-  const [name, setName] = useState(existingLead?.name ?? initialName);
-  const [company, setCompany] = useState(existingLead?.company ?? "");
-  const [source, setSource] = useState(existingLead?.source ?? "WhatsApp");
-  const [status, setStatus] = useState<LeadStatus>(existingLead?.status ?? columns[0]?.id ?? "novo");
-  const [temperature, setTemperature] = useState<NonNullable<Lead["temperature"]>>(existingLead?.temperature ?? "morno");
-  const [ownerName, setOwnerName] = useState(existingLead?.owner_name ?? "");
-  const [nextFollowupAt, setNextFollowupAt] = useState("");
-
-  return (
-    <Modal onClose={onClose} title={existingLead ? "Vincular conversa ao lead" : "Salvar conversa como lead"}>
-      <form
-        className="space-y-3"
-        onSubmit={(event) => {
-          event.preventDefault();
-          onSave({ name, company, source, status, temperature, ownerName, nextFollowupAt });
-        }}
-      >
-        {existingLead && (
-          <div className="rounded-lg border border-amber-400/20 bg-amber-400/10 p-3 text-sm text-amber-100">
-            Ja existe um lead com este telefone. A conversa sera vinculada a ele, evitando duplicidade.
-          </div>
-        )}
-        <Input label="Nome" onChange={setName} required value={name} />
-        <label className="block text-sm text-zinc-300">
-          Telefone
-          <input
-            className="mt-2 h-11 w-full rounded-lg border border-white/10 bg-white/[0.03] px-3 text-zinc-400 outline-none"
-            readOnly
-            value={phoneNumber}
-          />
-        </label>
-        <Input label="Empresa" onChange={setCompany} value={company} />
-        <Input label="Origem" onChange={setSource} value={source} />
-        <Input label="Responsavel" onChange={setOwnerName} value={ownerName} />
-        <label className="block text-sm text-zinc-300">
-          Status inicial
-          <select
-            className="mt-2 h-11 w-full rounded-lg border border-white/10 bg-[#14131B] px-3 text-white outline-none transition focus:border-[#8B5CF6]"
-            onChange={(event) => setStatus(event.target.value as LeadStatus)}
-            value={status}
-          >
-            {columns.map((column) => (
-              <option key={column.id} value={column.id}>
-                {column.title}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="block text-sm text-zinc-300">
-          Temperatura
-          <select
-            className="mt-2 h-11 w-full rounded-lg border border-white/10 bg-[#14131B] px-3 text-white outline-none transition focus:border-[#8B5CF6]"
-            onChange={(event) => setTemperature(event.target.value as NonNullable<Lead["temperature"]>)}
-            value={temperature}
-          >
-            <option value="frio">Frio</option>
-            <option value="morno">Morno</option>
-            <option value="quente">Quente</option>
-          </select>
-        </label>
-        <label className="block text-sm text-zinc-300">
-          Proximo follow-up
-          <input
-            className="mt-2 h-11 w-full rounded-lg border border-white/10 bg-black/30 px-3 text-white outline-none transition focus:border-[#8B5CF6]"
-            onChange={(event) => setNextFollowupAt(event.target.value)}
-            type="datetime-local"
-            value={nextFollowupAt}
-          />
-        </label>
-        <button
-          className="flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-[#25D366] font-semibold text-black transition hover:bg-[#20bd5a] disabled:opacity-60"
-          disabled={saving}
-          type="submit"
-        >
-          {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
-          {existingLead ? "Vincular conversa" : "Criar lead e vincular conversa"}
-        </button>
-      </form>
-    </Modal>
-  );
-}
-
-function conversationStatus(
-  direction: WhatsAppMessage["direction"],
-  hasLinkedLead: boolean,
-  unreadCount: number,
-  storedStatus?: WhatsAppConversation["status"] | null,
-): ConversationStatus {
-  if (storedStatus === "archived" || storedStatus === "resolved") return storedStatus;
-  if (hasLinkedLead) return "converted";
-  if (unreadCount > 0) return "unread";
-  if (direction === "outbound") return "waiting";
-  return "responded";
-}
-
-function countPendingInboundMessages(messages: WhatsAppMessage[]) {
-  const lastOutboundAt = Math.max(
-    0,
-    ...messages
-      .filter((message) => message.direction === "outbound")
-      .map((message) => new Date(message.created_at).getTime()),
-  );
-
-  return messages.filter(
-    (message) =>
-      message.direction === "inbound" && new Date(message.created_at).getTime() > lastOutboundAt,
-  ).length;
-}
-
-function conversationStatusLabel(status: ConversationStatus) {
-  const labels: Record<ConversationStatus, string> = {
-    unread: "Nao lida",
-    waiting: "Aguardando resposta",
-    responded: "Respondida",
-    converted: "Convertida em lead",
-    resolved: "Resolvida",
-    archived: "Arquivada",
-  };
-
-  return labels[status];
-}
-
-function messageStatusLabel(status: WhatsAppMessage["status"]) {
-  const labels: Record<WhatsAppMessage["status"], string> = {
-    pending: "pendente",
-    sent: "enviada",
-    delivered: "entregue",
-    read: "lida",
-    failed: "falhou",
-  };
-
-  return labels[status] ?? status;
-}
-
-function messageStatusIcon(status: WhatsAppMessage["status"]) {
-  const className = "h-3.5 w-3.5";
-
-  if (status === "pending") return <Clock3 className={className} />;
-  if (status === "sent") return <Check className={className} />;
-  if (status === "delivered") return <CheckCheck className={className} />;
-  if (status === "read") return <CheckCheck className={`${className} text-[#0EA5E9]`} />;
-  return <AlertTriangle className={className} />;
-}
-
-function previewTemplateText(
-  text: string,
-  conversation:
-    | {
-        contactName: string;
-        phone: string;
-        lead?: Lead;
-      }
-    | undefined,
-) {
-  if (!conversation) return text;
-
-  const lead: Lead = conversation.lead ?? {
-    id: "",
-    name: conversation.contactName,
-    phone: conversation.phone,
-    company: "",
-    source: "WhatsApp",
-    status: "novo",
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-  };
-
-  return renderTemplate(text, lead);
-}
-
-function findLeadByPhone(leads: Lead[], phone: string) {
-  const candidates = getPhoneCandidates(phone);
-
-  return (
-    leads.find((lead) => {
-      const normalized = normalizePhone(lead.phone);
-      return candidates.some(
-        (candidate) => candidate === normalized || candidate.endsWith(normalized) || normalized.endsWith(candidate),
-      );
-    }) ?? null
-  );
-}
-
-function getPhoneCandidates(phone: string) {
-  const normalized = normalizePhone(phone);
-  const candidates = new Set([normalized]);
-  const localNumber = normalized.startsWith("55") ? normalized.slice(2) : normalized;
-
-  candidates.add(localNumber);
-  candidates.add(`55${localNumber}`);
-
-  if (localNumber.length === 10) {
-    const withNinthDigit = `${localNumber.slice(0, 2)}9${localNumber.slice(2)}`;
-    candidates.add(withNinthDigit);
-    candidates.add(`55${withNinthDigit}`);
-  }
-
-  if (localNumber.length === 11 && localNumber[2] === "9") {
-    const withoutNinthDigit = `${localNumber.slice(0, 2)}${localNumber.slice(3)}`;
-    candidates.add(withoutNinthDigit);
-    candidates.add(`55${withoutNinthDigit}`);
-  }
-
-  return Array.from(candidates).filter(Boolean);
-}
-
-function ContactAvatar({
-  avatarUrl,
-  label,
-  size = "md",
-}: {
-  avatarUrl?: string | null;
-  label: string;
-  size?: "sm" | "md";
-}) {
-  const dimension = size === "sm" ? "h-9 w-9" : "h-11 w-11";
-  const initials = label
-    .split(" ")
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((part) => part[0])
-    .join("")
-    .toUpperCase();
-
-  if (avatarUrl) {
-    // Profile picture URLs come from WhatsApp/Evolution and are not handled by next/image.
-    // eslint-disable-next-line @next/next/no-img-element
-    return <img alt={label} className={`${dimension} rounded-full object-cover`} src={avatarUrl} />;
-  }
-
-  return (
-    <div className={`${dimension} flex shrink-0 items-center justify-center rounded-full bg-white/10 text-xs font-semibold text-zinc-300`}>
-      {initials || <UserRound className="h-4 w-4" />}
-    </div>
-  );
-}
-
-function ConversationInfoRow({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-lg border border-white/10 bg-black/20 p-3">
-      <div className="text-[11px] uppercase text-zinc-500">{label}</div>
-      <div className="mt-1 truncate text-sm text-zinc-100">{value}</div>
-    </div>
-  );
-}
-
-function applyMessageRealtimeEvent(current: WhatsAppMessage[], payload: {
-  eventType: "INSERT" | "UPDATE" | "DELETE";
-  new: Record<string, unknown>;
-  old: Record<string, unknown>;
-}) {
-  if (payload.eventType === "INSERT") {
-    const next = payload.new as WhatsAppMessage;
-    if (current.some((message) => message.id === next.id)) return current;
-    return [...current, next].sort(sortWhatsAppMessages);
-  }
-
-  if (payload.eventType === "UPDATE") {
-    const next = payload.new as WhatsAppMessage;
-    return current.map((message) => (message.id === next.id ? next : message)).sort(sortWhatsAppMessages);
-  }
-
-  if (payload.eventType === "DELETE") {
-    return current.filter((message) => message.id !== payload.old.id);
-  }
-
-  return current;
-}
-
-function upsertWhatsAppMessage(current: WhatsAppMessage[], next: WhatsAppMessage) {
-  const exists = current.some((message) => message.id === next.id || message.message_id === next.message_id);
-  return (exists
-    ? current.map((message) => (message.id === next.id || message.message_id === next.message_id ? next : message))
-    : [...current, next]
-  ).sort(sortWhatsAppMessages);
-}
-
-function applyConversationRealtimeEvent(current: WhatsAppConversation[], payload: {
-  eventType: "INSERT" | "UPDATE" | "DELETE";
-  new: Record<string, unknown>;
-  old: Record<string, unknown>;
-}) {
-  if (payload.eventType === "INSERT") {
-    const next = payload.new as WhatsAppConversation;
-    return upsertLocalConversation(current, next);
-  }
-
-  if (payload.eventType === "UPDATE") {
-    const next = payload.new as WhatsAppConversation;
-    return upsertLocalConversation(current, next);
-  }
-
-  if (payload.eventType === "DELETE") {
-    return current.filter((conversation) => conversation.id !== payload.old.id);
-  }
-
-  return current;
-}
-
-function upsertLocalConversation(current: WhatsAppConversation[], next: WhatsAppConversation) {
-  const exists = current.some((conversation) => conversation.id === next.id || conversation.phone_number === next.phone_number);
-  const items = exists
-    ? current.map((conversation) =>
-        conversation.id === next.id || conversation.phone_number === next.phone_number ? next : conversation,
-      )
-    : [next, ...current];
-
-  return items.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
-}
-
-function sortWhatsAppMessages(a: WhatsAppMessage, b: WhatsAppMessage) {
-  return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
-}
-
-function getWhatsAppMessageDisplay(message: WhatsAppMessage) {
-  if (message.content?.trim()) return message.content;
-  if (message.media_url) return "Midia recebida";
-  return message.direction === "inbound" ? "Mensagem recebida" : "Mensagem enviada";
-}
-
-function isSameDay(value: string, date: Date) {
-  const current = new Date(value);
-  return startOfDay(current).getTime() === startOfDay(date).getTime();
-}
-
-function sortConversations<
-  T extends {
-    unreadCount: number;
-    lastMessage: WhatsAppMessage;
-    activeLead?: Lead | null;
-  },
->(a: T, b: T, mode: ConversationSort) {
-  if (mode === "unread") {
-    const unreadDiff = b.unreadCount - a.unreadCount;
-    if (unreadDiff !== 0) return unreadDiff;
-  }
-
-  if (mode === "oldestWaiting") {
-    const aInbound = a.lastMessage.direction === "inbound" ? 0 : 1;
-    const bInbound = b.lastMessage.direction === "inbound" ? 0 : 1;
-    if (aInbound !== bInbound) return aInbound - bInbound;
-    return new Date(a.lastMessage.created_at).getTime() - new Date(b.lastMessage.created_at).getTime();
-  }
-
-  if (mode === "hot") {
-    const aHot = a.activeLead?.temperature === "quente" ? 1 : 0;
-    const bHot = b.activeLead?.temperature === "quente" ? 1 : 0;
-    if (aHot !== bHot) return bHot - aHot;
-  }
-
-  return new Date(b.lastMessage.created_at).getTime() - new Date(a.lastMessage.created_at).getTime();
-}
-
 function migrationChecksInitialState(configured: boolean): MigrationCheck[] {
   if (!configured) {
     return [
       {
         label: "Supabase",
         status: "missing",
-        detail: "Supabase nao configurado neste ambiente",
+        detail: "Supabase não configurado neste ambiente",
       },
     ];
   }
@@ -6345,12 +4218,12 @@ function migrationChecksInitialState(configured: boolean): MigrationCheck[] {
     {
       label: "Supabase",
       status: "checking",
-      detail: "Verificando conexao autenticada",
+      detail: "Verificando conexão autenticada",
     },
     {
       label: "Base SaaS",
       status: "checking",
-      detail: "Verificando organizacoes, membros e assinatura",
+      detail: "Verificando organizações, membros e assinatura",
     },
     {
       label: "Campos comerciais",
@@ -6390,141 +4263,6 @@ function migrationChecksInitialState(configured: boolean): MigrationCheck[] {
   ];
 }
 
-type SettingsTab = "system" | "whatsapp" | "templates" | "team" | "crm" | "audit" | "logs" | "data";
-type UserRole = "admin" | "seller" | "support" | "readonly";
-type CrmPreferences = {
-  companyName: string;
-  brandName: string;
-  defaultSlaHours: string;
-  businessHours: string;
-  defaultFollowupDays: string;
-  defaultWhatsAppSource: string;
-  defaultOwnerName: string;
-};
-
-const settingsTabs: Array<{ id: SettingsTab; label: string }> = [
-  { id: "system", label: "Sistema" },
-  { id: "whatsapp", label: "WhatsApp" },
-  { id: "templates", label: "Mensagens" },
-  { id: "team", label: "Equipe" },
-  { id: "crm", label: "CRM" },
-  { id: "audit", label: "Auditoria" },
-  { id: "logs", label: "Logs" },
-  { id: "data", label: "Dados" },
-];
-
-const defaultCrmPreferences: CrmPreferences = {
-  companyName: "OrigoCRM",
-  brandName: "OrigoCRM",
-  defaultSlaHours: "24",
-  businessHours: "08:00-18:00",
-  defaultFollowupDays: "1",
-  defaultWhatsAppSource: "WhatsApp",
-  defaultOwnerName: "",
-};
-
-const migrationSqlByLabel: Record<string, string> = {
-  "Base SaaS": "Aplique o arquivo completo supabase/saas_base_migration.sql no SQL Editor do Supabase.",
-  "Google Calendar": "Aplique o arquivo completo supabase/google_calendar_migration.sql no SQL Editor do Supabase.",
-  "Campos comerciais": [
-    "alter table public.leads add column if not exists estimated_value numeric(12,2);",
-    "alter table public.leads add column if not exists owner_name text not null default '';",
-    "alter table public.leads add column if not exists temperature text not null default 'morno';",
-    "alter table public.leads add column if not exists outcome_reason text not null default '';",
-    "alter table public.leads add column if not exists sla_hours integer not null default 24;",
-    "alter table public.leads add column if not exists archived_at timestamptz;",
-    "alter table public.leads drop constraint if exists leads_status_check;",
-    "alter table public.leads drop constraint if exists leads_closed_outcome_reason_check;",
-    "create index if not exists leads_user_id_temperature_idx on public.leads(user_id, temperature);",
-    "create index if not exists leads_user_id_owner_name_idx on public.leads(user_id, owner_name);",
-    "create index if not exists leads_user_id_archived_at_idx on public.leads(user_id, archived_at);",
-  ].join("\n"),
-  "Tabela de tarefas": [
-    "create table if not exists public.tasks (",
-    "  id uuid primary key default gen_random_uuid(),",
-    "  user_id uuid not null references auth.users(id) on delete cascade,",
-    "  lead_id uuid references public.leads(id) on delete cascade,",
-    "  type text not null default 'followup',",
-    "  title text not null,",
-    "  notes text,",
-    "  due_at timestamptz not null,",
-    "  status text not null default 'open' check (status in ('open', 'completed', 'canceled')),",
-    "  completed_at timestamptz,",
-    "  created_at timestamptz not null default now(),",
-    "  updated_at timestamptz not null default now()",
-    ");",
-    "alter table public.tasks alter column lead_id drop not null;",
-    "alter table public.tasks drop constraint if exists tasks_type_check;",
-    "alter table public.tasks add constraint tasks_type_check check (type in ('followup', 'call', 'email', 'whatsapp', 'meeting', 'other'));",
-    "create index if not exists tasks_user_id_status_due_at_idx on public.tasks(user_id, status, due_at);",
-    "create index if not exists tasks_user_id_lead_id_idx on public.tasks(user_id, lead_id);",
-    "create index if not exists tasks_user_id_due_at_idx on public.tasks(user_id, due_at);",
-    "alter table public.tasks enable row level security;",
-  ].join("\n"),
-  "Trilha de auditoria": [
-    "create table if not exists public.audit_logs (",
-    "  id uuid primary key default gen_random_uuid(),",
-    "  user_id uuid references auth.users(id) on delete set null,",
-    "  entity_type text not null check (entity_type in ('lead', 'task', 'template', 'whatsapp', 'system')),",
-    "  entity_id uuid,",
-    "  action text not null,",
-    "  summary text not null,",
-    "  metadata jsonb not null default '{}'::jsonb,",
-    "  created_at timestamptz not null default now()",
-    ");",
-    "create index if not exists audit_logs_user_id_created_at_idx on public.audit_logs(user_id, created_at desc);",
-    "create index if not exists audit_logs_user_id_entity_idx on public.audit_logs(user_id, entity_type, entity_id);",
-    "alter table public.audit_logs enable row level security;",
-  ].join("\n"),
-  "Conversas operacionais": [
-    "alter table public.whatsapp_conversations drop constraint if exists whatsapp_conversations_status_check;",
-    "alter table public.whatsapp_conversations add constraint whatsapp_conversations_status_check check (status in ('open', 'unread', 'waiting', 'responded', 'converted', 'resolved', 'archived'));",
-    "create index if not exists whatsapp_conversations_user_id_status_updated_at_idx on public.whatsapp_conversations(user_id, status, updated_at desc);",
-  ].join("\n"),
-  "Tags e campanhas": [
-    "create table if not exists public.tags (",
-    "  id uuid primary key default gen_random_uuid(),",
-    "  user_id uuid not null references auth.users(id) on delete cascade,",
-    "  name text not null,",
-    "  color text not null default '#8B5CF6',",
-    "  created_at timestamptz not null default now()",
-    ");",
-    "create table if not exists public.lead_tags (",
-    "  user_id uuid not null references auth.users(id) on delete cascade,",
-    "  lead_id uuid not null references public.leads(id) on delete cascade,",
-    "  tag_id uuid not null references public.tags(id) on delete cascade,",
-    "  created_at timestamptz not null default now(),",
-    "  primary key (lead_id, tag_id)",
-    ");",
-    "create table if not exists public.prospecting_campaigns (id uuid primary key default gen_random_uuid(), user_id uuid not null references auth.users(id) on delete cascade, name text not null, niche text not null default '', state text not null default '', city text not null default '', template_id uuid references public.message_templates(id) on delete set null, total_contacts integer not null default 0, whatsapp_validated_count integer not null default 0, sent_count integer not null default 0, failed_count integer not null default 0, ignored_count integer not null default 0, status text not null default 'completed', created_at timestamptz not null default now(), updated_at timestamptz not null default now());",
-    "create table if not exists public.prospecting_campaign_contacts (id uuid primary key default gen_random_uuid(), campaign_id uuid not null references public.prospecting_campaigns(id) on delete cascade, user_id uuid not null references auth.users(id) on delete cascade, business_name text not null, phone text not null default '', category text not null default '', city text not null default '', state text not null default '', lead_score integer, dispatch_status text not null default 'new', message text, error text, sent_at timestamptz, created_at timestamptz not null default now());",
-    "create unique index if not exists tags_user_id_lower_name_idx on public.tags(user_id, lower(name));",
-    "create index if not exists lead_tags_user_id_lead_id_idx on public.lead_tags(user_id, lead_id);",
-    "create index if not exists prospecting_campaigns_user_id_created_at_idx on public.prospecting_campaigns(user_id, created_at desc);",
-    "alter table public.tags enable row level security;",
-    "alter table public.lead_tags enable row level security;",
-    "alter table public.prospecting_campaigns enable row level security;",
-    "alter table public.prospecting_campaign_contacts enable row level security;",
-  ].join("\n"),
-};
-
-function readCrmPreferences(): CrmPreferences {
-  if (typeof window === "undefined") return defaultCrmPreferences;
-
-  try {
-    const raw = window.localStorage.getItem("origocrm:settings");
-    return raw ? { ...defaultCrmPreferences, ...JSON.parse(raw) } : defaultCrmPreferences;
-  } catch {
-    return defaultCrmPreferences;
-  }
-}
-
-function readUserRole(): UserRole {
-  if (typeof window === "undefined") return "admin";
-  const value = window.localStorage.getItem("origocrm:user-role");
-  return value === "seller" || value === "support" || value === "readonly" ? value : "admin";
-}
-
 function SettingsView({
   auditLogs,
   archivedLeads,
@@ -6540,11 +4278,13 @@ function SettingsView({
   whatsappLogs,
   whatsappMessages,
   onUnarchiveLead,
+  memberRole,
+  organizationContext,
 }: {
   auditLogs: AuditLog[];
   archivedLeads: Lead[];
   crmTheme: CrmTheme;
-  initialTab?: SettingsTab;
+  initialTab: SettingsTab;
   leads: Lead[];
   onAddTemplate: (title: string, body: string) => void;
   onDeleteTemplate: (template: MessageTemplate) => void;
@@ -6555,6 +4295,8 @@ function SettingsView({
   whatsappLogs: WhatsAppLog[];
   whatsappMessages: WhatsAppMessage[];
   onUnarchiveLead: (lead: Lead) => void;
+  memberRole: CrmRole;
+  organizationContext: OrganizationContext | null;
 }) {
   const supabase = useMemo(() => createSupabaseClient(), []);
   const [checks, setChecks] = useState<MigrationCheck[]>(() => migrationChecksInitialState(Boolean(supabase)));
@@ -6566,10 +4308,10 @@ function SettingsView({
     configured: boolean;
     connected: boolean;
     state: string;
-    instanceName?: string;
-    phoneNumber?: string | null;
-    profileName?: string | null;
-    error?: string;
+    instanceName: string;
+    phoneNumber: string | null;
+    profileName: string | null;
+    error: string;
   } | null>(null);
   const [evolutionLoading, setEvolutionLoading] = useState(false);
   const [evolutionDisconnecting, setEvolutionDisconnecting] = useState(false);
@@ -6579,7 +4321,7 @@ function SettingsView({
   const [googleCalendarStatus, setGoogleCalendarStatus] = useState<GoogleCalendarStatus | null>(null);
   const [googleCalendarLoading, setGoogleCalendarLoading] = useState(false);
   const [googleCalendarFeedback, setGoogleCalendarFeedback] = useState("");
-  const [role, setRole] = useState<UserRole>(() => readUserRole());
+  const [role, setRole] = useState<CrmRole>(() => readUserRole());
   const [preferences, setPreferences] = useState<CrmPreferences>(() => readCrmPreferences());
   const [auditEntityFilter, setAuditEntityFilter] = useState<AuditLog["entity_type"] | "all">("all");
   const [auditActionFilter, setAuditActionFilter] = useState("all");
@@ -6587,6 +4329,16 @@ function SettingsView({
   const [selectedAuditLog, setSelectedAuditLog] = useState<AuditLog | null>(null);
   const [logStatusFilter, setLogStatusFilter] = useState<WhatsAppLog["status"] | "all">("all");
   const [selectedWhatsAppLog, setSelectedWhatsAppLog] = useState<WhatsAppLog | null>(null);
+  const [organizationMembers, setOrganizationMembers] = useState<OrganizationMemberRow[]>([]);
+  const [organizationInvitations, setOrganizationInvitations] = useState<OrganizationInvitationRow[]>([]);
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [inviteRole, setInviteRole] = useState<CrmRole>("seller");
+  const [membersLoading, setMembersLoading] = useState(false);
+  const [inviteLoading, setInviteLoading] = useState(false);
+  const [teamFeedback, setTeamFeedback] = useState("");
+  const [selectedBillingPeriod, setSelectedBillingPeriod] = useState<BillingPeriod>(() => organizationContext?.subscription?.billing_period ?? "monthly");
+  const [billingLoading, setBillingLoading] = useState<PlanSlug | "portal" | null>(null);
+  const [billingFeedback, setBillingFeedback] = useState("");
   const lastWebhook = whatsappLogs[0] ?? null;
   const lastError = whatsappLogs.find((log) => log.status === "error") ?? null;
   const lastMessage = whatsappMessages[0] ?? null;
@@ -6612,12 +4364,100 @@ function SettingsView({
     [logStatusFilter, whatsappLogs],
   );
   const environmentHost = typeof window === "undefined" ? "indefinido" : window.location.host;
-  const rolePermissions: Record<UserRole, string[]> = {
-    admin: ["CRM", "Conversas", "Tarefas", "Templates", "Configuracoes", "Excluir lead", "Alterar funil", "Desconectar WhatsApp"],
-    seller: ["CRM", "Conversas", "Tarefas", "Templates"],
-    support: ["Conversas", "Tarefas", "Templates"],
-    readonly: ["Leitura de dados"],
-  };
+  const effectiveRole = memberRole ?? role;
+  const previewPermissions = useMemo(() => getPermissionsForRole(role), [role]);
+  const effectivePermissions = useMemo(() => getPermissionsForRole(effectiveRole), [effectiveRole]);
+  const canManageTeam = effectiveRole === "owner" || effectiveRole === "admin";
+  const canManageBilling = effectivePermissions.has("billing:manage");
+  const currentSubscription = organizationContext?.subscription ?? null;
+  const currentPlan = getPlan(currentSubscription?.plan_slug ?? "manual");
+  const teamUserLimit = getPlanUserLimit(currentSubscription?.plan_slug ?? "manual");
+  const activeTeamSeats = organizationMembers.filter((member) => member.status === "active").length;
+  const pendingTeamSeats = organizationInvitations.filter((invite) => invite.status === "pending").length;
+  const usedTeamSeats = activeTeamSeats + pendingTeamSeats;
+  const availableTeamSeats = Math.max(teamUserLimit - usedTeamSeats, 0);
+
+  const refreshOrganizationMembers = useCallback(async () => {
+    setMembersLoading(true);
+    setTeamFeedback("");
+    const [membersResult, invitationsResult] = await Promise.all([
+      listOrganizationMembers(),
+      listOrganizationInvitations(),
+    ]);
+    if (!membersResult.success) {
+      setTeamFeedback(membersResult.error ?? "Não foi possível carregar a equipe.");
+      setMembersLoading(false);
+      return;
+    }
+
+    if (!invitationsResult.success) {
+      setTeamFeedback(invitationsResult.error ?? "Não foi possível carregar os convites.");
+    }
+
+    setOrganizationMembers(membersResult.data ?? []);
+    setOrganizationInvitations(invitationsResult.success ? invitationsResult.data ?? [] : []);
+    setMembersLoading(false);
+  }, []);
+
+  useEffect(() => {
+    if (activeTab !== "team") return;
+    const timeout = window.setTimeout(() => {
+      void refreshOrganizationMembers();
+    }, 0);
+
+    return () => window.clearTimeout(timeout);
+  }, [activeTab, refreshOrganizationMembers]);
+
+  async function changeOrganizationMemberRole(memberId: string, nextRole: CrmRole) {
+    setTeamFeedback("");
+    const result = await updateOrganizationMemberRole(memberId, nextRole);
+    if (!result.success) {
+      setTeamFeedback(result.error ?? "Não foi possível alterar o papel.");
+      return;
+    }
+
+    setOrganizationMembers((items) => items.map((item) => (item.id === memberId ? result.data ?? item : item)));
+    setTeamFeedback("Papel atualizado.");
+  }
+
+  async function deactivateOrganizationMember(memberId: string) {
+    setTeamFeedback("");
+    const result = await disableOrganizationMember(memberId);
+    if (!result.success) {
+      setTeamFeedback(result.error ?? "Não foi possível desativar o membro.");
+      return;
+    }
+
+    setOrganizationMembers((items) => items.map((item) => (item.id === memberId ? result.data ?? item : item)));
+    setTeamFeedback("Membro desativado.");
+  }
+
+  async function inviteOrganizationMember() {
+    setTeamFeedback("");
+    setInviteLoading(true);
+    const result = await createOrganizationInvitation(inviteEmail, inviteRole);
+    setInviteLoading(false);
+    if (!result.success) {
+      setTeamFeedback(result.error ?? "Não foi possível criar o convite.");
+      return;
+    }
+
+    setInviteEmail("");
+    setOrganizationInvitations((items) => [result.data!, ...items]);
+    setTeamFeedback("Convite criado. O usuário será adicionado quando entrar com esse email.");
+  }
+
+  async function cancelPendingInvitation(invitationId: string) {
+    setTeamFeedback("");
+    const result = await cancelOrganizationInvitation(invitationId);
+    if (!result.success) {
+      setTeamFeedback(result.error ?? "Não foi possível cancelar o convite.");
+      return;
+    }
+
+    setOrganizationInvitations((items) => items.filter((item) => item.id !== invitationId));
+    setTeamFeedback("Convite cancelado.");
+  }
 
   const runChecks = useCallback(async () => {
     if (!supabase) {
@@ -6701,58 +4541,58 @@ function SettingsView({
       {
         label: "Supabase",
         status: session.data.user ? "ok" : "missing",
-        detail: session.data.user ? "Sessao autenticada e banco acessivel" : "Usuario nao autenticado ou RLS bloqueando leitura",
+        detail: session.data.user ? "Sessão autenticada e banco acessível" : "Usuário não autenticado ou RLS bloqueando leitura",
       },
       {
         label: "Base SaaS",
         status: saasResult.error ? "missing" : "ok",
         detail: saasResult.error
-          ? "Aplique supabase/saas_base_migration.sql para ativar organizacoes, membros e assinaturas"
-          : "Organizacoes, membros e assinatura disponiveis para venda recorrente",
+          ? "Aplique supabase/saas_base_migration.sql para ativar organizações, membros e assinaturas"
+          : "Organizações, membros e assinatura disponíveis para venda recorrente",
       },
       {
         label: "Campos comerciais",
         status: commercial.error ? "missing" : "ok",
         detail: commercial.error
           ? "Aplique commercial_pipeline_migration.sql, lead_archiving_contracts_migration.sql e custom_pipeline_stages_migration.sql"
-          : "Campos comerciais, arquivamento e etapas customizadas disponiveis",
+          : "Campos comerciais, arquivamento e etapas customizadas disponíveis",
       },
       {
         label: "Tabela de tarefas",
         status: tasksResult.error ? "missing" : "ok",
         detail: tasksResult.error
           ? "Aplique supabase/tasks_migration.sql, tasks_meeting_type_migration.sql e tasks_operational_migration.sql"
-          : "Tabela tasks disponivel para tarefas comerciais e operacionais",
+          : "Tabela tasks disponível para tarefas comerciais e operacionais",
       },
       {
         label: "Trilha de auditoria",
         status: auditResult.error ? "missing" : "ok",
         detail: auditResult.error
           ? "Aplique supabase/audit_logs_migration.sql"
-          : "Tabela audit_logs pronta para acoes sensiveis",
+          : "Tabela audit_logs pronta para ações sensíveis",
       },
       {
         label: "Conversas operacionais",
         status: conversationResult.error ? "missing" : "ok",
         detail: conversationResult.error
           ? "Aplique supabase/conversations_operational_migration.sql"
-          : "Status resolvida/arquivada e inbox operacional disponiveis",
+          : "Status resolvida/arquivada e inbox operacional disponíveis",
       },
       {
         label: "Tags e campanhas",
         status: tagResult.error || campaignResult.error ? "missing" : "ok",
         detail: tagResult.error || campaignResult.error
           ? "Aplique supabase/tags_and_prospecting_campaigns_migration.sql"
-          : "Tags e historico de campanhas de prospeccao disponiveis",
+          : "Tags e histórico de campanhas de prospecção disponíveis",
       },
       {
         label: "Google Calendar",
         status: googleCalendarData?.configured && !googleTaskResult.error && googleCalendarData.migrated !== false ? "ok" : "missing",
         detail: !googleCalendarData?.configured
           ? "Configure GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET e GOOGLE_CALENDAR_REDIRECT_URI na Vercel"
-          : googleTaskResult.error || googleCalendarData.migrated === false
-            ? "Aplique supabase/google_calendar_migration.sql para ativar conexao por usuario e eventos automaticos"
-            : googleCalendarData.connected
+          : googleTaskResult.error || googleCalendarData?.migrated === false
+            ? "Aplique supabase/google_calendar_migration.sql para ativar conexão por usuário e eventos automáticos"
+            : googleCalendarData?.connected
               ? `Agenda conectada${googleCalendarData.connection?.account_email ? ` em ${googleCalendarData.connection.account_email}` : ""}`
               : "OAuth configurado. Conecte uma conta Google na aba CRM",
       },
@@ -6761,14 +4601,14 @@ function SettingsView({
         status: webhookResult?.status === "ok" ? "ok" : "missing",
         detail: webhookResult?.status === "ok"
           ? `Endpoint ativo com ${(webhookResult.events ?? []).length} eventos suportados`
-          : "Nao foi possivel validar o endpoint publico do webhook",
+          : "Não foi possível validar o endpoint público do webhook",
       },
       {
         label: "Evolution",
         status: evolutionData?.configured ? "ok" : "missing",
         detail: evolutionData?.configured
-          ? `Instancia ${evolutionData.instanceName || "configurada"} em estado ${evolutionData.state ?? "indefinido"}`
-          : "Variaveis da Evolution ausentes ou nao acessiveis",
+          ? `Instância ${evolutionData.instanceName || "configurada"} em estado ${evolutionData.state || "indefinido"}`
+          : "Variáveis da Evolution ausentes ou não acessíveis",
       },
     ]);
     setLastCheckedAt(new Date().toISOString());
@@ -6803,11 +4643,12 @@ function SettingsView({
     const params = new URLSearchParams(window.location.search);
     const googleCalendar = params.get("googleCalendar");
     const googleCalendarError = params.get("googleCalendarError");
+    const billing = params.get("billing");
 
     const timeout = window.setTimeout(() => {
       if (googleCalendar === "connected") {
         setActiveTab("crm");
-        setGoogleCalendarFeedback("Google Calendar conectado. Novas tarefas serao sincronizadas automaticamente.");
+        setGoogleCalendarFeedback("Google Calendar conectado. Novas tarefas serão sincronizadas automaticamente.");
         void refreshGoogleCalendarStatus();
       } else if (googleCalendarError) {
         setActiveTab("crm");
@@ -6817,7 +4658,15 @@ function SettingsView({
         setGoogleCalendarFeedback(`Google Calendar: ${googleCalendar}`);
       }
 
-      if (googleCalendar || googleCalendarError) {
+      if (billing === "success") {
+        setActiveTab("data");
+        setBillingFeedback("Pagamento confirmado. A assinatura será atualizada assim que o Stripe enviar o webhook.");
+      } else if (billing === "canceled") {
+        setActiveTab("data");
+        setBillingFeedback("Checkout cancelado. Nenhuma alteração foi feita.");
+      }
+
+      if (googleCalendar || googleCalendarError || billing) {
         window.history.replaceState(null, "", window.location.pathname);
       }
     }, 0);
@@ -6846,9 +4695,9 @@ function SettingsView({
         profileName: data.profileName,
         error: data.error,
       });
-      if (!response.ok) setEvolutionFeedback(data.error ?? "Nao foi possivel consultar a Evolution");
+      if (!response.ok) setEvolutionFeedback(data.error ?? "Não foi possível consultar a Evolution");
     } catch {
-      setEvolutionFeedback("Nao foi possivel consultar a Evolution");
+      setEvolutionFeedback("Não foi possível consultar a Evolution");
     } finally {
       setEvolutionLoading(false);
     }
@@ -6863,7 +4712,7 @@ function SettingsView({
       const response = await fetch("/api/evolution/qrcode", { cache: "no-store" });
       const data = await response.json();
       if (!response.ok || data.error) {
-        setEvolutionFeedback(data.error ?? "Nao foi possivel gerar QR Code");
+        setEvolutionFeedback(data.error ?? "Não foi possível gerar QR Code");
         return;
       }
 
@@ -6874,11 +4723,11 @@ function SettingsView({
         data.base64
           ? "QR gerado. Escaneie pelo WhatsApp e clique em Atualizar."
           : data.pairingCode
-            ? "Codigo de pareamento gerado."
-            : "A Evolution respondeu, mas nao retornou QR ou codigo de pareamento.",
+            ? "Código de pareamento gerado."
+            : "A Evolution respondeu, mas não retornou QR ou código de pareamento.",
       );
     } catch {
-      setEvolutionFeedback("Nao foi possivel gerar QR Code");
+      setEvolutionFeedback("Não foi possível gerar QR Code");
     } finally {
       setEvolutionLoading(false);
     }
@@ -6891,7 +4740,7 @@ function SettingsView({
       const response = await fetch("/api/evolution/disconnect", { method: "DELETE" });
       const data = await response.json();
       if (!response.ok || data.error) {
-        setEvolutionFeedback(data.error ?? "Nao foi possivel desconectar");
+        setEvolutionFeedback(data.error ?? "Não foi possível desconectar");
         return;
       }
 
@@ -6900,7 +4749,7 @@ function SettingsView({
       await refreshEvolutionStatus();
       setEvolutionFeedback("WhatsApp desconectado");
     } catch {
-      setEvolutionFeedback("Nao foi possivel desconectar");
+      setEvolutionFeedback("Não foi possível desconectar");
     } finally {
       setEvolutionDisconnecting(false);
     }
@@ -6909,7 +4758,7 @@ function SettingsView({
   async function testWebhook() {
     const response = await fetch("/api/webhooks/evolution", { cache: "no-store" });
     const data = await response.json();
-    setEvolutionFeedback(response.ok ? `Webhook ativo: ${(data.events ?? []).join(", ")}` : "Webhook nao respondeu");
+    setEvolutionFeedback(response.ok ? `Webhook ativo: ${(data.events ?? []).join(", ")}` : "Webhook não respondeu");
   }
 
   async function refreshGoogleCalendarStatus() {
@@ -6925,10 +4774,10 @@ function SettingsView({
         connection: data.connection ?? null,
       });
       if (!response.ok || data.error) {
-        setGoogleCalendarFeedback(data.error ?? "Nao foi possivel consultar Google Calendar");
+        setGoogleCalendarFeedback(data.error ?? "Não foi possível consultar Google Calendar");
       }
     } catch {
-      setGoogleCalendarFeedback("Nao foi possivel consultar Google Calendar");
+      setGoogleCalendarFeedback("Não foi possível consultar Google Calendar");
     } finally {
       setGoogleCalendarLoading(false);
     }
@@ -6945,14 +4794,14 @@ function SettingsView({
       const response = await fetch("/api/integrations/google/disconnect", { method: "DELETE" });
       const data = await response.json();
       if (!response.ok || data.error) {
-        setGoogleCalendarFeedback(data.error ?? "Nao foi possivel desconectar Google Calendar");
+        setGoogleCalendarFeedback(data.error ?? "Não foi possível desconectar Google Calendar");
         return;
       }
 
       setGoogleCalendarFeedback("Google Calendar desconectado");
       await refreshGoogleCalendarStatus();
     } catch {
-      setGoogleCalendarFeedback("Nao foi possivel desconectar Google Calendar");
+      setGoogleCalendarFeedback("Não foi possível desconectar Google Calendar");
     } finally {
       setGoogleCalendarLoading(false);
     }
@@ -6995,6 +4844,48 @@ function SettingsView({
     })));
   }
 
+  async function startCheckout(planSlug: PlanSlug) {
+    setBillingFeedback("");
+    setBillingLoading(planSlug);
+    try {
+      const response = await fetch("/api/billing/checkout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ planSlug, billingPeriod: selectedBillingPeriod }),
+      });
+      const data = await response.json();
+      if (!response.ok || data.error || !data.url) {
+        setBillingFeedback(data.error ?? "Não foi possível iniciar o checkout.");
+        return;
+      }
+
+      window.location.href = data.url;
+    } catch {
+      setBillingFeedback("Não foi possível iniciar o checkout.");
+    } finally {
+      setBillingLoading(null);
+    }
+  }
+
+  async function openBillingPortal() {
+    setBillingFeedback("");
+    setBillingLoading("portal");
+    try {
+      const response = await fetch("/api/billing/portal", { method: "POST" });
+      const data = await response.json();
+      if (!response.ok || data.error || !data.url) {
+        setBillingFeedback(data.error ?? "Não foi possível abrir o portal de cobrança.");
+        return;
+      }
+
+      window.location.href = data.url;
+    } catch {
+      setBillingFeedback("Não foi possível abrir o portal de cobrança.");
+    } finally {
+      setBillingLoading(null);
+    }
+  }
+
   return (
     <div className="space-y-5">
       <div className="flex flex-wrap gap-2 rounded-lg border border-white/10 bg-white/[0.025] p-2">
@@ -7019,7 +4910,7 @@ function SettingsView({
             <h2 className="text-lg font-semibold">Diagnostico operacional</h2>
             <p className="mt-1 text-sm text-zinc-500">Banco, migrations, webhook, Evolution e ambiente.</p>
             <p className="mt-2 text-xs text-zinc-600">
-              Ultimo teste: {lastCheckedAt ? new Date(lastCheckedAt).toLocaleString("pt-BR") : "ainda nao executado"}
+              Último teste: {lastCheckedAt ? new Date(lastCheckedAt).toLocaleString("pt-BR") : "ainda não executado"}
             </p>
           </div>
           <button
@@ -7059,13 +4950,13 @@ function SettingsView({
         </div>
         <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
           <SettingsMetric icon={Database} label="Banco" value={supabase ? "Configurado" : "Pendente"} />
-          <SettingsMetric icon={ShieldCheck} label="Usuario" value={user.email ?? user.id} />
+          <SettingsMetric icon={ShieldCheck} label="Usuário" value={user.email ?? user.id} />
           <SettingsMetric icon={Settings} label="Ambiente" value={environmentHost} />
           <SettingsMetric icon={MessageCircle} label="WhatsApp" value={evolutionStatus?.connected ? "Conectado" : "Pendente"} />
         </div>
         {pendingChecks.length > 0 && (
           <div className="mt-4 rounded-lg border border-amber-400/20 bg-amber-400/10 p-3 text-sm text-amber-100">
-            {pendingChecks.length} item(ns) pedem acao. Copie o SQL pendente e aplique no SQL Editor do Supabase.
+            {pendingChecks.length} item(ns) pedem ação. Copie o SQL pendente e aplique no SQL Editor do Supabase.
           </div>
         )}
       </section>
@@ -7078,7 +4969,7 @@ function SettingsView({
             <div className="flex items-start justify-between gap-3">
               <div>
                 <h2 className="text-lg font-semibold">Evolution</h2>
-                <p className="mt-1 text-sm text-zinc-500">Estado da instancia, webhook e acoes operacionais.</p>
+                <p className="mt-1 text-sm text-zinc-500">Estado da instância, webhook e ações operacionais.</p>
               </div>
               <SettingsStatusPill
                 status={evolutionStatus?.connected ? "ok" : "missing"}
@@ -7086,12 +4977,12 @@ function SettingsView({
               />
             </div>
             <div className="grid gap-3 sm:grid-cols-2">
-              <SettingsMetric icon={Wifi} label="Estado" value={evolutionStatus?.state ?? "nao verificado"} />
-              <SettingsMetric icon={UserRound} label="Numero conectado" value={evolutionStatus?.phoneNumber ?? "Nao informado"} />
-              <SettingsMetric icon={MessageCircle} label="Perfil" value={evolutionStatus?.profileName ?? "Nao informado"} />
-              <SettingsMetric icon={Clock3} label="Ultimo webhook" value={lastWebhook ? new Date(lastWebhook.created_at).toLocaleString("pt-BR") : "Sem eventos"} />
-              <SettingsMetric icon={Send} label="Ultima mensagem" value={lastMessage ? new Date(lastMessage.created_at).toLocaleString("pt-BR") : "Sem mensagens"} />
-              <SettingsMetric icon={AlertTriangle} label="Ultimo erro" value={lastError?.error_message ?? lastError?.event_type ?? "Sem erros recentes"} />
+              <SettingsMetric icon={Wifi} label="Estado" value={evolutionStatus?.state ?? "não verificado"} />
+              <SettingsMetric icon={UserRound} label="Número conectado" value={evolutionStatus?.phoneNumber ?? "Não informado"} />
+              <SettingsMetric icon={MessageCircle} label="Perfil" value={evolutionStatus?.profileName ?? "Não informado"} />
+              <SettingsMetric icon={Clock3} label="Último webhook" value={lastWebhook ? new Date(lastWebhook.created_at).toLocaleString("pt-BR") : "Sem eventos"} />
+              <SettingsMetric icon={Send} label="Última mensagem" value={lastMessage ? new Date(lastMessage.created_at).toLocaleString("pt-BR") : "Sem mensagens"} />
+              <SettingsMetric icon={AlertTriangle} label="Último erro" value={lastError?.error_message ?? lastError?.event_type ?? "Sem erros recentes"} />
             </div>
             {evolutionFeedback && <p className="rounded-lg border border-white/10 bg-black/20 p-3 text-sm text-zinc-300">{evolutionFeedback}</p>}
             {evolutionStatus?.error && <p className="rounded-lg border border-red-400/20 bg-red-500/10 p-3 text-sm text-red-200">{evolutionStatus.error}</p>}
@@ -7130,7 +5021,7 @@ function SettingsView({
                     WhatsApp conectado. As conversas novas chegam pelo webhook.
                   </div>
                 ) : evolutionQrCode ? (
-                  // QR Code vem como data URL da Evolution, entao nao passa pelo otimizador de imagem.
+                  // QR Code vem como data URL da Evolution, entao não passa pelo otimizador de imagem.
                   // eslint-disable-next-line @next/next/no-img-element
                   <img
                     alt="QR Code para conectar WhatsApp"
@@ -7139,14 +5030,14 @@ function SettingsView({
                   />
                 ) : evolutionPairingCode ? (
                   <div className="text-center">
-                    <div className="text-sm text-zinc-500">Codigo de pareamento</div>
+                    <div className="text-sm text-zinc-500">Código de pareamento</div>
                     <div className="mt-3 rounded-lg border border-white/10 bg-black/30 px-5 py-3 font-mono text-2xl tracking-widest text-zinc-100">
                       {evolutionPairingCode}
                     </div>
                   </div>
                 ) : (
                   <div className="max-w-sm text-center text-sm leading-6 text-zinc-500">
-                    Clique em Gerar QR ou Reconectar para iniciar o pareamento da instancia.
+                    Clique em Gerar QR ou Reconectar para iniciar o pareamento da instância.
                   </div>
                 )}
               </div>
@@ -7189,60 +5080,233 @@ function SettingsView({
 
       {activeTab === "team" && (
       <section className="rounded-xl border border-white/10 bg-white/[0.035] p-5">
-        <h2 className="text-lg font-semibold">Usuarios e seguranca</h2>
+        <h2 className="text-lg font-semibold">Usuários e segurança</h2>
         <div className="mt-4 grid gap-4 xl:grid-cols-2">
           <div className="rounded-lg border border-white/10 bg-black/20 p-4">
-            <div className="text-sm text-zinc-500">Usuario logado</div>
+            <div className="text-sm text-zinc-500">Usuário logado</div>
             <div className="mt-1 font-medium text-zinc-100">{user.email ?? user.id}</div>
+            <div className="mt-4 grid gap-3 sm:grid-cols-2">
+              <div className="rounded-lg border border-white/10 bg-white/[0.035] p-3">
+                <div className="text-xs uppercase text-zinc-500">Organização</div>
+                <div className="mt-1 font-medium text-zinc-100">
+                  {organizationContext?.organization?.name ?? "Base SaaS pendente"}
+                </div>
+              </div>
+              <div className="rounded-lg border border-white/10 bg-white/[0.035] p-3">
+                <div className="text-xs uppercase text-zinc-500">Papel atual</div>
+                <div className="mt-1 font-medium text-zinc-100">{crmRoleLabels[effectiveRole]}</div>
+              </div>
+            </div>
             <label className="mt-4 block text-sm text-zinc-300">
-              Papel operacional
+              Simular permissões por papel
               <select
                 className="mt-2 h-10 w-full rounded-lg border border-white/10 bg-black/30 px-3 text-sm outline-none focus:border-[#8B5CF6]"
-                onChange={(event) => setRole(event.target.value as UserRole)}
+                onChange={(event) => {
+                  const nextRole = event.target.value as CrmRole;
+                  setRole(nextRole);
+                  window.localStorage.setItem("origocrm:user-role", nextRole);
+                }}
                 value={role}
               >
-                <option value="admin">Admin</option>
-                <option value="seller">Vendedor</option>
-                <option value="support">Atendimento</option>
-                <option value="readonly">Leitura</option>
+                {roleOptions.map((option) => (
+                  <option key={option} value={option}>{crmRoleLabels[option]}</option>
+                ))}
               </select>
             </label>
           </div>
           <div className="rounded-lg border border-white/10 bg-black/20 p-4">
-            <div className="text-sm font-medium text-zinc-100">Permissoes por modulo</div>
+            <div className="text-sm font-medium text-zinc-100">Permissões por módulo</div>
             <div className="mt-3 flex flex-wrap gap-2">
-              {["CRM", "Conversas", "Tarefas", "Templates", "Configuracoes"].map((item) => (
-                <span className={`rounded-full border px-2.5 py-1 text-xs ${rolePermissions[role].includes(item) ? "border-[#25D366]/25 bg-[#25D366]/10 text-[#9AF0B8]" : "border-white/10 text-zinc-500"}`} key={item}>
-                  {item}
+              {modulePermissionGroups.map((item) => {
+                const enabled = item.permissions.some((permission) => effectivePermissions.has(permission));
+                return (
+                <span className={`rounded-full border px-2.5 py-1 text-xs ${enabled ? "border-[#25D366]/25 bg-[#25D366]/10 text-[#9AF0B8]" : "border-white/10 text-zinc-500"}`} key={item.label}>
+                  {item.label}
                 </span>
-              ))}
+                );
+              })}
             </div>
-            <div className="mt-4 text-sm font-medium text-zinc-100">Acoes sensiveis</div>
+            <div className="mt-4 text-sm font-medium text-zinc-100">Ações sensíveis</div>
             <div className="mt-3 flex flex-wrap gap-2">
-              {["Excluir lead", "Arquivar conversa", "Alterar funil", "Desconectar WhatsApp"].map((item) => (
-                <span className={`rounded-full border px-2.5 py-1 text-xs ${role === "admin" ? "border-amber-400/25 bg-amber-400/10 text-amber-100" : "border-white/10 text-zinc-500"}`} key={item}>
-                  {item}
+              {sensitivePermissionGroups.map((item) => {
+                const enabled = item.permissions.every((permission) => effectivePermissions.has(permission));
+                return (
+                <span className={`rounded-full border px-2.5 py-1 text-xs ${enabled ? "border-amber-400/25 bg-amber-400/10 text-amber-100" : "border-white/10 text-zinc-500"}`} key={item.label}>
+                  {item.label}
                 </span>
-              ))}
+                );
+              })}
+            </div>
+            <div className="mt-4 rounded-lg border border-white/10 bg-white/[0.035] p-3">
+              <div className="text-xs uppercase text-zinc-500">Permissões da simulação</div>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {Array.from(previewPermissions).map((permission) => (
+                  <span className="rounded-full border border-[#8B5CF6]/25 bg-[#8B5CF6]/10 px-2.5 py-1 text-xs text-[#C4B5FD]" key={permission}>
+                    {crmPermissionLabels[permission]}
+                  </span>
+                ))}
+                {previewPermissions.size === 0 && <span className="text-xs text-zinc-500">Apenas leitura.</span>}
+              </div>
             </div>
           </div>
         </div>
-        <p className="mt-4 text-sm text-zinc-500">Convite de equipe e permissoes server-side devem entrar quando houver multiusuario real.</p>
+        <div className="mt-4 grid gap-3 md:grid-cols-3">
+          <SettingsMetric icon={UserRound} label="Usuários ativos" value={`${activeTeamSeats}/${teamUserLimit}`} />
+          <SettingsMetric icon={Clock3} label="Convites pendentes" value={String(pendingTeamSeats)} />
+          <SettingsMetric icon={ShieldCheck} label="Vagas disponíveis" value={String(availableTeamSeats)} />
+        </div>
+        <div className="mt-5 rounded-lg border border-[#8B5CF6]/20 bg-[#8B5CF6]/10 p-4">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-end">
+            <label className="flex-1 text-sm text-zinc-300">
+              Email do novo usuário
+              <input
+                className="mt-2 h-10 w-full rounded-lg border border-white/10 bg-black/30 px-3 text-sm outline-none focus:border-[#8B5CF6]"
+                disabled={!canManageTeam || inviteLoading || availableTeamSeats <= 0}
+                onChange={(event) => setInviteEmail(event.target.value)}
+                placeholder="nome@empresa.com"
+                type="email"
+                value={inviteEmail}
+              />
+            </label>
+            <label className="w-full text-sm text-zinc-300 lg:w-52">
+              Papel
+              <select
+                className="mt-2 h-10 w-full rounded-lg border border-white/10 bg-black/30 px-3 text-sm outline-none focus:border-[#8B5CF6]"
+                disabled={!canManageTeam || inviteLoading || availableTeamSeats <= 0}
+                onChange={(event) => setInviteRole(event.target.value as CrmRole)}
+                value={inviteRole}
+              >
+                {roleOptions.filter((option) => option !== "owner").map((option) => (
+                  <option key={option} value={option}>{crmRoleLabels[option]}</option>
+                ))}
+              </select>
+            </label>
+            <button
+              className="flex h-10 items-center justify-center gap-2 rounded-lg bg-[#8B5CF6] px-4 text-sm font-semibold text-white transition hover:bg-[#7C3AED] disabled:cursor-not-allowed disabled:opacity-50"
+              disabled={!canManageTeam || inviteLoading || !inviteEmail.trim() || availableTeamSeats <= 0}
+              onClick={() => void inviteOrganizationMember()}
+              type="button"
+            >
+              {inviteLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+              Convidar
+            </button>
+          </div>
+          <p className="mt-3 text-xs leading-5 text-zinc-500">
+            O convite fica pendente por 7 dias. Quando a pessoa entrar no OrigoCRM com o mesmo email, ela será vinculada automaticamente à organização.
+          </p>
+          {availableTeamSeats <= 0 && (
+            <p className="mt-3 rounded-lg border border-amber-400/20 bg-amber-400/10 p-3 text-sm text-amber-100">
+              Limite de usuários atingido para o plano atual.
+            </p>
+          )}
+        </div>
+        <div className="mt-5 rounded-lg border border-white/10 bg-black/20 p-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <h3 className="font-semibold text-zinc-100">Membros da organização</h3>
+              <p className="mt-1 text-sm text-zinc-500">
+                Controle papéis, convites e acessos ativos da equipe.
+              </p>
+            </div>
+            <button
+              className="flex h-9 items-center justify-center gap-2 rounded-lg border border-white/10 px-3 text-sm text-zinc-200 transition hover:bg-white/[0.06] disabled:opacity-60"
+              disabled={membersLoading}
+              onClick={() => void refreshOrganizationMembers()}
+              type="button"
+            >
+              {membersLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+              Atualizar
+            </button>
+          </div>
+          {teamFeedback && <p className="mt-3 rounded-lg border border-white/10 bg-white/[0.035] p-3 text-sm text-zinc-300">{teamFeedback}</p>}
+          {organizationInvitations.length > 0 && (
+            <div className="mt-4 overflow-hidden rounded-lg border border-white/10">
+              <div className="border-b border-white/10 bg-white/[0.035] px-3 py-2 text-xs font-semibold uppercase tracking-[0.12em] text-zinc-500">
+                Convites pendentes
+              </div>
+              {organizationInvitations.map((invite) => (
+                <div className="grid gap-3 border-b border-white/10 bg-black/20 p-3 text-sm last:border-b-0 lg:grid-cols-[1fr_0.5fr_0.6fr_auto]" key={invite.id}>
+                  <div>
+                    <div className="font-medium text-zinc-100">{invite.email}</div>
+                    <div className="mt-1 text-xs text-zinc-500">Expira em {new Date(invite.expires_at).toLocaleDateString("pt-BR")}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs uppercase text-zinc-500">Papel</div>
+                    <div className="mt-1 font-medium text-zinc-100">{crmRoleLabels[invite.role]}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs uppercase text-zinc-500">Status</div>
+                    <div className="mt-1 font-medium text-amber-100">Pendente</div>
+                  </div>
+                  <button
+                    className="flex h-9 items-center justify-center gap-2 rounded-lg border border-red-400/20 bg-red-500/10 px-3 text-sm text-red-200 transition hover:bg-red-500/20 disabled:opacity-40"
+                    disabled={!canManageTeam}
+                    onClick={() => void cancelPendingInvitation(invite.id)}
+                    type="button"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                    Cancelar
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="mt-4 divide-y divide-white/10 overflow-hidden rounded-lg border border-white/10">
+            {organizationMembers.map((member) => (
+              <div className="grid gap-3 bg-black/20 p-3 text-sm lg:grid-cols-[1.2fr_0.7fr_0.8fr_auto]" key={member.id}>
+                <div>
+                  <div className="font-medium text-zinc-100">{member.user_id === user.id ? user.email ?? member.user_id : member.user_id}</div>
+                  <div className="mt-1 text-xs text-zinc-500">ID {member.user_id}</div>
+                </div>
+                <div>
+                  <div className="text-xs uppercase text-zinc-500">Status</div>
+                  <div className={`mt-1 font-medium ${member.status === "active" ? "text-[#9AF0B8]" : "text-zinc-500"}`}>
+                    {member.status === "active" ? "Ativo" : member.status === "invited" ? "Convidado" : "Desativado"}
+                  </div>
+                </div>
+                <label className="block">
+                  <span className="text-xs uppercase text-zinc-500">Papel</span>
+                  <select
+                    className="mt-1 h-9 w-full rounded-lg border border-white/10 bg-black/30 px-3 text-sm text-zinc-100 outline-none focus:border-[#8B5CF6] disabled:opacity-60"
+                    disabled={!canManageTeam || member.status !== "active"}
+                    onChange={(event) => void changeOrganizationMemberRole(member.id, event.target.value as CrmRole)}
+                    value={member.role}
+                  >
+                    {roleOptions.map((option) => (
+                      <option key={option} value={option}>{crmRoleLabels[option]}</option>
+                    ))}
+                  </select>
+                </label>
+                <button
+                  className="flex h-9 items-center justify-center rounded-lg border border-red-400/20 bg-red-500/10 px-3 text-sm text-red-200 transition hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-40"
+                  disabled={!canManageTeam || member.user_id === user.id || member.status !== "active"}
+                  onClick={() => void deactivateOrganizationMember(member.id)}
+                  type="button"
+                >
+                  Desativar
+                </button>
+              </div>
+            ))}
+            {organizationMembers.length === 0 && (
+              <div className="p-4 text-sm text-zinc-500">Nenhum membro carregado.</div>
+            )}
+          </div>
+        </div>
       </section>
       )}
 
       {activeTab === "crm" && (
       <section className="rounded-xl border border-white/10 bg-white/[0.035] p-5">
-        <h2 className="text-lg font-semibold">Preferencias do CRM</h2>
+        <h2 className="text-lg font-semibold">Preferências do CRM</h2>
         <div className="mt-4 grid gap-4 xl:grid-cols-[0.85fr_1.15fr]">
           <div className="rounded-lg border border-white/10 bg-black/20 p-4">
-            <div className="text-sm font-medium text-zinc-100">Aparencia</div>
+            <div className="text-sm font-medium text-zinc-100">Aparência</div>
             <p className="mt-1 text-sm text-zinc-500">
-              Alterne o conteudo do sistema entre escuro e claro. A barra lateral permanece escura para preservar a identidade OrigoCRM.
+              Alterne o conteúdo do sistema entre escuro e claro. A barra lateral permanece escura para preservar a identidade OrigoCRM.
             </p>
             <div className="mt-4 grid gap-2 sm:grid-cols-2">
               {([
-                ["dark", Moon, "Escuro", "Operacao em ambiente dark premium."],
+                ["dark", Moon, "Escuro", "Operação em ambiente dark premium."],
                 ["light", Sun, "Claro", "Leitura clara com menu lateral dark."],
               ] as Array<[CrmTheme, typeof Moon, string, string]>).map(([theme, Icon, title, description]) => (
                 <button
@@ -7265,11 +5329,11 @@ function SettingsView({
           <div className="grid gap-4 md:grid-cols-2">
           <SettingsInput label="Nome da empresa" value={preferences.companyName} onChange={(value) => updatePreference("companyName", value)} />
           <SettingsInput label="Marca exibida" value={preferences.brandName} onChange={(value) => updatePreference("brandName", value)} />
-          <SettingsInput label="SLA padrao (horas)" value={preferences.defaultSlaHours} onChange={(value) => updatePreference("defaultSlaHours", value)} />
-          <SettingsInput label="Horario comercial" value={preferences.businessHours} onChange={(value) => updatePreference("businessHours", value)} />
-          <SettingsInput label="Follow-up padrao (dias)" value={preferences.defaultFollowupDays} onChange={(value) => updatePreference("defaultFollowupDays", value)} />
-          <SettingsInput label="Origem padrao WhatsApp" value={preferences.defaultWhatsAppSource} onChange={(value) => updatePreference("defaultWhatsAppSource", value)} />
-          <SettingsInput label="Responsavel padrao" value={preferences.defaultOwnerName} onChange={(value) => updatePreference("defaultOwnerName", value)} />
+          <SettingsInput label="SLA padrão (horas)" value={preferences.defaultSlaHours} onChange={(value) => updatePreference("defaultSlaHours", value)} />
+          <SettingsInput label="Horário comercial" value={preferences.businessHours} onChange={(value) => updatePreference("businessHours", value)} />
+          <SettingsInput label="Follow-up padrão (dias)" value={preferences.defaultFollowupDays} onChange={(value) => updatePreference("defaultFollowupDays", value)} />
+          <SettingsInput label="Origem padrão WhatsApp" value={preferences.defaultWhatsAppSource} onChange={(value) => updatePreference("defaultWhatsAppSource", value)} />
+          <SettingsInput label="Responsável padrão" value={preferences.defaultOwnerName} onChange={(value) => updatePreference("defaultOwnerName", value)} />
           </div>
         </div>
         <div className="mt-5 rounded-lg border border-white/10 bg-black/20 p-4">
@@ -7303,7 +5367,7 @@ function SettingsView({
             <SettingsMetric
               icon={UserRound}
               label="Conta"
-              value={googleCalendarStatus?.connection?.account_email ?? user.email ?? "Nao conectada"}
+              value={googleCalendarStatus?.connection?.account_email ?? user.email ?? "Não conectada"}
             />
             <SettingsMetric
               icon={Clock3}
@@ -7311,7 +5375,7 @@ function SettingsView({
               value={
                 googleCalendarStatus?.connection?.last_synced_at
                   ? new Date(googleCalendarStatus.connection.last_synced_at).toLocaleString("pt-BR")
-                  : "Sem sincronizacao"
+                  : "Sem sincronização"
               }
             />
           </div>
@@ -7359,6 +5423,7 @@ function SettingsView({
                 title: "Tarefa OrigoCRM",
                 startsAt: addDays(1),
                 details: "Teste de evento pre-preenchido pelo OrigoCRM",
+                lead: null,
               })}
               type="button"
             >
@@ -7375,7 +5440,7 @@ function SettingsView({
         <div className="flex items-center justify-between gap-3">
           <div>
             <h2 className="text-lg font-semibold">Auditoria profissional</h2>
-            <p className="mt-1 text-sm text-zinc-500">Acoes sensiveis registradas para rastreabilidade operacional.</p>
+            <p className="mt-1 text-sm text-zinc-500">Ações sensiveis registradas para rastreabilidade operacional.</p>
           </div>
           <button className="flex h-10 items-center justify-center gap-2 rounded-lg border border-white/10 px-3 text-sm text-zinc-200 transition hover:bg-white/[0.06] disabled:opacity-60" onClick={exportAudit} type="button">
             <FileDown className="h-4 w-4" />
@@ -7386,7 +5451,7 @@ function SettingsView({
           <input
             className="h-10 rounded-lg border border-white/10 bg-black/30 px-3 text-sm outline-none focus:border-[#8B5CF6]"
             onChange={(event) => setAuditSearch(event.target.value)}
-            placeholder="Buscar resumo, acao ou metadata"
+            placeholder="Buscar resumo, ação ou metadata"
             value={auditSearch}
           />
           <select
@@ -7406,7 +5471,7 @@ function SettingsView({
             onChange={(event) => setAuditActionFilter(event.target.value)}
             value={auditActionFilter}
           >
-            <option value="all">Todas acoes</option>
+            <option value="all">Todas ações</option>
             {auditActions.map((action) => (
               <option key={action} value={action}>{action}</option>
             ))}
@@ -7415,7 +5480,7 @@ function SettingsView({
         <div className="mt-4 divide-y divide-white/10 overflow-hidden rounded-lg border border-white/10">
           {filteredAuditLogs.length === 0 ? (
             <div className="p-4 text-sm text-zinc-500">
-              Nenhum registro carregado. Se a migracao estiver pendente, aplique audit_logs_migration.sql.
+              Nenhum registro carregado. Se a migração estiver pendente, aplique audit_logs_migration.sql.
             </div>
           ) : (
             filteredAuditLogs.slice(0, 30).map((log) => (
@@ -7446,7 +5511,7 @@ function SettingsView({
         <div className="flex items-center justify-between gap-3">
           <div>
             <h2 className="text-lg font-semibold">Logs WhatsApp amigaveis</h2>
-            <p className="mt-1 text-sm text-zinc-500">Webhooks, falhas e eventos de sincronizacao em linguagem operacional.</p>
+            <p className="mt-1 text-sm text-zinc-500">Webhooks, falhas e eventos de sincronização em linguagem operacional.</p>
           </div>
           <select
             className="h-10 rounded-lg border border-white/10 bg-black/30 px-3 text-sm outline-none"
@@ -7483,6 +5548,109 @@ function SettingsView({
 
       {activeTab === "data" && (
       <div className="grid gap-5 xl:grid-cols-[0.8fr_1.2fr]">
+      <section className="rounded-xl border border-white/10 bg-white/[0.035] p-5 xl:col-span-2">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <div className="flex items-center gap-2 text-sm text-[#A78BFA]">
+              <CreditCard className="h-4 w-4" />
+              Assinatura e planos
+            </div>
+            <h2 className="mt-2 text-lg font-semibold">Plano atual: {currentPlan?.name ?? "Acesso manual"}</h2>
+            <p className="mt-1 text-sm text-zinc-500">
+              {currentSubscription
+                ?
+                 `${currentSubscription.status} - ${getBillingPeriod(currentSubscription.billing_period).label}`
+                : "Nenhuma assinatura vinculada à organização."}
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {billingPeriods.map((period) => (
+              <button
+                className={`h-9 rounded-lg border px-3 text-sm transition ${
+                  selectedBillingPeriod === period.key
+                    ?
+                     "border-[#8B5CF6]/60 bg-[#8B5CF6]/15 text-white"
+                    : "border-white/10 text-zinc-400 hover:bg-white/[0.06]"
+                }`}
+                key={period.key}
+                onClick={() => setSelectedBillingPeriod(period.key)}
+                type="button"
+              >
+                {period.label}
+              </button>
+            ))}
+            {currentSubscription?.provider_customer_id && (
+              <button
+                className="flex h-9 items-center justify-center gap-2 rounded-lg border border-white/10 px-3 text-sm text-zinc-200 transition hover:bg-white/[0.06] disabled:opacity-60"
+                disabled={!canManageBilling || billingLoading === "portal"}
+                onClick={() => void openBillingPortal()}
+                type="button"
+              >
+                {billingLoading === "portal" ? <Loader2 className="h-4 w-4 animate-spin" /> : <ExternalLink className="h-4 w-4" />}
+                Gerenciar cobrança
+              </button>
+            )}
+          </div>
+        </div>
+        {billingFeedback && <p className="mt-4 rounded-lg border border-white/10 bg-black/20 p-3 text-sm text-zinc-300">{billingFeedback}</p>}
+        {!canManageBilling && (
+          <p className="mt-4 rounded-lg border border-amber-400/20 bg-amber-400/10 p-3 text-sm text-amber-100">
+            Seu papel atual não permite gerenciar assinatura.
+          </p>
+        )}
+        <div className="mt-5 grid gap-3 lg:grid-cols-3">
+          {plans.map((plan) => {
+            const isCurrent = currentSubscription?.plan_slug === plan.slug;
+            const price = getPlanPriceCents(plan.slug, selectedBillingPeriod);
+            const monthly = getPlanMonthlyEquivalentCents(plan.slug, selectedBillingPeriod);
+            return (
+              <div
+                className={`flex min-h-80 flex-col rounded-xl border p-4 transition ${
+                  plan.featured
+                    ?
+                     "border-[#8B5CF6]/45 bg-[#8B5CF6]/10 shadow-lg shadow-[#8B5CF6]/10"
+                    : "border-white/10 bg-black/20"
+                }`}
+                key={plan.slug}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <h3 className="font-semibold text-zinc-100">{plan.name}</h3>
+                    <p className="mt-1 min-h-10 text-sm leading-5 text-zinc-500">{plan.description}</p>
+                  </div>
+                  {isCurrent && <span className="rounded-full border border-[#25D366]/25 bg-[#25D366]/10 px-2 py-1 text-xs text-[#9AF0B8]">Atual</span>}
+                </div>
+                <div className="mt-4">
+                  <div className="text-2xl font-semibold text-zinc-100">{formatMoneyFromCents(monthly)}</div>
+                  <div className="mt-1 text-xs text-zinc-500">
+                    por mês, cobrado {getBillingPeriod(selectedBillingPeriod).shortLabel}
+                    {selectedBillingPeriod !== "monthly" ? ` (${formatMoneyFromCents(price)} no período)` : ""}
+                  </div>
+                </div>
+                <div className="mt-4 space-y-2">
+                  {plan.highlights.map((item) => (
+                    <div className="flex items-center gap-2 text-sm text-zinc-300" key={item}>
+                      <Check className="h-4 w-4 text-[#25D366]" />
+                      {item}
+                    </div>
+                  ))}
+                </div>
+                <div className="mt-auto pt-5">
+                  <button
+                    className="flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-[#8B5CF6] px-3 text-sm font-semibold text-white transition hover:bg-[#7C3AED] disabled:cursor-not-allowed disabled:opacity-50"
+                    disabled={!canManageBilling || billingLoading !== null || isCurrent}
+                    onClick={() => void startCheckout(plan.slug)}
+                    type="button"
+                  >
+                    {billingLoading === plan.slug ? <Loader2 className="h-4 w-4 animate-spin" /> : <CreditCard className="h-4 w-4" />}
+                    {isCurrent ? "Plano atual" : "Assinar plano"}
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </section>
       <section className="rounded-xl border border-white/10 bg-white/[0.035] p-5">
         <h2 className="text-lg font-semibold">Backup e dados</h2>
         <div className="mt-4 grid gap-3 sm:grid-cols-2">
@@ -7498,7 +5666,7 @@ function SettingsView({
           <button className="flex h-10 items-center justify-center gap-2 rounded-lg border border-white/10 px-3 text-sm text-zinc-200 transition hover:bg-white/[0.06] disabled:opacity-60" onClick={exportMessages} type="button"><FileDown className="h-4 w-4" /> Exportar conversas</button>
           <button className="flex h-10 items-center justify-center gap-2 rounded-lg border border-white/10 px-3 text-sm text-zinc-200 transition hover:bg-white/[0.06] disabled:opacity-60" onClick={exportAudit} type="button"><FileDown className="h-4 w-4" /> Exportar auditoria</button>
         </div>
-        <p className="mt-4 text-sm text-zinc-500">Retencao atual: manter historico operacional. Importacao CSV entra em fase posterior.</p>
+        <p className="mt-4 text-sm text-zinc-500">Retenção atual: manter histórico operacional. Importação CSV entra em fase posterior.</p>
       </section>
 
       <section className="rounded-xl border border-white/10 bg-white/[0.035] p-5">
@@ -7547,99 +5715,13 @@ function SettingsView({
   );
 }
 
-function SettingsStatusPill({
-  status,
-  okLabel = "Aplicada",
-  missingLabel = "Pendente",
-}: {
-  status: MigrationCheck["status"];
-  okLabel?: string;
-  missingLabel?: string;
-}) {
-  const className =
-    status === "ok"
-      ? "border-[#25D366]/25 bg-[#25D366]/10 text-[#9AF0B8]"
-      : status === "missing"
-        ? "border-amber-400/25 bg-amber-400/10 text-amber-100"
-        : "border-white/10 bg-white/[0.04] text-zinc-400";
-
-  return (
-    <span className={`rounded-full border px-2 py-1 text-xs ${className}`}>
-      {status === "ok" ? okLabel : status === "missing" ? missingLabel : "Verificando"}
-    </span>
-  );
-}
-
-function SettingsMetric({
-  icon: Icon,
-  label,
-  value,
-}: {
-  icon: typeof Database;
-  label: string;
-  value: string;
-}) {
-  return (
-    <div className="rounded-lg border border-white/10 bg-black/20 p-3">
-      <div className="flex items-center gap-2 text-xs uppercase text-zinc-500">
-        <Icon className="h-4 w-4" />
-        {label}
-      </div>
-      <div className="mt-2 truncate text-sm font-medium text-zinc-100">{value}</div>
-    </div>
-  );
-}
-
-function SettingsInput({
-  label,
-  value,
-  onChange,
-}: {
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-}) {
-  return (
-    <label className="block text-sm text-zinc-300">
-      {label}
-      <input
-        className="mt-2 h-10 w-full rounded-lg border border-white/10 bg-black/30 px-3 text-sm text-zinc-100 outline-none transition focus:border-[#8B5CF6]"
-        onChange={(event) => onChange(event.target.value)}
-        value={value}
-      />
-    </label>
-  );
-}
-
-function SettingsDetailPanel({
-  title,
-  children,
-  onClose,
-}: {
-  title: string;
-  children: ReactNode;
-  onClose: () => void;
-}) {
-  return (
-    <div className="mt-4 rounded-lg border border-white/10 bg-black/30 p-4">
-      <div className="flex items-center justify-between gap-3">
-        <h3 className="font-medium text-zinc-100">{title}</h3>
-        <button className="text-sm text-zinc-500 hover:text-zinc-200" onClick={onClose} type="button">
-          Fechar
-        </button>
-      </div>
-      <div className="mt-3 max-h-80 overflow-auto">{children}</div>
-    </div>
-  );
-}
-
 function friendlyWhatsAppLogLabel(log: WhatsAppLog) {
-  if (log.status === "error") return log.error_message || "Falha na integracao WhatsApp";
+  if (log.status === "error") return log.error_message || "Falha na integração WhatsApp";
   if (log.event_type.includes("messages.upsert.ignored")) return "Mensagem ignorada pelo webhook";
   if (log.event_type.includes("messages.upsert.unmatched_saved")) return "Conversa criada sem lead vinculado";
   if (log.event_type.includes("messages.upsert")) return "Mensagem recebida pelo webhook";
   if (log.event_type.includes("messages.update")) return "Status de entrega atualizado";
-  if (log.event_type.includes("connection")) return "Estado da conexao atualizado";
+  if (log.event_type.includes("connection")) return "Estado da conexão atualizado";
   if (log.event_type.includes("qr")) return "QR Code atualizado";
   return "Evento WhatsApp registrado";
 }
@@ -7663,104 +5745,259 @@ function downloadCsv(filename: string, rows: Record<string, string | number | nu
   URL.revokeObjectURL(url);
 }
 
-function LeadForm({
+function LeadCreateModal({
+  availableTags,
   columns,
-  lead,
   onClose,
   onSave,
 }: {
+  availableTags: CrmTag[];
   columns: PipelineStage[];
-  lead: Lead | null;
   onClose: () => void;
-  onSave: (input: LeadInput) => void;
+  onSave: (input: LeadInput, tagIds: string[], newTagName: string) => Promise<Lead | null>;
 }) {
-  const [form, setForm] = useState<LeadInput>(lead ?? emptyLead);
+  const [form, setForm] = useState<LeadInput>({ ...emptyLead });
+  const [activeTab, setActiveTab] = useState<LeadCreateTab>("summary");
+  const [selectedTagIds, setSelectedTagIds] = useState<Set<string>>(() => new Set());
+  const [newTagName, setNewTagName] = useState("");
+  const [saving, setSaving] = useState(false);
+  const tabs: { id: LeadCreateTab; label: string; helper: string; locked: boolean }[] = [
+    { id: "summary", label: "Resumo", helper: "Cadastro rapido", locked: false },
+    { id: "commercial", label: "Comercial", helper: "Campos avancados", locked: false },
+    { id: "tasks", label: "Tarefas", helper: "Liberado após salvar", locked: true },
+    { id: "contact", label: "Contato", helper: "Liberado após salvar", locked: true },
+    { id: "history", label: "Histórico", helper: "Liberado após salvar", locked: true },
+  ];
 
   function updateField<K extends keyof LeadInput>(key: K, value: LeadInput[K]) {
     setForm((current) => ({ ...current, [key]: value }));
   }
 
+  function toggleTag(tagId: string) {
+    setSelectedTagIds((current) => {
+      const next = new Set(current);
+      if (next.has(tagId)) next.delete(tagId);
+      else next.add(tagId);
+      return next;
+    });
+  }
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSaving(true);
+    try {
+      await onSave(form, Array.from(selectedTagIds), newTagName);
+    } finally {
+      setSaving(false);
+    }
+  }
+
   return (
-    <Modal onClose={onClose} title={lead ? "Editar lead" : "Novo lead"}>
-      <form
-        className="space-y-3"
-        onSubmit={(event) => {
-          event.preventDefault();
-          onSave(form);
-        }}
-      >
-        <Input label="Nome" onChange={(value) => updateField("name", value)} required value={form.name} />
-        <Input
-          label="Telefone"
-          onChange={(value) => updateField("phone", normalizePhone(value))}
-          required
-          value={form.phone}
-        />
-        <Input label="Empresa" onChange={(value) => updateField("company", value)} value={form.company} />
-        <Input label="Origem" onChange={(value) => updateField("source", value)} value={form.source} />
-        <Input
-          label="Valor estimado"
-          onChange={(value) =>
-            updateField("estimated_value", value ? Number(value.replace(",", ".")) : null)
-          }
-          type="number"
-          value={form.estimated_value?.toString() ?? ""}
-        />
-        <Input
-          label="Responsavel"
-          onChange={(value) => updateField("owner_name", value)}
-          value={form.owner_name ?? ""}
-        />
-        <div className="grid gap-3 sm:grid-cols-2">
-          <label className="block text-sm text-zinc-300">
-            Temperatura
-            <select
-              className="mt-2 h-11 w-full rounded-lg border border-white/10 bg-[#14131B] px-3 text-white outline-none transition focus:border-[#8B5CF6]"
-              onChange={(event) =>
-                updateField("temperature", event.target.value as Lead["temperature"])
-              }
-              value={form.temperature ?? "morno"}
-            >
-              <option value="frio">Frio</option>
-              <option value="morno">Morno</option>
-              <option value="quente">Quente</option>
-            </select>
-          </label>
-          <Input
-            label="SLA de retorno (h)"
-            onChange={(value) => updateField("sla_hours", value ? Number(value) : null)}
-            type="number"
-            value={form.sla_hours?.toString() ?? ""}
-          />
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm">
+      <div className="crm-modal-surface reveal-up relative flex max-h-[90vh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl border border-[#8B5CF6]/25 bg-[#0F0F16]/95 text-white shadow-2xl shadow-[#8B5CF6]/15">
+        <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(139,92,246,0.85),rgba(37,211,102,0.3),transparent)]" />
+        <div className="pointer-events-none absolute -right-20 -top-24 h-64 w-64 opacity-[0.04]">
+          <Image alt="" className="object-contain" fill sizes="256px" src="/origocrm-icon.png" />
         </div>
-        <label className="block text-sm text-zinc-300">
-          Motivo de ganho/perda
-          <textarea
-            className="mt-2 min-h-20 w-full rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-white outline-none transition focus:border-[#8B5CF6]"
-            onChange={(event) => updateField("outcome_reason", event.target.value)}
-            value={form.outcome_reason ?? ""}
-          />
-        </label>
-        <label className="block text-sm text-zinc-300">
-          Status
-          <select
-            className="mt-2 h-11 w-full rounded-lg border border-white/10 bg-[#14131B] px-3 text-white outline-none transition focus:border-[#8B5CF6]"
-            onChange={(event) => updateField("status", event.target.value as LeadStatus)}
-            value={form.status}
-          >
-            {columns.map((column) => (
-              <option key={column.id} value={column.id}>
-                {column.title}
-              </option>
-            ))}
-          </select>
-        </label>
-        <button className="flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-[#8B5CF6] font-medium">
-          <Check className="h-4 w-4" />
-          Salvar
-        </button>
-      </form>
-    </Modal>
+        <header className="relative flex shrink-0 flex-col gap-4 border-b border-white/10 p-5 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <div className="flex flex-wrap items-center gap-2">
+              <h2 className="text-2xl font-semibold">Novo lead</h2>
+              <span className="rounded-full border border-[#8B5CF6]/35 bg-[#8B5CF6]/15 px-3 py-1 text-xs font-semibold text-[#DDD6FE]">
+                Cadastro manual
+              </span>
+            </div>
+            <p className="mt-1 text-sm text-zinc-500">
+              Cadastre o essencial agora. Depois de salvar, o Lead 360 abre para tarefas, WhatsApp e histórico.
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              className="flex h-10 items-center justify-center rounded-xl border border-white/10 px-4 text-sm font-medium text-zinc-300 transition hover:bg-white/[0.06] hover:text-white"
+              onClick={onClose}
+              type="button"
+            >
+              Fechar
+            </button>
+            <button
+              className="shine-cta flex h-10 items-center justify-center gap-2 rounded-xl bg-[#8B5CF6] px-4 text-sm font-semibold text-white shadow-lg shadow-[#8B5CF6]/20 transition hover:bg-[#7C3AED] disabled:opacity-60"
+              disabled={saving}
+              form="lead-create-form"
+              type="submit"
+            >
+              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+              {saving ? "Salvando" : "Salvar lead"}
+            </button>
+          </div>
+        </header>
+
+        <div className="relative min-h-0 flex-1 overflow-y-auto p-5">
+          <div className="grid gap-5 lg:grid-cols-[260px_minmax(0,1fr)]">
+            <aside className="space-y-2">
+              {tabs.map((tab) => (
+                <button
+                  className={`w-full rounded-xl border p-3 text-left transition ${
+                    activeTab === tab.id
+                      ?
+                       "border-[#8B5CF6]/65 bg-[#8B5CF6]/18 text-white"
+                      : "border-white/10 bg-white/[0.035] text-zinc-300 hover:bg-white/[0.06]"
+                  }`}
+                  key={tab.id}
+                  onClick={() => setActiveTab(tab.id)}
+                  type="button"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-sm font-semibold">{tab.label}</span>
+                    {tab.locked && <span className="rounded-full bg-white/10 px-2 py-0.5 text-[10px] text-zinc-400">após salvar</span>}
+                  </div>
+                  <div className="mt-1 text-xs text-zinc-500">{tab.helper}</div>
+                </button>
+              ))}
+            </aside>
+
+            <form id="lead-create-form" className="min-w-0" onSubmit={submit}>
+              {activeTab === "summary" && (
+                <section className="rounded-2xl border border-white/10 bg-white/[0.035] p-5">
+                  <div className="mb-5">
+                    <h3 className="text-lg font-semibold text-zinc-100">Cadastro rapido</h3>
+                    <p className="mt-1 text-sm text-zinc-500">Preencha os campos que colocam o lead no CRM sem atrito.</p>
+                  </div>
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <Input label="Nome" onChange={(value) => updateField("name", value)} required value={form.name} />
+                    <Input
+                      label="Telefone"
+                      onChange={(value) => updateField("phone", normalizePhone(value))}
+                      required
+                      value={form.phone}
+                    />
+                    <Input label="Empresa" onChange={(value) => updateField("company", value)} value={form.company} />
+                    <Input label="Origem" onChange={(value) => updateField("source", value)} value={form.source} />
+                    <label className="block text-sm text-zinc-300">
+                      Etapa
+                      <select
+                        className="mt-2 h-11 w-full rounded-lg border border-white/10 bg-[#14131B] px-3 text-white outline-none transition focus:border-[#8B5CF6]"
+                        onChange={(event) => updateField("status", event.target.value as LeadStatus)}
+                        value={form.status}
+                      >
+                        {columns.map((column) => (
+                          <option key={column.id} value={column.id}>
+                            {column.title}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="block text-sm text-zinc-300">
+                      Temperatura
+                      <select
+                        className="mt-2 h-11 w-full rounded-lg border border-white/10 bg-[#14131B] px-3 text-white outline-none transition focus:border-[#8B5CF6]"
+                        onChange={(event) => updateField("temperature", event.target.value as Lead["temperature"])}
+                        value={form.temperature ?? "morno"}
+                      >
+                        <option value="frio">Frio</option>
+                        <option value="morno">Morno</option>
+                        <option value="quente">Quente</option>
+                      </select>
+                    </label>
+                    <Input label="Responsável" onChange={(value) => updateField("owner_name", value)} value={form.owner_name ?? ""} />
+                  </div>
+
+                  <div className="mt-5 rounded-xl border border-white/10 bg-black/20 p-4">
+                    <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                      <div>
+                        <div className="text-sm font-semibold text-zinc-100">Tags</div>
+                        <p className="text-xs text-zinc-500">Organize a origem, perfil e prioridade desde o cadastro.</p>
+                      </div>
+                      <span className="text-xs text-zinc-500">{selectedTagIds.size} selecionada(s)</span>
+                    </div>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {availableTags.length === 0 && <span className="text-sm text-zinc-500">Nenhuma tag cadastrada ainda.</span>}
+                      {availableTags.map((tag) => (
+                        <button
+                          className={`rounded-full border px-3 py-1.5 text-xs font-medium transition ${
+                            selectedTagIds.has(tag.id) ? "ring-1 ring-white/25" : "opacity-70 hover:opacity-100"
+                          }`}
+                          key={tag.id}
+                          onClick={() => toggleTag(tag.id)}
+                          style={{ borderColor: `${tag.color}66`, backgroundColor: `${tag.color}18`, color: tag.color }}
+                          type="button"
+                        >
+                          {tag.name}
+                        </button>
+                      ))}
+                    </div>
+                    <input
+                      className="mt-3 h-11 w-full rounded-lg border border-white/10 bg-black/30 px-3 text-sm text-white outline-none transition placeholder:text-zinc-600 focus:border-[#8B5CF6]"
+                      onChange={(event) => setNewTagName(event.target.value)}
+                      placeholder="Criar nova tag ao salvar"
+                      value={newTagName}
+                    />
+                  </div>
+                </section>
+              )}
+
+              {activeTab === "commercial" && (
+                <section className="rounded-2xl border border-white/10 bg-white/[0.035] p-5">
+                  <div className="mb-5">
+                    <h3 className="text-lg font-semibold text-zinc-100">Dados comerciais avancados</h3>
+                    <p className="mt-1 text-sm text-zinc-500">Campos que ajudam na qualificação, SLA e fechamento.</p>
+                  </div>
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <Input
+                      label="Valor estimado"
+                      onChange={(value) => updateField("estimated_value", value ? Number(value.replace(",", ".")) : null)}
+                      type="number"
+                      value={form.estimated_value?.toString() ?? ""}
+                    />
+                    <Input
+                      label="SLA de retorno (h)"
+                      onChange={(value) => updateField("sla_hours", value ? Number(value) : null)}
+                      type="number"
+                      value={form.sla_hours?.toString() ?? ""}
+                    />
+                  </div>
+                  <label className="mt-4 block text-sm text-zinc-300">
+                    Observações comerciais / motivo futuro
+                    <textarea
+                      className="mt-2 min-h-28 w-full rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-white outline-none transition focus:border-[#8B5CF6]"
+                      onChange={(event) => updateField("outcome_reason", event.target.value)}
+                      value={form.outcome_reason ?? ""}
+                    />
+                  </label>
+                </section>
+              )}
+
+              {activeTab !== "summary" && activeTab !== "commercial" && (
+                <section className="flex min-h-[360px] items-center justify-center rounded-2xl border border-dashed border-white/10 bg-white/[0.025] p-8 text-center">
+                  <div>
+                    <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full border border-[#8B5CF6]/25 bg-[#8B5CF6]/10 text-[#8B5CF6]">
+                      {activeTab === "tasks" ? (
+                        <CalendarClock className="h-6 w-6" />
+                      ) : activeTab === "contact" ? (
+                        <MessageCircle className="h-6 w-6" />
+                      ) : (
+                        <Clock3 className="h-6 w-6" />
+                      )}
+                    </div>
+                    <h3 className="mt-4 text-lg font-semibold text-zinc-100">
+                      Salve o lead para liberar esta área
+                    </h3>
+                    <p className="mt-2 max-w-md text-sm text-zinc-500">
+                      Depois do cadastro, o Lead 360 abre automaticamente com tarefas, WhatsApp, histórico e follow-up vinculados ao lead real.
+                    </p>
+                    <button
+                      className="mt-5 rounded-xl bg-[#8B5CF6] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[#7C3AED]"
+                      type="submit"
+                    >
+                      Salvar e abrir Lead 360
+                    </button>
+                  </div>
+                </section>
+              )}
+            </form>
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -7816,6 +6053,7 @@ function LeadDetails({
   const [followupAt, setFollowupAt] = useState(() => toDateTimeLocal(lead.next_followup_at ?? addDays(1)));
   const [commercialForm, setCommercialForm] = useState<LeadInput>(() => leadToInput(lead));
   const [taskForm, setTaskForm] = useState<TaskInput>(() => ({
+    lead_id: lead.id,
     type: "followup",
     title: `Follow-up com ${lead.name}`,
     notes: "",
@@ -7831,6 +6069,7 @@ function LeadDetails({
     .sort((a, b) => new Date(a.due_at).getTime() - new Date(b.due_at).getTime());
   const currentStage = columns.find((column) => column.id === lead.status)?.title ?? lead.status;
   const temperatureLabel = getTemperatureLabel(lead.temperature);
+  const leadScore = calculateLeadScore(lead);
   const nextTask = openTasks[0] ?? null;
   const lastInteraction = [...interactions].sort(
     (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
@@ -7840,7 +6079,7 @@ function LeadDetails({
     { id: "commercial", label: "Comercial" },
     { id: "tasks", label: "Tarefas", count: openTasks.length },
     { id: "contact", label: "Contato" },
-    { id: "history", label: "Historico", count: interactions.length + whatsappMessages.length },
+    { id: "history", label: "Histórico", count: interactions.length + whatsappMessages.length },
   ];
 
   function updateCommercialField<K extends keyof LeadInput>(key: K, value: LeadInput[K]) {
@@ -7878,7 +6117,7 @@ function LeadDetails({
                   {temperatureLabel.text}
                 </span>
                 <span className="rounded-full border border-white/10 px-2 py-0.5 text-xs text-zinc-400">
-                  {lead?.owner_name || "Sem responsavel"}
+                  {lead.owner_name || "Sem responsável"}
                 </span>
                 {leadTags.map((tag) => (
                   <button
@@ -7897,7 +6136,8 @@ function LeadDetails({
                 {lead.company || "Sem empresa"} - {lead.phone}
               </div>
             </div>
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:w-[520px]">
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-5 lg:w-[650px]">
+              <LeadMetric label="Score" value={`${leadScore.score}`} />
               <LeadMetric label="Tarefas" value={String(openTasks.length)} />
               <LeadMetric label="WhatsApp" value={String(whatsappMessages.length)} />
               <LeadMetric label="Valor" value={formatCurrency(lead.estimated_value) ?? "R$ 0"} />
@@ -7953,7 +6193,8 @@ function LeadDetails({
               <button
                 className={`flex h-9 shrink-0 items-center gap-2 rounded-lg border px-3 text-sm transition ${
                   activeTab === tab.id
-                    ? "border-[#8B5CF6]/70 bg-[#8B5CF6]/20 text-white"
+                    ?
+                     "border-[#8B5CF6]/70 bg-[#8B5CF6]/20 text-white"
                     : "border-white/10 bg-black/20 text-zinc-400 hover:bg-white/[0.06] hover:text-zinc-100"
                 }`}
                 key={tab.id}
@@ -7975,7 +6216,7 @@ function LeadDetails({
               <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
                 <div>
                   <h3 className="font-semibold text-zinc-100">Resumo operacional</h3>
-                  <p className="mt-1 text-sm text-zinc-500">Proxima melhor acao e contexto essencial do lead.</p>
+                  <p className="mt-1 text-sm text-zinc-500">Próxima melhor ação e contexto essencial do lead.</p>
                 </div>
                 <button
                   className="mt-2 flex h-9 items-center justify-center gap-2 rounded-lg border border-[#8B5CF6]/40 bg-[#8B5CF6]/15 px-3 text-xs font-medium text-[#DDD6FE] transition hover:bg-[#8B5CF6]/25 sm:mt-0"
@@ -7988,17 +6229,33 @@ function LeadDetails({
               </div>
               <div className="mt-4 grid gap-3 sm:grid-cols-2">
                 <LeadSummaryItem label="Empresa" value={lead.company || "Sem empresa"} />
-                <LeadSummaryItem label="Origem" value={lead.source || "Nao informada"} />
-                <LeadSummaryItem label="Responsavel" value={lead.owner_name || "Nao definido"} />
-                <LeadSummaryItem label="Valor estimado" value={formatCurrency(lead.estimated_value) ?? "Nao informado"} />
+                <LeadSummaryItem label="Origem" value={lead.source || "Não informada"} />
+                <LeadSummaryItem label="Responsável" value={lead.owner_name || "Não definido"} />
+                <LeadSummaryItem label="Valor estimado" value={formatCurrency(lead.estimated_value) ?? "Não informado"} />
                 <LeadSummaryItem
                   label="Proximo contato"
-                  value={lead.next_followup_at ? new Date(lead.next_followup_at).toLocaleString("pt-BR") : "Nao agendado"}
+                  value={lead.next_followup_at ? new Date(lead.next_followup_at).toLocaleString("pt-BR") : "Não agendado"}
                 />
                 <LeadSummaryItem
                   label="Ultimo contato"
                   value={lead.last_contact_at ? new Date(lead.last_contact_at).toLocaleString("pt-BR") : "Sem contato"}
                 />
+              </div>
+              <div className={`mt-4 rounded-lg border p-3 ${leadScore.tone}`}>
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div>
+                    <div className="text-xs uppercase opacity-80">Lead Scoring</div>
+                    <div className="mt-1 text-2xl font-semibold">{leadScore.score}/100</div>
+                    <div className="mt-1 text-sm font-medium">{leadScore.label} - {leadScore.action}</div>
+                  </div>
+                  <div className="grid gap-1 text-xs sm:min-w-[260px]">
+                    {leadScore.reasons.map((reason) => (
+                      <span className="rounded-md bg-black/15 px-2 py-1" key={reason}>
+                        {reason}
+                      </span>
+                    ))}
+                  </div>
+                </div>
               </div>
               {lead.outcome_reason && (
                 <div className="mt-4 rounded-lg border border-white/10 bg-black/20 p-3">
@@ -8010,7 +6267,7 @@ function LeadDetails({
 
             <aside className="space-y-4">
               <div className="rounded-lg border border-white/10 bg-white/[0.025] p-4">
-                <div className="text-sm font-semibold text-zinc-100">Proxima acao</div>
+                <div className="text-sm font-semibold text-zinc-100">Próxima ação</div>
                 {nextTask ? (
                   <div className="mt-3 rounded-lg border border-white/10 bg-black/20 p-3">
                     <div className="flex flex-wrap items-center gap-2">
@@ -8025,7 +6282,7 @@ function LeadDetails({
                   </div>
                 ) : (
                   <div className="mt-3 rounded-lg border border-dashed border-white/10 p-4 text-sm text-zinc-500">
-                    Nenhuma tarefa aberta. Crie uma tarefa para manter o lead em cadencia.
+                    Nenhuma tarefa aberta. Crie uma tarefa para manter o lead em cadência.
                   </div>
                 )}
                 <button
@@ -8046,7 +6303,7 @@ function LeadDetails({
                     <div className="mt-2 text-xs text-zinc-500">{new Date(lastInteraction.created_at).toLocaleString("pt-BR")}</div>
                   </div>
                 ) : (
-                  <div className="mt-3 text-sm text-zinc-500">Nenhuma interacao registrada.</div>
+                  <div className="mt-3 text-sm text-zinc-500">Nenhuma interação registrada.</div>
                 )}
               </div>
 
@@ -8074,7 +6331,7 @@ function LeadDetails({
             <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
               <div>
                 <h3 className="font-semibold text-zinc-100">Dados comerciais</h3>
-                <p className="mt-1 text-sm text-zinc-500">Edite qualificacao, responsavel e etapa sem sair do lead.</p>
+                <p className="mt-1 text-sm text-zinc-500">Edite qualificação, responsável e etapa sem sair do lead.</p>
               </div>
               <button
                 className="flex h-10 items-center justify-center gap-2 rounded-lg bg-[#8B5CF6] px-4 text-sm font-medium transition hover:bg-[#7C3AED]"
@@ -8102,7 +6359,7 @@ function LeadDetails({
                 type="number"
                 value={commercialForm.estimated_value?.toString() ?? ""}
               />
-              <Input label="Responsavel" onChange={(value) => updateCommercialField("owner_name", value)} value={commercialForm.owner_name ?? ""} />
+              <Input label="Responsável" onChange={(value) => updateCommercialField("owner_name", value)} value={commercialForm.owner_name ?? ""} />
               <label className="block text-sm text-zinc-300">
                 Temperatura
                 <select
@@ -8156,7 +6413,7 @@ function LeadDetails({
             <div className="flex items-center justify-between gap-3">
               <div>
                 <h3 className="text-sm font-semibold text-zinc-100">Tarefas abertas</h3>
-                <p className="mt-1 text-xs text-zinc-500">Proximas acoes deste lead.</p>
+                <p className="mt-1 text-xs text-zinc-500">Próximas ações deste lead.</p>
               </div>
               <span className="rounded-full border border-white/10 px-2 py-1 text-xs text-zinc-400">{openTasks.length}</span>
             </div>
@@ -8209,6 +6466,7 @@ function LeadDetails({
               if (!taskForm.title.trim()) return;
               onCreateTask(lead, taskForm);
               setTaskForm({
+                lead_id: lead.id,
                 type: taskForm.type,
                 title: taskForm.type === "followup" ? `Follow-up com ${lead.name}` : "",
                 notes: "",
@@ -8233,9 +6491,9 @@ function LeadDetails({
                 >
                   <option value="followup">Follow-up</option>
                   <option value="whatsapp">WhatsApp</option>
-                  <option value="call">Ligacao</option>
+                  <option value="call">Ligação</option>
                   <option value="email">Email</option>
-                  <option value="meeting">Reuniao</option>
+                  <option value="meeting">Reunião</option>
                   <option value="other">Outro</option>
                 </select>
               </label>
@@ -8249,9 +6507,9 @@ function LeadDetails({
                 />
               </label>
             </div>
-            <Input label="Titulo" onChange={(value) => updateTaskField("title", value)} required value={taskForm.title} />
+            <Input label="Título" onChange={(value) => updateTaskField("title", value)} required value={taskForm.title} />
             <label className="mt-3 block text-sm text-zinc-300">
-              Observacao
+              Observação
               <textarea
                 className="mt-2 min-h-20 w-full rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-white outline-none transition focus:border-[#8B5CF6]"
                 onChange={(event) => updateTaskField("notes", event.target.value)}
@@ -8303,8 +6561,9 @@ function LeadDetails({
             <div className="text-xs text-zinc-500">
               Atual:{" "}
               {lead.next_followup_at
-                ? new Date(lead.next_followup_at).toLocaleString("pt-BR")
-                : "Nao agendado"}
+                ?
+                 new Date(lead.next_followup_at).toLocaleString("pt-BR")
+                : "Não agendado"}
             </div>
           </div>
           <div className="mt-4 grid grid-cols-3 gap-2">
@@ -8312,14 +6571,15 @@ function LeadDetails({
               <button
                 className={`h-10 rounded-lg border text-sm transition ${
                   isSameFollowupDay(followupAt, days)
-                    ? "border-[#8B5CF6] bg-[#8B5CF6] text-white"
+                    ?
+                     "border-[#8B5CF6] bg-[#8B5CF6] text-white"
                     : "border-white/10 bg-white/[0.04] text-zinc-300 hover:bg-white/[0.07]"
                 }`}
                 key={days}
                 onClick={() => setFollowupAt(toDateTimeLocal(addDays(days)))}
                 type="button"
               >
-                {days === 1 ? "Amanha" : `${days} dias`}
+                {days === 1 ? "Amanhã" : `${days} dias`}
               </button>
             ))}
           </div>
@@ -8372,7 +6632,7 @@ function LeadDetails({
         >
           <div className="mb-3 flex flex-col gap-3 sm:flex-row">
             <label className="flex-1 text-sm text-zinc-300">
-              Tipo de interacao
+              Tipo de interação
               <select
                 className="mt-2 h-10 w-full rounded-lg border border-white/10 bg-[#14131B] px-3 text-sm text-zinc-100 outline-none transition focus:border-[#8B5CF6]"
                 onChange={(event) => setInteractionType(event.target.value as NonNullable<Interaction["type"]>)}
@@ -8392,7 +6652,7 @@ function LeadDetails({
                 value={interactionChannel}
               >
                 <option value="whatsapp">WhatsApp</option>
-                <option value="call">Ligacao</option>
+                <option value="call">Ligação</option>
                 <option value="email">Email</option>
                 <option value="other">Outro</option>
               </select>
@@ -8401,13 +6661,13 @@ function LeadDetails({
           <textarea
             className="min-h-24 w-full rounded-lg border border-white/10 bg-black/30 p-3 text-sm outline-none transition focus:border-[#8B5CF6]"
             onChange={(event) => setNote(event.target.value)}
-            placeholder="Resumo objetivo do contato, combinados, objecoes ou proximo passo"
+            placeholder="Resumo objetivo do contato, combinados, objeções ou próximo passo"
             required
             value={note}
           />
           <button className="mt-2 flex h-10 w-full items-center justify-center gap-2 rounded-lg border border-white/10 text-sm text-zinc-300 transition hover:bg-white/[0.06]">
             <Edit3 className="h-4 w-4" />
-            Registrar interacao
+            Registrar interação
           </button>
         </form>
 
@@ -8418,472 +6678,4 @@ function LeadDetails({
     </Modal>
   );
 }
-
-function LeadMetric({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="min-w-0 rounded-lg border border-white/10 bg-black/20 px-3 py-2">
-      <div className="truncate text-[11px] uppercase text-zinc-500">{label}</div>
-      <div className="mt-1 truncate text-sm font-semibold text-zinc-100">{value}</div>
-    </div>
-  );
-}
-
-function LeadSummaryItem({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-lg border border-white/10 bg-black/20 p-3">
-      <div className="text-xs uppercase text-zinc-500">{label}</div>
-      <div className="mt-2 break-words text-sm font-medium text-zinc-100">{value}</div>
-    </div>
-  );
-}
-
-function LeadHistory({
-  interactions,
-  whatsappMessages,
-}: {
-  interactions: Interaction[];
-  whatsappMessages: WhatsAppMessage[];
-}) {
-  const commercialChanges = interactions.filter(isCommercialInteraction);
-  const operationalInteractions = interactions.filter(
-    (interaction) => !isCommercialInteraction(interaction) && interaction.type !== "whatsapp_sent",
-  );
-  const whatsappInteractions = interactions.filter((interaction) => interaction.type === "whatsapp_sent");
-
-  return (
-    <div className="grid gap-5 xl:grid-cols-3">
-      <Timeline
-        emptyText="Nenhuma interacao manual registrada."
-        interactions={operationalInteractions}
-        title="Interacoes"
-      />
-      <WhatsAppHistory interactions={whatsappInteractions} messages={whatsappMessages} />
-      <Timeline
-        emptyText="Nenhuma mudanca comercial registrada."
-        interactions={commercialChanges}
-        title="Mudancas comerciais"
-      />
-    </div>
-  );
-}
-
-function WhatsAppHistory({
-  interactions,
-  messages,
-}: {
-  interactions: Interaction[];
-  messages: WhatsAppMessage[];
-}) {
-  const sortedMessages = [...messages].sort(
-    (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
-  );
-
-  return (
-    <div className="space-y-3">
-      <div className="flex items-center justify-between gap-3">
-        <h3 className="font-medium">WhatsApp</h3>
-        <span className="rounded-full border border-white/10 px-2 py-1 text-xs text-zinc-500">
-          {sortedMessages.length || interactions.length} registros
-        </span>
-      </div>
-      {sortedMessages.length === 0 && interactions.length === 0 && (
-        <div className="rounded-lg border border-dashed border-white/10 p-4 text-sm text-zinc-500">
-          Nenhuma mensagem de WhatsApp vinculada a este lead.
-        </div>
-      )}
-      {sortedMessages.slice(0, 8).map((message) => (
-        <div className="rounded-lg border border-white/10 bg-white/[0.03] p-4" key={message.id}>
-          <div className="flex items-center justify-between gap-3">
-            <span className={`rounded-full px-2 py-0.5 text-[11px] ${
-              message.direction === "inbound"
-                ? "bg-[#25D366]/10 text-[#9AF0B8]"
-                : "bg-[#8B5CF6]/10 text-[#DDD6FE]"
-            }`}>
-              {message.direction === "inbound" ? "Recebida" : "Enviada"}
-            </span>
-            <span className="text-xs text-zinc-500">{new Date(message.created_at).toLocaleString("pt-BR")}</span>
-          </div>
-          <p className="mt-2 line-clamp-3 text-sm leading-6 text-zinc-300">{message.content || "Mensagem sem texto"}</p>
-        </div>
-      ))}
-      {sortedMessages.length === 0 && interactions.map((interaction) => (
-        <div className="rounded-lg border border-white/10 bg-white/[0.03] p-4" key={interaction.id}>
-          <div className="text-sm font-medium text-zinc-100">Mensagem enviada</div>
-          <p className="mt-2 text-sm leading-6 text-zinc-300">{interaction.message ?? interaction.note}</p>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function Timeline({
-  interactions,
-  title = "Historico comercial",
-  emptyText = "Nenhuma interacao registrada. Use notas objetivas para manter contexto, combinados e proximos passos do lead.",
-}: {
-  interactions: Interaction[];
-  title?: string;
-  emptyText?: string;
-}) {
-  const sorted = [...interactions].sort(
-    (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
-  );
-
-  return (
-    <div className="space-y-3">
-      <div className="flex items-center justify-between gap-3">
-        <h3 className="font-medium">{title}</h3>
-        <span className="rounded-full border border-white/10 px-2 py-1 text-xs text-zinc-500">
-          {sorted.length} registros
-        </span>
-      </div>
-      {sorted.length === 0 && (
-        <div className="rounded-lg border border-dashed border-white/10 p-4 text-sm text-zinc-500">
-          {emptyText}
-        </div>
-      )}
-      {sorted.map((interaction) => (
-        <div className="relative border-l border-white/10 pl-4" key={interaction.id}>
-          <div className={`absolute -left-1.5 top-2 h-3 w-3 rounded-full ${timelineTone(interaction)}`} />
-          <div className="rounded-lg border border-white/10 bg-white/[0.03] p-4">
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-              <div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="font-medium text-zinc-100">{timelineTitle(interaction)}</span>
-                  <span className="rounded-full border border-white/10 px-2 py-0.5 text-[11px] text-zinc-500">
-                    {interactionChannelLabel(interaction.channel)}
-                  </span>
-                </div>
-                <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-zinc-300">
-                  {interaction.message ?? interaction.note}
-                </p>
-              </div>
-              <span className="shrink-0 text-xs text-zinc-500">
-                {new Date(interaction.created_at).toLocaleString("pt-BR")}
-              </span>
-            </div>
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function timelineTitle(interaction: Interaction) {
-  if (interaction.type === "whatsapp_sent") return "Mensagem enviada";
-  if (interaction.type === "status_changed") return "Mudanca de status";
-  if (interaction.type === "followup_created") return "Follow-up criado";
-  return "Interacao registrada";
-}
-
-function timelineTone(interaction: Interaction) {
-  if (interaction.type === "whatsapp_sent") return "bg-[#25D366]";
-  if (interaction.type === "followup_created") return "bg-amber-300";
-  if (interaction.type === "status_changed") return "bg-[#8B5CF6]";
-  return "bg-zinc-400";
-}
-
-function isCommercialInteraction(interaction: Interaction) {
-  const text = `${interaction.message ?? ""} ${interaction.note ?? ""}`.toLowerCase();
-  return (
-    interaction.type === "status_changed" ||
-    interaction.type === "followup_created" ||
-    text.includes("temperatura alterada") ||
-    text.includes("tarefa criada") ||
-    text.includes("tarefa reagendada") ||
-    text.includes("follow-up concluido")
-  );
-}
-
-function interactionChannelLabel(channel: Interaction["channel"]) {
-  if (channel === "call") return "Ligacao";
-  if (channel === "email") return "Email";
-  if (channel === "other") return "Outro";
-  return "WhatsApp";
-}
-
-function toDateTimeLocal(value: string) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "";
-  const offsetDate = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
-  return offsetDate.toISOString().slice(0, 16);
-}
-
-function fromDateTimeLocal(value: string) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return addDays(1);
-  return date.toISOString();
-}
-
-function isSameFollowupDay(value: string, days: number) {
-  const selected = new Date(value);
-  const quickDate = new Date(addDays(days));
-  return startOfDay(selected).getTime() === startOfDay(quickDate).getTime();
-}
-
-function ConfirmDeleteLead({
-  lead,
-  onCancel,
-  onConfirm,
-}: {
-  lead: Lead;
-  onCancel: () => void;
-  onConfirm: () => void;
-}) {
-  return (
-    <Modal onClose={onCancel} title="Excluir lead">
-      <div className="space-y-4">
-        <div className="rounded-lg border border-red-400/25 bg-red-500/10 p-4">
-          <div className="flex items-start gap-3">
-            <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-red-300" />
-            <div>
-              <p className="font-medium text-red-100">Esta acao remove o lead da base.</p>
-              <p className="mt-2 text-sm leading-6 text-red-100/80">
-                O lead {lead.name}, suas tarefas e interacoes serao apagados. O historico de
-                WhatsApp sera preservado desvinculado.
-              </p>
-            </div>
-          </div>
-        </div>
-        <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-          <button
-            className="h-10 rounded-lg border border-white/10 px-4 text-sm text-zinc-300 transition hover:bg-white/[0.06]"
-            onClick={onCancel}
-            type="button"
-          >
-            Cancelar
-          </button>
-          <button
-            className="flex h-10 items-center justify-center gap-2 rounded-lg bg-red-500 px-4 text-sm font-semibold text-white transition hover:bg-red-400"
-            onClick={onConfirm}
-            type="button"
-          >
-            <Trash2 className="h-4 w-4" />
-            Excluir lead
-          </button>
-        </div>
-      </div>
-    </Modal>
-  );
-}
-
-function ConfirmDeleteTemplate({
-  template,
-  onCancel,
-  onConfirm,
-}: {
-  template: MessageTemplate;
-  onCancel: () => void;
-  onConfirm: () => void;
-}) {
-  return (
-    <Modal onClose={onCancel} title="Excluir mensagem pronta">
-      <div className="space-y-4">
-        <div className="rounded-lg border border-red-400/25 bg-red-500/10 p-4">
-          <div className="flex items-start gap-3">
-            <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-red-300" />
-            <div>
-              <p className="font-medium text-red-100">A mensagem pronta sera removida.</p>
-              <p className="mt-2 text-sm leading-6 text-red-100/80">
-                {template.title} deixara de aparecer nas selecoes de atendimento e follow-up.
-              </p>
-            </div>
-          </div>
-        </div>
-        <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-          <button
-            className="h-10 rounded-lg border border-white/10 px-4 text-sm text-zinc-300 transition hover:bg-white/[0.06]"
-            onClick={onCancel}
-            type="button"
-          >
-            Cancelar
-          </button>
-          <button
-            className="flex h-10 items-center justify-center gap-2 rounded-lg bg-red-500 px-4 text-sm font-semibold text-white transition hover:bg-red-400"
-            onClick={onConfirm}
-            type="button"
-          >
-            <Trash2 className="h-4 w-4" />
-            Excluir mensagem
-          </button>
-        </div>
-      </div>
-    </Modal>
-  );
-}
-
-function ConfirmDeleteTask({
-  task,
-  onCancel,
-  onConfirm,
-}: {
-  task: Task;
-  onCancel: () => void;
-  onConfirm: () => void;
-}) {
-  return (
-    <Modal onClose={onCancel} title="Excluir tarefa">
-      <div className="space-y-4">
-        <div className="rounded-lg border border-red-400/25 bg-red-500/10 p-4">
-          <div className="flex items-start gap-3">
-            <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-red-300" />
-            <div>
-              <p className="font-medium text-red-100">Esta tarefa sera removida.</p>
-              <p className="mt-2 text-sm leading-6 text-red-100/80">
-                {task.title} deixara de aparecer no Dashboard, em Tarefas e no lead vinculado.
-              </p>
-            </div>
-          </div>
-        </div>
-        <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-          <button
-            className="h-10 rounded-lg border border-white/10 px-4 text-sm text-zinc-300 transition hover:bg-white/[0.06]"
-            onClick={onCancel}
-            type="button"
-          >
-            Cancelar
-          </button>
-          <button
-            className="flex h-10 items-center justify-center gap-2 rounded-lg bg-red-500 px-4 text-sm font-semibold text-white transition hover:bg-red-400"
-            onClick={onConfirm}
-            type="button"
-          >
-            <Trash2 className="h-4 w-4" />
-            Excluir tarefa
-          </button>
-        </div>
-      </div>
-    </Modal>
-  );
-}
-
-// Kept as a reusable confirmation modal for future close-stage workflows.
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-function CloseLeadModal({
-  lead,
-  onCancel,
-  onConfirm,
-}: {
-  lead: Lead;
-  onCancel: () => void;
-  onConfirm: (reason: string) => void;
-}) {
-  const [reason, setReason] = useState(lead.outcome_reason ?? "");
-
-  return (
-    <Modal onClose={onCancel} title="Fechar lead">
-      <form
-        className="space-y-4"
-        onSubmit={(event) => {
-          event.preventDefault();
-          if (!reason.trim()) return;
-          onConfirm(reason.trim());
-        }}
-      >
-        <div className="rounded-lg border border-amber-400/25 bg-amber-500/10 p-4">
-          <div className="flex items-start gap-3">
-            <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-300" />
-            <div>
-              <p className="font-medium text-amber-100">Informe o motivo antes de fechar.</p>
-              <p className="mt-2 text-sm leading-6 text-amber-100/80">
-                Esse registro ajuda a entender ganho, perda, objeção ou contexto final da oportunidade.
-              </p>
-            </div>
-          </div>
-        </div>
-        <label className="block text-sm text-zinc-300">
-          Motivo de ganho/perda
-          <textarea
-            autoFocus
-            className="mt-2 min-h-28 w-full rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-white outline-none transition focus:border-[#8B5CF6]"
-            onChange={(event) => setReason(event.target.value)}
-            placeholder={`Ex.: ${lead.name} fechou com outro fornecedor, sem budget agora, ou venda concluida.`}
-            required
-            value={reason}
-          />
-        </label>
-        <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-          <button
-            className="h-10 rounded-lg border border-white/10 px-4 text-sm text-zinc-300 transition hover:bg-white/[0.06]"
-            onClick={onCancel}
-            type="button"
-          >
-            Cancelar
-          </button>
-          <button
-            className="flex h-10 items-center justify-center gap-2 rounded-lg bg-[#8B5CF6] px-4 text-sm font-semibold text-white transition hover:bg-[#7C3AED] disabled:opacity-50"
-            disabled={!reason.trim()}
-            type="submit"
-          >
-            <Check className="h-4 w-4" />
-            Fechar lead
-          </button>
-        </div>
-      </form>
-    </Modal>
-  );
-}
-
-function Input({
-  label,
-  value,
-  required,
-  onChange,
-  type = "text",
-}: {
-  label: string;
-  value: string;
-  required?: boolean;
-  onChange: (value: string) => void;
-  type?: string;
-}) {
-  return (
-    <label className="block text-sm text-zinc-300">
-      {label}
-      <input
-        className="mt-2 h-11 w-full rounded-lg border border-white/10 bg-black/30 px-3 text-white outline-none transition focus:border-[#8B5CF6]"
-        onChange={(event) => onChange(event.target.value)}
-        required={required}
-        type={type}
-        value={value}
-      />
-    </label>
-  );
-}
-
-function Modal({
-  title,
-  children,
-  onClose,
-  wide = false,
-}: {
-  title: string;
-  children: React.ReactNode;
-  onClose: () => void;
-  wide?: boolean;
-}) {
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm">
-      <div className={`reveal-up relative max-h-[90vh] w-full overflow-y-auto rounded-xl border border-[#8B5CF6]/25 bg-[#0F0F16]/95 p-5 shadow-2xl shadow-[#8B5CF6]/15 ${
-        wide ? "max-w-6xl" : "max-w-xl"
-      }`}>
-        <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(139,92,246,0.85),rgba(37,211,102,0.3),transparent)]" />
-        <div className="pointer-events-none absolute -right-20 -top-24 h-64 w-64 opacity-[0.04]">
-          <Image alt="" className="object-contain" fill sizes="256px" src="/origocrm-icon.png" />
-        </div>
-        <div className="relative mb-5 flex items-center justify-between gap-4">
-          <h2 className="text-xl font-semibold">{title}</h2>
-          <button
-            className="rounded-lg border border-white/10 px-3 py-2 text-sm text-zinc-400 transition hover:bg-white/[0.06] hover:text-white"
-            onClick={onClose}
-          >
-            Fechar
-          </button>
-        </div>
-        <div className="relative">{children}</div>
-      </div>
-    </div>
-  );
-}
-
 

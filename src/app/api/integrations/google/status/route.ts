@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
 
-import { getAuthenticatedOrganizationContext } from "@/lib/server/auth";
+import { getAuthenticatedOrganizationContext, requireServerPermission, requireServerPlanFeature } from "@/lib/server/auth";
 import { getGoogleCalendarConfig } from "@/lib/server/google-calendar";
 
-function isMissingGoogleTable(message?: string | null) {
+function isMissingGoogleTable(message: string | null) {
   if (!message) return false;
   const normalized = message.toLowerCase();
   return normalized.includes("google_calendar_connections") || normalized.includes("schema cache") || normalized.includes("relation");
@@ -16,6 +16,10 @@ export async function GET() {
   if ("error" in auth) {
     return NextResponse.json({ configured, connected: false, error: auth.error }, { status: 401 });
   }
+  const permissionError = requireServerPermission(auth, "task:manage");
+  if (permissionError) return NextResponse.json({ configured, connected: false, error: permissionError }, { status: 403 });
+  const planError = await requireServerPlanFeature(auth, "googleCalendar");
+  if (planError) return NextResponse.json({ configured, connected: false, error: planError }, { status: 402 });
 
   let query = auth.supabase
     .from("google_calendar_connections")

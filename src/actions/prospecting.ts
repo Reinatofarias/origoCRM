@@ -2,24 +2,26 @@
 
 import { revalidatePath } from "next/cache";
 
-import { getAuthenticatedOrganizationContext, withOrganizationId } from "@/lib/server/auth";
+import { getAuthenticatedOrganizationContext, requireServerPermission, requireServerPlanFeature, withOrganizationId } from "@/lib/server/auth";
 import type { ProspectingCampaignInput } from "@/lib/types";
 
-type ActionResult<T = unknown> = {
-  success: boolean;
-  data?: T;
-  error?: string;
-};
+type ActionResult<T = unknown> =
+  | { success: true; data?: T }
+  | { success: false; error: string };
 
 export async function createProspectingCampaign(input: ProspectingCampaignInput) {
   const auth = await getAuthenticatedOrganizationContext();
-  if ("error" in auth) return { success: false, error: auth.error } satisfies ActionResult;
+  if ("error" in auth) return { success: false, error: auth.error ?? "Não autenticado" } satisfies ActionResult;
+  const permissionError = requireServerPermission(auth, "prospecting:use");
+  if (permissionError) return { success: false, error: permissionError } satisfies ActionResult;
+  const planError = await requireServerPlanFeature(auth, "campaigns");
+  if (planError) return { success: false, error: planError } satisfies ActionResult;
 
   const { data: campaign, error } = await auth.supabase
     .from("prospecting_campaigns")
     .insert(withOrganizationId({
       user_id: auth.user.id,
-      name: input.name.trim() || "Campanha de prospeccao",
+      name: input.name.trim() || "Campanha de prospecção",
       niche: input.niche ?? "",
       state: input.state ?? "",
       city: input.city ?? "",

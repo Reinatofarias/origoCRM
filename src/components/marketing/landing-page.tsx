@@ -18,29 +18,29 @@ import type { ComponentType, CSSProperties } from "react";
 import { PricingSection } from "./pricing-section";
 
 const capabilities = [
-  { icon: Workflow, title: "Venda sem depender da memoria", text: "Cada oportunidade mostra responsavel, momento da negociacao, prioridade e proxima acao." },
-  { icon: MessageCircle, title: "Atendimento com contexto", text: "As conversas do WhatsApp ficam conectadas ao cliente, ao retorno esperado e ao historico de atendimento." },
-  { icon: Search, title: "Prospeccao sem planilha", text: "Busque empresas por nicho, estado e cidade, capture telefones e monte listas prontas para abordagem." },
-  { icon: CalendarClock, title: "Follow-up que aparece", text: "Tarefas vencidas, proximas acoes e agenda do dia ficam na frente do vendedor." },
-  { icon: Tags, title: "Segmentacao simples", text: "Separe contatos por origem, interesse, prioridade, campanha e nivel de oportunidade." },
-  { icon: BarChart3, title: "Decisao diaria", text: "Veja respostas novas, riscos comerciais, tarefas e performance antes de perder vendas." },
+  { icon: Workflow, title: "CRM com funil e visão completa do lead", text: "Cada oportunidade mostra etapa, responsável, temperatura, valor, tags, histórico e próxima ação." },
+  { icon: MessageCircle, title: "Conversas WhatsApp organizadas", text: "As conversas ficam conectadas ao lead, com tags, status, mensagens prontas e contexto de venda." },
+  { icon: Search, title: "Prospecção inteligente", text: "Busque empresas por nicho, estado e cidade, capture telefones e transforme listas em campanhas." },
+  { icon: CalendarClock, title: "Tarefas e Google Calendar", text: "Tarefas comerciais e operacionais entram na rotina do dia e podem sincronizar com a agenda Google." },
+  { icon: Tags, title: "Tags, permissões e histórico", text: "Organize contatos por perfil, controle ações importantes e acompanhe o histórico da operação." },
+  { icon: BarChart3, title: "Painel de prioridades", text: "Veja respostas novas, riscos comerciais, tarefas, performance e saúde do WhatsApp em uma tela." },
 ];
 
-const segments = ["Agencias", "Clinicas", "Energia solar", "Estetica", "Imobiliarias", "Servicos locais"];
+const segments = ["Agências", "Clínicas", "Energia solar", "Estética", "Imobiliárias", "Serviços locais"];
 const offerStack = [
-  "Funil comercial para organizar oportunidades",
-  "Atendimento WhatsApp conectado ao cliente",
-  "Tarefas e follow-ups para nao deixar venda esfriar",
-  "Prospeccao por Google com telefone e prioridade",
-  "Envios em lote com acompanhamento de retorno",
-  "Segmentacao, registros e indicadores para controle diario",
+  "CRM com funil, lista e visão completa do lead",
+  "Conversas WhatsApp com mensagens prontas e tags",
+  "Tarefas, follow-ups e Google Calendar",
+  "Prospecção Google com telefone e prioridade",
+  "Campanhas e disparos acompanhados",
+  "Permissões, histórico de ações e indicadores",
 ];
 
 const proofMetrics = [
   { value: "38", label: "respostas novas para priorizar" },
-  { value: "12", label: "follow-ups que nao ficam na memoria" },
+  { value: "12", label: "follow-ups que não ficam na memória" },
   { value: "20", label: "contatos validados por campanha" },
-  { value: "1", label: "rotina diaria para vendas e atendimento" },
+  { value: "1", label: "rotina diária para vendas e atendimento" },
 ];
 
 const beforeAfter = [
@@ -49,11 +49,11 @@ const beforeAfter = [
     after: "Cada conversa vira oportunidade acompanhada",
   },
   {
-    before: "Follow-up depende da memoria do vendedor",
+    before: "Follow-up depende da memória do vendedor",
     after: "Tarefas mostram quem precisa ser acionado hoje",
   },
   {
-    before: "Prospecao manual em planilhas",
+    before: "Prospecção manual em planilhas",
     after: "Lista de empresas com telefone pronta para abordagem",
   },
   {
@@ -64,7 +64,7 @@ const beforeAfter = [
 
 const prospectingHighlights = [
   { title: "Encontre empresas", text: "Digite nicho, estado e cidade para montar uma lista comercial a partir do Google." },
-  { title: "Filtre contatos uteis", text: "Priorize empresas com telefone, WhatsApp e maior chance de resposta." },
+  { title: "Filtre contatos úteis", text: "Priorize empresas com telefone, WhatsApp e maior chance de resposta." },
   { title: "Aborde em lotes", text: "Selecione contatos, escolha uma mensagem pronta e acompanhe o retorno." },
 ];
 
@@ -80,9 +80,9 @@ export function LandingPage() {
             <Image alt="OrigoCRM" className="object-contain object-left" fill priority sizes="176px" src="/origocrm-logo.png" />
           </Link>
           <nav className="hidden items-center gap-6 text-sm text-zinc-400 md:flex">
-            <a className="transition hover:text-white" href="#solucao">Solucao</a>
+            <a className="transition hover:text-white" href="#solucao">Solução</a>
             <a className="transition hover:text-white" href="#prova">Prova</a>
-            <a className="transition hover:text-white" href="#prospeccao">Prospeccao</a>
+            <a className="transition hover:text-white" href="#prospeccao">Prospecção</a>
             <a className="transition hover:text-white" href="#planos">Planos</a>
           </nav>
           <div className="flex items-center gap-2">
@@ -107,7 +107,7 @@ export function LandingPage() {
             Pare de perder leads no WhatsApp e transforme conversas em vendas acompanhadas.
           </h1>
           <p className="reveal-up mt-6 max-w-2xl text-lg leading-8 text-zinc-300" style={{ "--delay": "170ms" } as CSSProperties}>
-            O OrigoCRM junta CRM, WhatsApp, tarefas, prospeccao e campanhas em uma unica central para voce saber quem responder, quem cobrar e qual oportunidade nao pode esfriar.
+            O OrigoCRM junta CRM, WhatsApp, tarefas, prospecção e campanhas em uma única central para você saber quem responder, quem cobrar e qual oportunidade não pode esfriar.
           </p>
           <div className="reveal-up mt-8 flex flex-col gap-3 sm:flex-row" style={{ "--delay": "250ms" } as CSSProperties}>
             <Link className="shine-cta flex h-12 items-center justify-center gap-2 rounded-lg bg-[#8B5CF6] px-5 text-sm font-semibold shadow-xl shadow-[#8B5CF6]/25 transition hover:bg-[#7C3AED]" href="/checkout">
@@ -116,7 +116,7 @@ export function LandingPage() {
             </Link>
           </div>
           <div className="reveal-up mt-8 grid grid-cols-2 gap-3 text-sm text-zinc-400 sm:grid-cols-4" style={{ "--delay": "330ms" } as CSSProperties}>
-            {["Sem planilhas", "Sem lead perdido", "Sem follow-up esquecido", "Com campanha rastreada"].map((item) => (
+            {["Sem planilhas", "Sem lead perdido", "Sem follow-up esquecido", "Com campanha acompanhada"].map((item) => (
               <div className="flex items-center gap-2" key={item}>
                 <Check className="h-4 w-4 text-[#25D366]" />
                 {item}
@@ -143,12 +143,12 @@ export function LandingPage() {
       <section className="scroll-reveal relative mx-auto max-w-7xl px-5 py-20" id="solucao">
         <div className="absolute inset-x-5 top-8 h-px bg-[linear-gradient(90deg,transparent,rgba(139,92,246,0.55),rgba(37,211,102,0.25),transparent)]" />
         <SectionHeader
-          eyebrow="O custo invisivel"
-          title="O problema nao e falta de lead. E falta de controle depois que o lead aparece."
-          text="Quando o vendedor atende pelo WhatsApp, anota em planilha e tenta lembrar do proximo contato, a venda depende de sorte. O OrigoCRM tira a rotina da memoria e mostra exatamente o que precisa acontecer em seguida."
+          eyebrow="O custo invisível"
+          title="O problema não é falta de lead. E falta de controle depois que o lead aparece."
+          text="Quando o vendedor atende pelo WhatsApp, anota em planilha e tenta lembrar do próximo contato, a venda depende de sorte. O OrigoCRM tira a rotina da memória e mostra exatamente o que precisa acontecer em seguida."
         />
         <div className="mt-8 grid gap-3 md:grid-cols-3">
-          {["Quem respondeu e nao foi atendido?", "Qual lead quente esta sem proxima acao?", "Qual campanha gerou conversa de verdade?"].map((question) => (
+          {["Quem respondeu e não foi atendido", "Qual lead quente está sem próxima ação", "Qual campanha gerou conversa de verdade"].map((question) => (
             <div className="rounded-xl border border-red-400/20 bg-red-500/10 p-4 text-sm font-medium text-red-100" key={question}>
               {question}
             </div>
@@ -166,12 +166,12 @@ export function LandingPage() {
         <div className="grid gap-6 lg:grid-cols-[0.85fr_1.15fr]">
           <div className="relative overflow-hidden rounded-2xl border border-[#25D366]/20 bg-[#07130D]/70 p-6 shadow-2xl shadow-[#25D366]/10">
             <div className="absolute inset-x-0 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(37,211,102,0.7),rgba(139,92,246,0.35),transparent)]" />
-            <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[#9AF0B8]">Como fica na pratica</div>
+            <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[#9AF0B8]">Como fica na prática</div>
             <h2 className="mt-4 text-3xl font-semibold tracking-[-0.01em] text-white">
-              Uma rotina diaria para vender sem deixar oportunidade escapar.
+              Uma rotina diária para vender sem deixar oportunidade escapar.
             </h2>
             <p className="mt-4 text-sm leading-6 text-zinc-400">
-              Ao entrar no CRM, a equipe enxerga respostas novas, follow-ups, contatos prospectados e campanhas em andamento. A decisao deixa de ser onde eu parei e vira quem precisa de acao agora.
+              Ao entrar no CRM, a equipe enxerga respostas novas, follow-ups, contatos prospectados e campanhas em andamento. A decisão deixa de ser onde eu parei e vira quem precisa de ação agora.
             </p>
             <div className="mt-6 grid gap-3 sm:grid-cols-2">
               {proofMetrics.map((metric) => (
@@ -235,12 +235,11 @@ export function LandingPage() {
       <section className="scroll-reveal relative mx-auto max-w-7xl px-5 py-20" id="planos">
         <div className="absolute inset-x-5 top-12 h-40 bg-[linear-gradient(90deg,rgba(139,92,246,0.08),rgba(37,211,102,0.06),transparent)] blur-3xl" />
         <SectionHeader
-          eyebrow="Oferta"
-          title="Escolha o quanto da sua operacao comercial voce quer controlar."
-          text="Comece com CRM para organizar vendas ou adicione prospeccao para gerar novas conversas todos os meses. Escolha entre mensal, semestral ou anual."
+          title="Pare de perder oportunidades no WhatsApp por R$ 67/mês."
+          text="Comece organizando leads, tarefas e follow-ups. Quando quiser acelerar, avance para conversas, agenda integrada, prospecção e campanhas sem trocar de ferramenta."
         />
         <div className="mt-8 rounded-2xl border border-[#25D366]/20 bg-[#25D366]/10 p-5">
-          <div className="text-sm font-semibold text-[#9AF0B8]">O que voce leva na estrutura completa</div>
+          <div className="text-sm font-semibold text-[#9AF0B8]">O que você pode ter no OrigoCRM</div>
           <div className="mt-4 grid gap-3 md:grid-cols-2 lg:grid-cols-3">
             {offerStack.map((item) => (
               <div className="flex items-center gap-2 text-sm text-zinc-200" key={item}>
@@ -262,16 +261,16 @@ export function LandingPage() {
             <div>
               <div className="flex items-center gap-2 text-sm font-medium text-[#DDD6FE]">
                 <ShieldCheck className="h-4 w-4" />
-                Acesso protegido, operacao rastreavel
+                Acesso seguro, operação organizada
               </div>
-              <h2 className="mt-4 text-3xl font-semibold">Se o WhatsApp ja gera venda, o OrigoCRM ajuda voce a perder menos oportunidade.</h2>
+              <h2 className="mt-4 text-3xl font-semibold">Se o WhatsApp já gera venda, o OrigoCRM ajuda você a perder menos oportunidade.</h2>
               <p className="mt-3 max-w-2xl text-sm leading-6 text-zinc-400">
-                Escolha um plano, solicite o cadastro e libere sua equipe para trabalhar com funil, conversas, tarefas, prospeccao e campanhas em uma unica rotina.
+                Escolha um plano e coloque sua equipe para trabalhar com funil, conversas, tarefas, prospecção e campanhas em uma única rotina.
               </p>
             </div>
             <div className="flex flex-col gap-3 sm:flex-row">
               <Link className="shine-cta flex h-12 items-center justify-center gap-2 rounded-lg bg-[#8B5CF6] px-5 text-sm font-semibold transition hover:bg-[#7C3AED]" href="/checkout">
-                Solicitar ativacao
+                Solicitar acesso
                 <ArrowRight className="h-4 w-4" />
               </Link>
             </div>
@@ -282,11 +281,11 @@ export function LandingPage() {
   );
 }
 
-function SectionHeader({ eyebrow, title, text }: { eyebrow: string; title: string; text: string }) {
+function SectionHeader({ eyebrow, title, text }: { eyebrow?: string; title: string; text: string }) {
   return (
     <div className="max-w-3xl">
-      <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[#A78BFA]">{eyebrow}</div>
-      <h2 className="mt-3 text-3xl font-semibold tracking-[-0.01em] text-white md:text-4xl">{title}</h2>
+      {eyebrow ? <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[#A78BFA]">{eyebrow}</div> : null}
+      <h2 className={eyebrow ? "mt-3 text-3xl font-semibold tracking-[-0.01em] text-white md:text-4xl" : "text-3xl font-semibold tracking-[-0.01em] text-white md:text-4xl"}>{title}</h2>
       <p className="mt-4 text-base leading-7 text-zinc-400">{text}</p>
     </div>
   );
@@ -300,7 +299,7 @@ function BrandWatermark({ className }: { className: string }) {
   );
 }
 
-function FeatureCard({ icon: Icon, title, text }: { icon: ComponentType<{ className?: string }>; title: string; text: string }) {
+function FeatureCard({ icon: Icon, title, text }: { icon: ComponentType<{ className: string }>; title: string; text: string }) {
   return (
     <article className="group relative overflow-hidden rounded-xl border border-white/10 bg-white/[0.035] p-5 shadow-xl shadow-black/20 transition hover:border-[#8B5CF6]/35 hover:bg-white/[0.055]">
       <div className="absolute inset-x-0 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(139,92,246,0.58),transparent)] opacity-0 transition group-hover:opacity-100" />
@@ -357,7 +356,7 @@ function ProductMockup() {
           {["Lead respondeu", "Campanha enviada", "Follow-up hoje"].map((item, index) => (
             <div className="mt-3 rounded-lg border border-white/10 bg-white/[0.035] p-3" key={item}>
               <div className="text-sm text-white">{item}</div>
-              <div className="mt-1 text-xs text-zinc-500">{index + 1} nova acao</div>
+              <div className="mt-1 text-xs text-zinc-500">{index + 1} nova ação</div>
             </div>
           ))}
         </div>

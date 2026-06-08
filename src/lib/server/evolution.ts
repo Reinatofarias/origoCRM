@@ -46,7 +46,7 @@ export function getEvolutionInstanceEndpoint(path: string) {
 
 export async function callEvolutionApi<T>(
   endpoint: string,
-  data?: Record<string, unknown>,
+  data: Record<string, unknown>,
   method: "GET" | "POST" | "PUT" | "DELETE" = "POST",
 ): Promise<EvolutionApiResponse<T>> {
   const config = getEvolutionServerConfig();
@@ -54,7 +54,7 @@ export async function callEvolutionApi<T>(
   if (!config) {
     return {
       status: 500,
-      error: "Evolution API nao configurada",
+      error: "Evolution API não configurada",
     };
   }
 
@@ -74,15 +74,18 @@ export async function callEvolutionApi<T>(
     });
 
     const responseData = (await response.json().catch(() => null)) as
-      | (T & { message?: string })
+      | (T & { message: string })
       | null;
 
     if (!response.ok) {
+      const responseMessage =
+        responseData && typeof (responseData as Record<string, unknown>).message === "string"
+          ? String((responseData as Record<string, unknown>).message)
+          : `Erro ${response.status}`;
+
       return {
         status: response.status,
-        error:
-          (responseData as Record<string, unknown> | null)?.message?.toString() ??
-          `Erro ${response.status}`,
+        error: responseMessage,
       };
     }
 
@@ -123,8 +126,8 @@ export function validateEvolutionWebhook(signature: string) {
 export async function logWhatsAppEvent(
   eventType: EvolutionWebhookEvent | "webhook.error" | string,
   payload: Record<string, unknown>,
-  userId?: string | null,
-  organizationId?: string | null,
+  userId: string | null,
+  organizationId: string | null,
 ) {
   const supabase = createSupabaseServiceRoleClient();
   if (!supabase) return;
@@ -143,7 +146,7 @@ export async function logWhatsAppEvent(
 export async function recordOutboundWhatsAppMessage(input: {
   leadId: string;
   userId: string;
-  organizationId?: string | null;
+  organizationId: string | null;
   messageId: string;
   phoneNumber: string;
   content: string;
@@ -168,6 +171,9 @@ export async function recordOutboundWhatsAppMessage(input: {
     organizationId: input.organizationId,
     leadId: input.leadId,
     phoneNumber: input.phoneNumber,
+    remoteJid: null,
+    contactName: null,
+    contactAvatarUrl: null,
     lastMessage: input.content,
     direction: "outbound",
     status: "responded",
@@ -178,7 +184,7 @@ export async function fetchContactProfilePictureUrl(phoneNumber: string) {
   const endpoint = getEvolutionInstanceEndpoint("/chat/fetchProfilePictureUrl");
   if (!endpoint) return null;
 
-  const response = await callEvolutionApi<{ profilePictureUrl?: string }>(
+  const response = await callEvolutionApi<{ profilePictureUrl: string }>(
     endpoint,
     { number: normalizePhone(phoneNumber) },
     "POST",
@@ -203,14 +209,14 @@ export async function updateStoredWhatsAppMessageStatus(
 
 export async function upsertWhatsAppConversation(input: {
   userId: string;
-  organizationId?: string | null;
+  organizationId: string | null;
   phoneNumber: string;
-  leadId?: string | null;
-  remoteJid?: string | null;
-  contactName?: string | null;
-  contactAvatarUrl?: string | null;
-  lastMessage?: string | null;
-  direction?: "inbound" | "outbound" | null;
+  leadId: string | null;
+  remoteJid: string | null;
+  contactName: string | null;
+  contactAvatarUrl: string | null;
+  lastMessage: string | null;
+  direction: "inbound" | "outbound" | null;
   status?: "open" | "unread" | "waiting" | "responded" | "converted" | "resolved" | "archived";
 }) {
   const supabase = createSupabaseServiceRoleClient();
@@ -254,7 +260,7 @@ export async function recordIncomingWhatsAppMessage(message: EvolutionIncomingMe
     await logWhatsAppEvent("messages.upsert.ignored", {
       reason: "missing_remote_jid_or_message_id",
       message: message as unknown as Record<string, unknown>,
-    });
+    }, null, null);
     return;
   }
 
@@ -263,7 +269,7 @@ export async function recordIncomingWhatsAppMessage(message: EvolutionIncomingMe
       remoteJid: normalizedMessage.remoteJid,
       messageId: normalizedMessage.messageId,
       reason: "group_message",
-    });
+    }, null, null);
     return;
   }
 
@@ -281,7 +287,7 @@ export async function recordIncomingWhatsAppMessage(message: EvolutionIncomingMe
       messageId: normalizedMessage.messageId,
       remoteJid: normalizedMessage.remoteJid,
       reason: "missing_lead_and_owner_user",
-    });
+    }, null, organizationId);
     return;
   }
 
@@ -291,7 +297,7 @@ export async function recordIncomingWhatsAppMessage(message: EvolutionIncomingMe
       messageId: normalizedMessage.messageId,
       ownerUserId,
       organizationId,
-    });
+    }, ownerUserId, organizationId);
   }
 
   const now = new Date().toISOString();
@@ -352,11 +358,11 @@ export async function recordIncomingWhatsAppMessage(message: EvolutionIncomingMe
 }
 
 function normalizeIncomingWebhookMessage(message: unknown) {
-  const record = asRecord(message);
-  const key = asRecord(record?.key);
-  const nestedData = asRecord(record?.data);
-  const nestedKey = asRecord(nestedData?.key);
-  const messageBody = asRecord(record?.message) ?? asRecord(nestedData?.message);
+  const record = asRecord(message) ?? {};
+  const key = asRecord(record.key) ?? {};
+  const nestedData = asRecord(record.data) ?? {};
+  const nestedKey = asRecord(nestedData.key) ?? {};
+  const messageBody = asRecord(record.message) ?? asRecord(nestedData.message);
 
   const remoteJid =
     getString(key, "remoteJid") ??
@@ -374,15 +380,17 @@ function normalizeIncomingWebhookMessage(message: unknown) {
     getString(nestedData, "id") ??
     getString(nestedData, "keyId") ??
     getString(nestedData, "messageId");
-  const fromMe = Boolean(key?.fromMe ?? nestedKey?.fromMe ?? record?.fromMe ?? nestedData?.fromMe);
+  const fromMe = Boolean(key.fromMe ?? nestedKey.fromMe ?? record.fromMe ?? nestedData.fromMe);
+
+  const rawContactName = getString(record, "pushName") ?? getString(nestedData, "pushName") ?? null;
 
   return {
     remoteJid,
     messageId,
     fromMe,
-    contactName: getString(record, "pushName") ?? getString(nestedData, "pushName") ?? null,
+    contactName: fromMe ? null : rawContactName,
     content: extractIncomingMessageContent(messageBody),
-    status: record?.status ?? nestedData?.status,
+    status: record.status ?? nestedData.status,
   };
 }
 
@@ -399,9 +407,9 @@ function extractIncomingMessageContent(messageBody: Record<string, unknown> | nu
     getString(extendedTextMessage, "text") ??
     getString(imageMessage, "caption") ??
     (imageMessage ? "Imagem recebida" : null) ??
-    (audioMessage ? "Audio recebido" : null) ??
+    (audioMessage ? "Áudio recebido" : null) ??
     getString(videoMessage, "caption") ??
-    (videoMessage ? "Video recebido" : null) ??
+    (videoMessage ? "Vídeo recebido" : null) ??
     getString(documentMessage, "fileName") ??
     (documentMessage ? "Documento recebido" : null) ??
     (stickerMessage ? "Sticker recebido" : null) ??
@@ -427,7 +435,7 @@ async function resolveWebhookOwner() {
 
   for (const table of ["leads", "message_templates", "interactions"]) {
     const { data } = await supabase.from(table).select("user_id,organization_id").limit(1).maybeSingle();
-    const row = data as { user_id?: string; organization_id?: string | null } | null;
+    const row = data as { user_id: string; organization_id: string | null } | null;
     if (row?.user_id) return { userId: row.user_id, organizationId: row.organization_id ?? null };
   }
 
@@ -449,7 +457,7 @@ async function findLeadByWhatsAppPhone(phoneNumber: string) {
     .order("created_at", { ascending: false })
     .limit(1);
 
-  const exactLead = (data?.[0] as { id: string; user_id: string; organization_id?: string | null } | undefined) ?? null;
+  const exactLead = (data?.[0] as { id: string; user_id: string; organization_id: string | null } | undefined) ?? null;
   if (exactLead) return exactLead;
 
   const { data: fallbackData } = await supabase
@@ -469,7 +477,7 @@ async function findLeadByWhatsAppPhone(phoneNumber: string) {
     );
   });
 
-  return (fallbackLead as { id: string; user_id: string; organization_id?: string | null } | undefined) ?? null;
+  return (fallbackLead as { id: string; user_id: string; organization_id: string | null } | undefined) ?? null;
 }
 
 function getBrazilianPhoneCandidates(phoneNumber: string) {

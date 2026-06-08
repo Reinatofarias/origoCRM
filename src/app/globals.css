@@ -215,6 +215,7 @@ body {
 .crm-theme-light .crm-content :is(section, article, div).rounded-xl,
 .crm-theme-light .crm-content :is(section, article, div).rounded-2xl {
   border-color: rgba(39, 33, 52, 0.12);
+  box-shadow: 0 10px 24px rgba(42, 32, 64, 0.055);
 }
 
 .crm-theme-light .crm-content [class*="bg-black/"],
@@ -292,4 +293,106 @@ body {
 
 .crm-theme-light .crm-content :is(.divide-white\/10 > :not([hidden]) ~ :not([hidden])) {
   border-color: rgba(39, 33, 52, 0.11) !important;
+}
+
+.crm-theme-light .crm-modal-surface {
+  background: rgba(15, 15, 22, 0.96) !important;
+  border-color: rgba(139, 92, 246, 0.32) !important;
+  color: #f8fafc !important;
+}
+
+.crm-theme-light .crm-modal-surface :is(h2, label, .text-white, .text-zinc-100, .text-zinc-200, .text-zinc-300) {
+  color: #f8fafc !important;
+}
+
+.crm-theme-light .crm-modal-surface :is(.text-zinc-400, .text-zinc-500, .text-zinc-600) {
+  color: #a1a1aa !important;
+}
+
+.crm-theme-light .crm-modal-surface :is(input, select, textarea) {
+  background: rgba(5, 5, 10, 0.78) !important;
+  border-color: rgba(255, 255, 255, 0.14) !important;
+  color: #f8fafc !important;
+}
+
+.crm-theme-light .crm-modal-surface :is(input, textarea)::placeholder {
+  color: #71717a !important;
+}
+
+.crm-theme-light .crm-modal-surface option {
+  background: #0f0f16;
+  color: #f8fafc;
+}
+
+.crm-conversations {
+  background:
+    radial-gradient(ellipse at 62% 6%, rgba(139, 92, 246, 0.08), transparent 34%),
+    #0b0b10;
+}
+
+.crm-conversations-list,
+.crm-conversations-detail,
+.crm-conversations-toolbar {
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.crm-conversations-chat {
+  background:
+    radial-gradient(ellipse at 50% 18%, rgba(139, 92, 246, 0.08), transparent 35%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.025), rgba(0, 0, 0, 0.08));
+}
+
+.crm-theme-light .crm-conversations {
+  background:
+    radial-gradient(ellipse at 18% 0%, rgba(139, 92, 246, 0.1), transparent 35%),
+    radial-gradient(ellipse at 92% 6%, rgba(37, 211, 102, 0.07), transparent 30%),
+    #f7f4ff;
+}
+
+.crm-theme-light .crm-conversations-list,
+.crm-theme-light .crm-conversations-detail,
+.crm-theme-light .crm-conversations-toolbar {
+  background: rgba(255, 255, 255, 0.9) !important;
+  border-color: rgba(39, 33, 52, 0.12) !important;
+}
+
+.crm-theme-light .crm-conversations-chat {
+  background:
+    radial-gradient(ellipse at 50% 12%, rgba(139, 92, 246, 0.08), transparent 32%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.68), rgba(247, 244, 255, 0.92)) !important;
+}
+
+.crm-theme-light .crm-conversations .border-white\/10 {
+  border-color: rgba(39, 33, 52, 0.12) !important;
+}
+
+.crm-theme-light .crm-conversations [class*="hover:bg-white/"]:hover {
+  background-color: rgba(139, 92, 246, 0.07) !important;
+}
+
+.crm-theme-light .crm-conversations [class*="bg-[#25D366]"] {
+  color: #052e16 !important;
+}
+
+.crm-theme-light .crm-pipeline-metric,
+.crm-theme-light .crm-pipeline-actions,
+.crm-theme-light .crm-pipeline-column {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.88), rgba(255, 255, 255, 0.74)) !important;
+  border-color: rgba(39, 33, 52, 0.1) !important;
+  box-shadow: 0 8px 22px rgba(42, 32, 64, 0.045) !important;
+}
+
+.crm-theme-light .crm-pipeline-column {
+  min-height: 28rem;
+}
+
+.crm-theme-light .crm-lead-card {
+  background: rgba(255, 255, 255, 0.92) !important;
+  border-color: rgba(39, 33, 52, 0.12) !important;
+  box-shadow: 0 8px 18px rgba(42, 32, 64, 0.055) !important;
+}
+
+.crm-theme-light .crm-lead-card:hover {
+  box-shadow: 0 12px 26px rgba(42, 32, 64, 0.08) !important;
 }

@@ -2,7 +2,7 @@ import { normalizePhone } from "@/lib/utils";
 
 export function openWhatsAppLink(phoneNumber: string, message: string): void {
   const normalizedPhone = normalizePhone(phoneNumber);
-  const whatsappLink = `https://wa.me/${normalizedPhone}?text=${encodeURIComponent(message)}`;
+  const whatsappLink = `https://wa.me/${normalizedPhone}text=${encodeURIComponent(message)}`;
 
   window.open(whatsappLink, "_blank", "noopener,noreferrer");
 }
@@ -23,7 +23,7 @@ export function validateEvolutionSetup(): {
   const errors: string[] = [];
 
   if (!isEvolutionConfigured()) {
-    errors.push("NEXT_PUBLIC_EVOLUTION_ENABLED precisa ser true para mostrar a integracao na UI");
+    errors.push("NEXT_PUBLIC_EVOLUTION_ENABLED precisa ser true para mostrar a integração na UI");
   }
 
   return {

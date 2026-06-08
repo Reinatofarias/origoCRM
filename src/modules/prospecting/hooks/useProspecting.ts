@@ -13,7 +13,7 @@ export function useProspecting() {
 
   const businesses = useMemo(
     () => searchBusinesses.data?.businesses ?? [],
-    [searchBusinesses.data?.businesses],
+    [searchBusinesses.data],
   );
   const isLoading = searchBusinesses.isPending || enrichCompany.isPending;
   const generatedApproach = enrichCompany.data && "approach" in enrichCompany.data ? enrichCompany.data.approach : "";

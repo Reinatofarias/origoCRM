@@ -3,15 +3,13 @@
 import { getAuthenticatedOrganizationContext, withOrganizationId } from "@/lib/server/auth";
 import type { AuditLogInput } from "@/lib/types";
 
-type ActionResult<T = unknown> = {
-  success: boolean;
-  data?: T;
-  error?: string;
-};
+type ActionResult<T = unknown> =
+  | { success: true; data: T }
+  | { success: false; error: string };
 
 export async function recordAuditLog(input: AuditLogInput) {
   const auth = await getAuthenticatedOrganizationContext();
-  if ("error" in auth) return { success: false, error: auth.error } satisfies ActionResult;
+  if ("error" in auth) return { success: false, error: auth.error ?? "Não autenticado" } satisfies ActionResult;
 
   const { data, error } = await auth.supabase
     .from("audit_logs")

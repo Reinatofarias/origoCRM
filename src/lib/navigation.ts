@@ -30,15 +30,15 @@ export const viewTitles: Record<View, string> = {
   leads: "Leads",
   templates: "Mensagens prontas",
   conversations: "Conversas",
-  whatsapp: "Conexao WhatsApp",
-  settings: "Configuracoes",
+  whatsapp: "Conexão WhatsApp",
+  settings: "Configurações",
 };
 
 export function getViewSubtitle(view: View) {
   if (view === "conversations") return "Mensagens salvas pelo webhook da Evolution.";
-  if (view === "tasks") return "Tarefas operacionais, comerciais e proximas acoes.";
+  if (view === "tasks") return "Tarefas operacionais, comerciais e próximas ações.";
   if (view === "pipeline") return "Funil comercial, leads e oportunidades em andamento.";
-  if (view === "whatsapp") return "Conecte a instancia OrigoCRM pelo QR Code.";
-  if (view === "settings") return "Status das conexoes e proximos ajustes do CRM.";
-  return "Cadencia continua: abrir, enviar, proximo.";
+  if (view === "whatsapp") return "Conecte a instância OrigoCRM pelo QR Code.";
+  if (view === "settings") return "Status das conexões e próximos ajustes do CRM.";
+  return "Cadência contínua: abrir, enviar, próximo.";
 }

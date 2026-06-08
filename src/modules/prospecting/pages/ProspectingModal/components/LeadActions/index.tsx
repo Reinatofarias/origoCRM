@@ -17,7 +17,7 @@ export function LeadActions({
   onGenerateApproach: () => void;
   onViewDetails: () => void;
 }) {
-  const phone = business.phone?.replace(/\D/g, "");
+  const phone = business.phone.replace(/\D/g, "");
 
   return (
     <div className="grid gap-2 sm:grid-cols-2">

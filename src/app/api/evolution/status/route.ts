@@ -5,38 +5,29 @@ import {
   getEvolutionInstanceEndpoint,
   getEvolutionServerConfig,
 } from "@/lib/server/evolution";
-import { createSupabaseServerClient } from "@/lib/server/supabase";
+import { getAuthenticatedOrganizationContext, requireServerPermission } from "@/lib/server/auth";
 
 export const dynamic = "force-dynamic";
 
 type EvolutionConnectionStateResponse = {
-  instance?: {
-    ownerJid?: string;
-    profileName?: string;
-    state?: string;
+  instance: {
+    ownerJid: string;
+    profileName: string;
+    state: string;
   };
-  ownerJid?: string;
-  profileName?: string;
-  number?: string;
-  state?: string;
+  ownerJid: string;
+  profileName: string;
+  number: string;
+  state: string;
 };
 
-async function requireUser() {
-  const supabase = await createSupabaseServerClient();
-  if (!supabase) return null;
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  return user ?? null;
-}
-
 export async function GET() {
-  const user = await requireUser();
-  if (!user) {
-    return NextResponse.json({ configured: false, error: "Nao autenticado" }, { status: 401 });
+  const auth = await getAuthenticatedOrganizationContext();
+  if ("error" in auth) {
+    return NextResponse.json({ configured: false, error: "Não autenticado" }, { status: 401 });
   }
+  const permissionError = requireServerPermission(auth, "settings:manage");
+  if (permissionError) return NextResponse.json({ configured: true, connected: false, state: "forbidden", error: permissionError }, { status: 403 });
 
   const config = getEvolutionServerConfig();
   const endpoint = getEvolutionInstanceEndpoint("/instance/connectionState");
@@ -51,7 +42,7 @@ export async function GET() {
 
   const response = await callEvolutionApi<EvolutionConnectionStateResponse>(
     endpoint,
-    undefined,
+    {},
     "GET",
   );
 
@@ -62,13 +53,13 @@ export async function GET() {
         connected: false,
         instanceName: config.instanceName?.trim() ?? "",
         state: "error",
-        error: response.error ?? "Nao foi possivel consultar a Evolution",
+        error: response.error ?? "Não foi possível consultar a Evolution",
       },
       { status: response.status >= 400 ? response.status : 502 },
     );
   }
 
-  const state = (response.data.instance?.state ?? response.data.state ?? "unknown")
+  const state = (response.data.instance.state ?? response.data.state ?? "unknown")
     .trim()
     .toLowerCase();
 
@@ -77,14 +68,14 @@ export async function GET() {
     connected: ["open", "connected"].includes(state),
     instanceName: config.instanceName?.trim() ?? "",
     phoneNumber: normalizeOwnerPhone(
-      response.data.instance?.ownerJid ?? response.data.ownerJid ?? response.data.number,
+      response.data.instance.ownerJid ?? response.data.ownerJid ?? response.data.number,
     ),
-    profileName: response.data.instance?.profileName ?? response.data.profileName ?? null,
+    profileName: response.data.instance.profileName ?? response.data.profileName ?? null,
     state,
   });
 }
 
-function normalizeOwnerPhone(value?: string) {
+function normalizeOwnerPhone(value: string) {
   if (!value) return null;
-  return value.split("@")[0]?.replace(/\D/g, "") || null;
+  return value.split("@")[0].replace(/\D/g, "") || null;
 }
