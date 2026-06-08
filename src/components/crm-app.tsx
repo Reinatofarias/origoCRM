@@ -36,7 +36,7 @@ import {
 } from "lucide-react";
 import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
-import { FormEvent, KeyboardEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { FormEvent, KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { recordAuditLog as recordAuditLogAction } from "@/actions/audit";
 import {
@@ -303,6 +303,7 @@ type AuditLogInput = {
   metadata?: Record<string, unknown>;
 };
 type LeadCreateTab = "summary" | "commercial" | "tasks" | "contact" | "history";
+type ConversationRealtimeStatus = "connecting" | "connected" | "fallback" | "disabled";
 
 export function CrmApp({
   initialView = "dashboard",
@@ -3211,6 +3212,44 @@ function Conversations({
   const [actionError, setActionError] = useState("");
   const [leadModalOpen, setLeadModalOpen] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(false);
+  const [realtimeStatus, setRealtimeStatus] = useState<ConversationRealtimeStatus>(supabase ? "connecting" : "disabled");
+  const selectedPhoneRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    selectedPhoneRef.current = selectedPhone;
+  }, [selectedPhone]);
+
+  const refreshConversationInbox = useCallback(
+    async ({ silent = false }: { silent?: boolean } = {}) => {
+      if (!supabase) {
+        setLoading(false);
+        return;
+      }
+
+      if (!silent) setLoading(true);
+
+      const messageQuery = organizationId
+        ? supabase.from("whatsapp_messages").select("*").eq("organization_id", organizationId)
+        : supabase.from("whatsapp_messages").select("*");
+      const conversationQuery = organizationId
+        ? supabase.from("whatsapp_conversations").select("*").eq("organization_id", organizationId)
+        : supabase.from("whatsapp_conversations").select("*");
+
+      const [messageResult, conversationResult] = await Promise.all([
+        messageQuery.order("created_at", { ascending: true }),
+        conversationQuery.order("updated_at", { ascending: false }),
+      ]);
+
+      if (!messageResult.error) {
+        setMessages((messageResult.data as WhatsAppMessage[] | null) ?? []);
+      }
+      if (!conversationResult.error) {
+        setStoredConversations((conversationResult.data as WhatsAppConversation[] | null) ?? []);
+      }
+      setLoading(false);
+    },
+    [organizationId, supabase],
+  );
 
   useEffect(() => {
     if (!supabase) {
@@ -3219,35 +3258,25 @@ function Conversations({
 
     let mounted = true;
 
-    const messageQuery = organizationId
-      ? supabase.from("whatsapp_messages").select("*").eq("organization_id", organizationId)
-      : supabase.from("whatsapp_messages").select("*");
-    const conversationQuery = organizationId
-      ? supabase.from("whatsapp_conversations").select("*").eq("organization_id", organizationId)
-      : supabase.from("whatsapp_conversations").select("*");
+    queueMicrotask(() => {
+      if (mounted) void refreshConversationInbox();
+    });
 
-    Promise.all([
-      messageQuery.order("created_at", { ascending: true }),
-      conversationQuery.order("updated_at", { ascending: false }),
-    ]).then(([messageResult, conversationResult]) => {
-        if (!mounted) return;
-        setMessages((messageResult.data as WhatsAppMessage[] | null) ?? []);
-        setStoredConversations((conversationResult.data as WhatsAppConversation[] | null) ?? []);
-        setLoading(false);
-      });
+    const realtimeFilter = organizationId ? `organization_id=eq.${organizationId}` : undefined;
 
     const messageChannel = supabase
-      .channel("whatsapp-messages")
+      .channel(`whatsapp-messages:${organizationId ?? "all"}`)
       .on(
         "postgres_changes",
-        { event: "*", schema: "public", table: "whatsapp_messages" },
+        { event: "*", schema: "public", table: "whatsapp_messages", filter: realtimeFilter },
         (payload) => {
+          if (!mounted) return;
           const nextMessage = payload.new as WhatsAppMessage;
-          if (organizationId && nextMessage.organization_id !== organizationId) return;
+          if (payload.eventType !== "DELETE" && organizationId && nextMessage.organization_id !== organizationId) return;
           if (
             payload.eventType === "INSERT" &&
             nextMessage.direction === "inbound" &&
-            nextMessage.phone_number !== selectedPhone
+            nextMessage.phone_number !== selectedPhoneRef.current
           ) {
             setReadPhones((current) => {
               if (!current.has(nextMessage.phone_number)) return current;
@@ -3259,26 +3288,66 @@ function Conversations({
           setMessages((current) => applyMessageRealtimeEvent(current, payload));
         },
       )
-      .subscribe();
+      .subscribe((status) => {
+        if (!mounted) return;
+        if (status === "SUBSCRIBED") setRealtimeStatus("connected");
+        if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") {
+          setRealtimeStatus("fallback");
+        }
+      });
     const conversationChannel = supabase
-      .channel("whatsapp-conversations")
+      .channel(`whatsapp-conversations:${organizationId ?? "all"}`)
       .on(
         "postgres_changes",
-        { event: "*", schema: "public", table: "whatsapp_conversations" },
+        { event: "*", schema: "public", table: "whatsapp_conversations", filter: realtimeFilter },
         (payload) => {
+          if (!mounted) return;
           const nextConversation = payload.new as WhatsAppConversation;
-          if (organizationId && nextConversation.organization_id !== organizationId) return;
+          if (payload.eventType !== "DELETE" && organizationId && nextConversation.organization_id !== organizationId) return;
           setStoredConversations((current) => applyConversationRealtimeEvent(current, payload));
         },
       )
-      .subscribe();
+      .subscribe((status) => {
+        if (!mounted) return;
+        if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") {
+          setRealtimeStatus("fallback");
+        }
+      });
 
     return () => {
       mounted = false;
       supabase.removeChannel(messageChannel);
       supabase.removeChannel(conversationChannel);
     };
-  }, [organizationId, selectedPhone, supabase]);
+  }, [organizationId, refreshConversationInbox, supabase]);
+
+  useEffect(() => {
+    if (!supabase) return;
+
+    const interval = window.setInterval(() => {
+      if (realtimeStatus !== "connected") {
+        void refreshConversationInbox({ silent: true });
+      }
+    }, 15000);
+
+    const handleFocus = () => {
+      void refreshConversationInbox({ silent: true });
+    };
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        void refreshConversationInbox({ silent: true });
+      }
+    };
+
+    window.addEventListener("focus", handleFocus);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener("focus", handleFocus);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, [refreshConversationInbox, realtimeStatus, supabase]);
 
   const conversations = useMemo(() => {
     const grouped = new Map<string, WhatsAppMessage[]>();
@@ -3383,6 +3452,24 @@ function Conversations({
         null
       : null;
   const selectedConversationLead = selectedConversation?.activeLead ?? null;
+  const realtimeBadge = {
+    connected: {
+      className: "border-[#25D366]/30 bg-[#25D366]/10 text-[#25D366]",
+      label: "Tempo real ativo",
+    },
+    connecting: {
+      className: "border-[#F59E0B]/30 bg-[#F59E0B]/10 text-[#F59E0B]",
+      label: "Conectando tempo real",
+    },
+    fallback: {
+      className: "border-[#F59E0B]/30 bg-[#F59E0B]/10 text-[#F59E0B]",
+      label: "Sincronizando",
+    },
+    disabled: {
+      className: "border-white/10 bg-white/[0.04] text-zinc-500",
+      label: "Realtime indisponível",
+    },
+  }[realtimeStatus];
   const filteredTemplates = useMemo(() => {
     const search = templateQuery.trim().toLowerCase();
     if (!search) return templates;
@@ -3692,8 +3779,12 @@ function Conversations({
                   {conversationCounts.unread} não lidas de {conversations.length} conversas
                 </span>
               </div>
-              <span className="flex h-9 items-center rounded-full border border-[#25D366]/30 bg-[#25D366]/10 px-3 text-xs font-semibold text-[#25D366]">
-                Tempo real
+              <span className={`flex h-9 items-center gap-2 rounded-full border px-3 text-xs font-semibold ${realtimeBadge.className}`}>
+                {realtimeStatus === "connecting" && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                {realtimeStatus === "connected" && <Wifi className="h-3.5 w-3.5" />}
+                {realtimeStatus === "fallback" && <RefreshCw className="h-3.5 w-3.5" />}
+                {realtimeStatus === "disabled" && <WifiOff className="h-3.5 w-3.5" />}
+                {realtimeBadge.label}
               </span>
             </div>
             <div className="grid gap-2 lg:grid-cols-[minmax(260px,1fr)_auto] 2xl:min-w-[980px]">
