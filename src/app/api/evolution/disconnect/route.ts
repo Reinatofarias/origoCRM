@@ -7,7 +7,7 @@ import {
   getWhatsAppInstanceByOrganization,
   updateWhatsAppInstance,
 } from "@/lib/server/evolution";
-import { getAuthenticatedOrganizationContext, requireServerPermission, withOrganizationId } from "@/lib/server/auth";
+import { getAuthenticatedOrganizationContext, requireServerPermission, requireServerPlanFeature, withOrganizationId } from "@/lib/server/auth";
 import { enforceRateLimit, rateLimitJson } from "@/lib/server/security";
 
 export const dynamic = "force-dynamic";
@@ -20,6 +20,9 @@ export async function DELETE(request: Request) {
 
   const permissionError = requireServerPermission(auth, "whatsapp:manage");
   if (permissionError) return NextResponse.json({ configured: true, disconnected: false, error: permissionError }, { status: 403 });
+
+  const planError = await requireServerPlanFeature(auth, "conversations");
+  if (planError) return NextResponse.json({ configured: true, disconnected: false, error: planError }, { status: 402 });
 
   const rateLimit = await enforceRateLimit({
     request,

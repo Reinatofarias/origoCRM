@@ -6,7 +6,7 @@ import {
   getEvolutionInstanceEndpointForName,
   getEvolutionServerConfig,
 } from "@/lib/server/evolution";
-import { getAuthenticatedOrganizationContext, requireServerPermission } from "@/lib/server/auth";
+import { getAuthenticatedOrganizationContext, requireServerPermission, requireServerPlanFeature } from "@/lib/server/auth";
 import { enforceRateLimit, rateLimitJson } from "@/lib/server/security";
 
 export const dynamic = "force-dynamic";
@@ -37,6 +37,9 @@ export async function GET(request: Request) {
 
   const permissionError = requireServerPermission(auth, "whatsapp:manage");
   if (permissionError) return NextResponse.json({ configured: true, error: permissionError }, { status: 403 });
+
+  const planError = await requireServerPlanFeature(auth, "conversations");
+  if (planError) return NextResponse.json({ configured: true, error: planError }, { status: 402 });
 
   const rateLimit = await enforceRateLimit({
     request,

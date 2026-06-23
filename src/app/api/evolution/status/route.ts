@@ -7,7 +7,7 @@ import {
   getEvolutionServerConfig,
   updateWhatsAppInstance,
 } from "@/lib/server/evolution";
-import { getAuthenticatedOrganizationContext, requireServerPermission } from "@/lib/server/auth";
+import { getAuthenticatedOrganizationContext, requireServerPermission, requireServerPlanFeature } from "@/lib/server/auth";
 
 export const dynamic = "force-dynamic";
 
@@ -32,6 +32,11 @@ export async function GET() {
   const permissionError = requireServerPermission(auth, "settings:manage");
   if (permissionError) {
     return NextResponse.json({ configured: true, connected: false, state: "forbidden", error: permissionError }, { status: 403 });
+  }
+
+  const planError = await requireServerPlanFeature(auth, "conversations");
+  if (planError) {
+    return NextResponse.json({ configured: true, connected: false, state: "plan_blocked", error: planError }, { status: 402 });
   }
 
   const config = getEvolutionServerConfig();

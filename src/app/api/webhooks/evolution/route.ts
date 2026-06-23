@@ -5,6 +5,7 @@ import {
   getWhatsAppInstanceByName,
   logWhatsAppEvent,
   recordIncomingWhatsAppMessage,
+  updateWhatsAppInstance,
   updateStoredWhatsAppMessageStatus,
   validateEvolutionWebhook,
 } from "@/lib/server/evolution";
@@ -69,10 +70,14 @@ async function handleWebhookEvent(
     case "messages.update":
       await handleMessageUpdate(data);
       break;
-    case "messages.delete":
     case "connection.update":
+      await handleConnectionUpdate(data, instanceName);
+      break;
     case "qr.update":
     case "qrcode.updated":
+      await handleQrUpdate(instanceName);
+      break;
+    case "messages.delete":
     case "presence.update":
       break;
     default:
@@ -80,6 +85,49 @@ async function handleWebhookEvent(
   }
 
   await logWhatsAppEvent(normalizedEvent, { data, instanceName }, null, instance?.organization_id ?? null, instance?.id ?? null);
+}
+
+async function handleConnectionUpdate(data: unknown, instanceName: string | null) {
+  if (!instanceName) return;
+
+  const item = extractWebhookItems<unknown>(data)[0] ?? data;
+  const record = asRecord(item) ?? {};
+  const nestedInstance = asRecord(record.instance) ?? {};
+  const state = normalizeConnectionState(
+    getString(nestedInstance, "state") ??
+      getString(record, "state") ??
+      getString(record, "status") ??
+      getString(record, "connection") ??
+      "unknown",
+  );
+  const ownerJid =
+    getString(nestedInstance, "ownerJid") ??
+    getString(record, "ownerJid") ??
+    getString(record, "number") ??
+    "";
+  const profileName = getString(nestedInstance, "profileName") ?? getString(record, "profileName");
+  const connected = state === "connected";
+  const now = new Date().toISOString();
+  const patch = {
+    status: state,
+    phone_number: normalizeOwnerPhone(ownerJid),
+    profile_name: profileName,
+    last_error: null,
+    last_webhook_at: now,
+    ...(connected ? { connected_at: now } : {}),
+    ...(state === "disconnected" ? { disconnected_at: now } : {}),
+  };
+
+  await updateWhatsAppInstance(instanceName, patch);
+}
+
+async function handleQrUpdate(instanceName: string | null) {
+  if (!instanceName) return;
+  await updateWhatsAppInstance(instanceName, {
+    status: "connecting",
+    last_error: null,
+    last_webhook_at: new Date().toISOString(),
+  });
 }
 
 function normalizeWebhookEvent(eventType: string) {
@@ -124,6 +172,29 @@ function normalizeMessageUpdateStatus(status: unknown): "sent" | "delivered" | "
   if (normalized.includes("delivery") || normalized.includes("delivered")) return "delivered";
   if (normalized.includes("fail") || normalized.includes("error")) return "failed";
   return "sent";
+}
+
+function normalizeConnectionState(value: string) {
+  const normalized = value.trim().toLowerCase();
+  if (["open", "connected"].includes(normalized)) return "connected";
+  if (["close", "closed", "disconnected", "logout", "logged_out"].includes(normalized)) return "disconnected";
+  if (["connecting", "qrcode", "qr", "pairing"].includes(normalized)) return "connecting";
+  if (["created", "error", "deleted"].includes(normalized)) return normalized;
+  return "created";
+}
+
+function normalizeOwnerPhone(value: string) {
+  if (!value) return null;
+  return value.split("@")[0].replace(/\D/g, "") || null;
+}
+
+function asRecord(value: unknown) {
+  return value && typeof value === "object" ? (value as Record<string, unknown>) : null;
+}
+
+function getString(record: Record<string, unknown> | null | undefined, key: string) {
+  const value = record?.[key];
+  return typeof value === "string" && value.trim() ? value : null;
 }
 
 function extractWebhookItems<T>(data: unknown): T[] {
