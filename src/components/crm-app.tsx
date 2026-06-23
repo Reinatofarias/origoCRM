@@ -3357,6 +3357,7 @@ function Conversations({
   const [leadModalOpen, setLeadModalOpen] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [realtimeStatus, setRealtimeStatus] = useState<ConversationRealtimeStatus>(supabase ? "connecting" : "disabled");
+  const [realtimeRetryKey, setRealtimeRetryKey] = useState(0);
   const selectedPhoneRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -3406,6 +3407,19 @@ function Conversations({
       if (mounted) void refreshConversationInbox();
     });
 
+    let reconnectTimer: number | null = null;
+    const scheduleRealtimeReconnect = () => {
+      if (reconnectTimer || !mounted) return;
+      reconnectTimer = window.setTimeout(() => {
+        reconnectTimer = null;
+        if (mounted) setRealtimeRetryKey((current) => current + 1);
+      }, 5000);
+    };
+
+    const connectingTimer = window.setTimeout(() => {
+      if (mounted) setRealtimeStatus("connecting");
+    }, 0);
+
     const realtimeFilter = organizationId ? `organization_id=eq.${organizationId}` : undefined;
 
     const messageChannel = supabase
@@ -3437,6 +3451,7 @@ function Conversations({
         if (status === "SUBSCRIBED") setRealtimeStatus("connected");
         if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") {
           setRealtimeStatus("fallback");
+          scheduleRealtimeReconnect();
         }
       });
     const conversationChannel = supabase
@@ -3455,15 +3470,18 @@ function Conversations({
         if (!mounted) return;
         if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") {
           setRealtimeStatus("fallback");
+          scheduleRealtimeReconnect();
         }
       });
 
     return () => {
       mounted = false;
+      window.clearTimeout(connectingTimer);
+      if (reconnectTimer) window.clearTimeout(reconnectTimer);
       supabase.removeChannel(messageChannel);
       supabase.removeChannel(conversationChannel);
     };
-  }, [organizationId, refreshConversationInbox, supabase]);
+  }, [organizationId, realtimeRetryKey, refreshConversationInbox, supabase]);
 
   useEffect(() => {
     if (!supabase) return;
