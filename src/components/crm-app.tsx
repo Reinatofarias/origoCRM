@@ -35,7 +35,7 @@ import {
   WifiOff,
 } from "lucide-react";
 import Image from "next/image";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { FormEvent, KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { recordAuditLog as recordAuditLogAction } from "@/actions/audit";
@@ -374,6 +374,8 @@ function Workspace({
   const supabase = useMemo(() => createSupabaseClient(), []);
   const router = useRouter();
   const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const checkoutSuccess = searchParams.get("checkout") === "success";
   const routedView = pathViews[pathname] ?? initialView;
   const view =
     routedView === "whatsapp" || routedView === "templates"
@@ -405,6 +407,9 @@ function Workspace({
   const [toast, setToast] = useState<Toast | null>(null);
   const [crmTheme, setCrmTheme] = useState<CrmTheme>(() => readCrmTheme());
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [onboardingDismissed, setOnboardingDismissed] = useState(() =>
+    typeof window !== "undefined" ? window.localStorage.getItem("origocrm:onboarding-dismissed") === "true" : false,
+  );
   const [crmViewMode, setCrmViewMode] = useState<CrmViewMode>(() => (routedView === "leads" ? "list" : "kanban"));
   const [recentLeadId, setRecentLeadId] = useState<string | null>(null);
   const [remoteLeads, setRemoteLeads] = useState<Lead[]>([]);
@@ -578,6 +583,10 @@ function Workspace({
     window.localStorage.setItem("origocrm:theme", crmTheme);
   }, [crmTheme]);
 
+  useEffect(() => {
+    window.localStorage.setItem("origocrm:onboarding-dismissed", onboardingDismissed ? "true" : "false");
+  }, [onboardingDismissed]);
+
   const showLeadHeaderControls = view === "pipeline";
 
   const filteredLeads = useMemo(() => {
@@ -597,6 +606,56 @@ function Workspace({
   }, [dateFilter, leads, query, showLeadHeaderControls, statusFilter, tagFilter, tagsByLeadId, temperatureFilter]);
 
   const selectedLead = leads.find((lead) => lead.id === selectedLeadId) ?? null;
+  const onboardingSteps = [
+    {
+      id: "whatsapp",
+      title: "Conectar WhatsApp",
+      description: "Gere o QR Code da organização para receber e responder conversas.",
+      done: whatsappMessages.length > 0 || whatsappLogs.some((log) => log.status === "success"),
+      action: () => navigateView("whatsapp"),
+      actionLabel: "Conectar",
+    },
+    {
+      id: "lead",
+      title: "Criar primeiro lead",
+      description: "Cadastre uma oportunidade manual ou salve uma conversa como lead.",
+      done: leads.length > 0,
+      action: () => setLeadFormOpen(true),
+      actionLabel: "Novo lead",
+    },
+    {
+      id: "template",
+      title: "Criar mensagem pronta",
+      description: "Padronize a primeira abordagem para ganhar velocidade comercial.",
+      done: templates.length > 0,
+      action: () => navigateView("templates"),
+      actionLabel: "Criar template",
+    },
+    {
+      id: "task",
+      title: "Registrar uma tarefa",
+      description: "Centralize follow-ups e tarefas operacionais da rotina.",
+      done: tasks.length > 0,
+      action: () => navigateView("tasks"),
+      actionLabel: "Abrir tarefas",
+    },
+    ...(canUseProspecting
+      ? [
+          {
+            id: "prospecting",
+            title: "Buscar empresas",
+            description: "Use a prospecção para capturar contatos e iniciar campanhas.",
+            done: false,
+            action: () => setProspectingOpen(true),
+            actionLabel: "Prospectar",
+          },
+        ]
+      : []),
+  ];
+  const shouldShowOnboarding =
+    view === "dashboard" &&
+    !onboardingDismissed &&
+    (checkoutSuccess || onboardingSteps.some((step) => !step.done));
   const selectedPipelineLeads = filteredLeads.filter((lead) => selectedPipelineLeadIds.has(lead.id));
   const visiblePipelineStages = useMemo(() => {
     const stageIds = new Set(pipelineStages.map((stage) => stage.id));
@@ -1737,6 +1796,13 @@ function Workspace({
               </div>
             ) : (
               <>
+                {shouldShowOnboarding && (
+                  <OnboardingPanel
+                    checkoutSuccess={checkoutSuccess}
+                    steps={onboardingSteps}
+                    onDismiss={() => setOnboardingDismissed(true)}
+                  />
+                )}
                 {view === "dashboard" && (
                   <Dashboard
                     columns={visiblePipelineStages}
@@ -1966,6 +2032,80 @@ function Workspace({
         />
       )}
     </main>
+  );
+}
+
+function OnboardingPanel({
+  checkoutSuccess,
+  steps,
+  onDismiss,
+}: {
+  checkoutSuccess: boolean;
+  steps: Array<{
+    id: string;
+    title: string;
+    description: string;
+    done: boolean;
+    action: () => void;
+    actionLabel: string;
+  }>;
+  onDismiss: () => void;
+}) {
+  const completed = steps.filter((step) => step.done).length;
+
+  return (
+    <section className="mb-5 overflow-hidden rounded-2xl border border-[#8B5CF6]/25 bg-[linear-gradient(135deg,rgba(139,92,246,0.16),rgba(37,211,102,0.06),rgba(255,255,255,0.03))] shadow-2xl shadow-[#8B5CF6]/10">
+      <div className="flex flex-col gap-4 border-b border-white/10 p-5 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-[#A78BFA]">
+            <Sparkles className="h-4 w-4" />
+            Primeiros passos
+          </div>
+          <h2 className="mt-2 text-xl font-semibold text-white">
+            {checkoutSuccess ? "Pagamento confirmado. Configure sua operação." : "Configure o essencial para começar a vender."}
+          </h2>
+          <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-400">
+            Conecte o WhatsApp, organize o CRM e deixe a rotina pronta para responder leads, criar tarefas e acompanhar conversas.
+          </p>
+        </div>
+        <div className="flex items-center gap-3">
+          <span className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-xs text-zinc-300">
+            {completed}/{steps.length} concluídos
+          </span>
+          <button
+            className="rounded-xl border border-white/10 px-3 py-2 text-xs text-zinc-400 transition hover:bg-white/[0.06] hover:text-white"
+            onClick={onDismiss}
+            type="button"
+          >
+            Dispensar
+          </button>
+        </div>
+      </div>
+      <div className="grid gap-3 p-5 md:grid-cols-2 xl:grid-cols-5">
+        {steps.map((step) => (
+          <div key={step.id} className="rounded-xl border border-white/10 bg-black/20 p-4">
+            <div className="flex items-center justify-between gap-3">
+              <span className={`flex h-8 w-8 items-center justify-center rounded-full border ${step.done ? "border-[#25D366]/30 bg-[#25D366]/10 text-[#25D366]" : "border-[#8B5CF6]/30 bg-[#8B5CF6]/10 text-[#A78BFA]"}`}>
+                <Check className="h-4 w-4" />
+              </span>
+              <span className={`rounded-full px-2 py-1 text-[11px] font-semibold ${step.done ? "bg-[#25D366]/10 text-[#25D366]" : "bg-white/[0.06] text-zinc-400"}`}>
+                {step.done ? "Pronto" : "Pendente"}
+              </span>
+            </div>
+            <h3 className="mt-3 text-sm font-semibold text-white">{step.title}</h3>
+            <p className="mt-2 min-h-12 text-xs leading-5 text-zinc-500">{step.description}</p>
+            <button
+              className="mt-4 h-9 w-full rounded-lg border border-white/10 px-3 text-xs font-semibold text-zinc-200 transition hover:border-[#8B5CF6]/40 hover:bg-[#8B5CF6]/10 disabled:cursor-not-allowed disabled:opacity-50"
+              disabled={step.done}
+              onClick={step.action}
+              type="button"
+            >
+              {step.done ? "Concluído" : step.actionLabel}
+            </button>
+          </div>
+        ))}
+      </div>
+    </section>
   );
 }
 
