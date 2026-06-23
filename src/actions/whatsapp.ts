@@ -477,7 +477,7 @@ export async function updateWhatsAppConversationStatus(
       unread_count: status === "unread" ? 1 : 0,
       last_read_at: status === "unread" ? null : new Date().toISOString(),
       updated_at: new Date().toISOString(),
-    }, auth.organizationId), { onConflict: "user_id,phone_number" });
+    }, auth.organizationId), { onConflict: auth.organizationId ? "organization_id,phone_number" : "user_id,phone_number" });
 
   if (error) {
       const message = error.message.includes("whatsapp_conversations_status_check")

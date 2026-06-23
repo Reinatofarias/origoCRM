@@ -4,6 +4,7 @@ import crypto from "node:crypto";
 import { createSupabaseServiceRoleClient } from "@/lib/server/supabase";
 import { isPayloadTooLarge } from "@/lib/server/security";
 import { getAppUrl, getStripeClient } from "@/lib/server/stripe";
+import { ensureWhatsAppInstanceForOrganization } from "@/lib/server/evolution";
 import type { BillingPeriod, PlanSlug } from "@/lib/plans";
 
 type StripeSubscriptionWithPeriods = Stripe.Subscription & {
@@ -130,6 +131,12 @@ async function ensurePublicCheckoutOrganization(
       source: "public_checkout",
     },
   });
+
+  try {
+    await ensureWhatsAppInstanceForOrganization({ organizationId, userId });
+  } catch {
+    // WhatsApp provisioning must not block paid access. Settings can retry QR/status later.
+  }
 
   return { organizationId, userId };
 }

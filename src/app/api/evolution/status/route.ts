@@ -2,9 +2,9 @@ import { NextResponse } from "next/server";
 
 import {
   callEvolutionApi,
+  ensureWhatsAppInstanceForOrganization,
   getEvolutionInstanceEndpointForName,
   getEvolutionServerConfig,
-  getWhatsAppInstanceByOrganization,
   updateWhatsAppInstance,
 } from "@/lib/server/evolution";
 import { getAuthenticatedOrganizationContext, requireServerPermission } from "@/lib/server/auth";
@@ -43,7 +43,10 @@ export async function GET() {
     });
   }
 
-  const { instance, error: instanceError } = await getWhatsAppInstanceByOrganization(auth.organizationId);
+  const { instance, error: instanceError } = await ensureWhatsAppInstanceForOrganization({
+    organizationId: auth.organizationId,
+    userId: auth.user.id,
+  });
   if (!instance) {
     return NextResponse.json({
       configured: true,
