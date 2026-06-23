@@ -21,6 +21,11 @@ export type PlanDefinition = {
   monthlyPrice: number;
   prices: Record<BillingPeriod, number>;
   includedSeats: number;
+  limits: {
+    whatsappInstances: number;
+    prospectingSearchLimit: number;
+    campaignBatchLimit: number;
+  };
   features: PlanFeature[];
   highlights: string[];
   featured?: boolean;
@@ -70,7 +75,7 @@ export const plans: PlanDefinition[] = [
   {
     slug: "base",
     name: "Origo Start",
-    description: "CRM essencial para organizar leads, tarefas e follow-ups.",
+    description: "CRM essencial com funil, tarefas e WhatsApp conectado.",
     monthlyPrice: 6700,
     prices: {
       monthly: 6700,
@@ -78,13 +83,18 @@ export const plans: PlanDefinition[] = [
       annual: 4700,
     },
     includedSeats: 1,
-    features: ["crm", "tasks", "templates"],
-    highlights: ["Funil comercial", "Lead 360", "Tarefas do dia", "Mensagens prontas"],
+    limits: {
+      whatsappInstances: 1,
+      prospectingSearchLimit: 0,
+      campaignBatchLimit: 0,
+    },
+    features: ["crm", "conversations", "tasks", "templates"],
+    highlights: ["Funil comercial", "Lead 360", "WhatsApp conectado", "Tarefas do dia"],
   },
   {
     slug: "pro",
     name: "Origo Pro",
-    description: "WhatsApp, agenda e indicadores para operar vendas com rotina.",
+    description: "WhatsApp, agenda, prospecção e campanhas para operar vendas.",
     monthlyPrice: 9700,
     prices: {
       monthly: 9700,
@@ -92,8 +102,13 @@ export const plans: PlanDefinition[] = [
       annual: 6700,
     },
     includedSeats: 1,
-    features: ["crm", "conversations", "tasks", "templates", "googleCalendar", "advancedDashboard"],
-    highlights: ["Inbox WhatsApp", "Google Calendar", "Dashboard executivo", "Auditoria operacional"],
+    limits: {
+      whatsappInstances: 1,
+      prospectingSearchLimit: 60,
+      campaignBatchLimit: 20,
+    },
+    features: ["crm", "conversations", "tasks", "templates", "prospecting", "campaigns", "googleCalendar", "advancedDashboard"],
+    highlights: ["Inbox WhatsApp", "Prospecção Google", "Campanhas WhatsApp", "Google Calendar"],
   },
   {
     slug: "prospecting",
@@ -106,8 +121,13 @@ export const plans: PlanDefinition[] = [
       annual: 9700,
     },
     includedSeats: 1,
+    limits: {
+      whatsappInstances: 1,
+      prospectingSearchLimit: 120,
+      campaignBatchLimit: 50,
+    },
     features: ["crm", "conversations", "tasks", "templates", "prospecting", "campaigns", "googleCalendar", "advancedDashboard"],
-    highlights: ["Prospecção Google", "Campanhas WhatsApp", "Validação de contatos", "Tags comerciais"],
+    highlights: ["Limites maiores", "Prospecção Google", "Campanhas WhatsApp", "Validação de contatos"],
     featured: true,
   },
 ];
@@ -151,4 +171,16 @@ export function getPlanUserLimit(planSlug: PlanSlug | null | undefined, seatCoun
   if (planSlug === "manual") return 999;
   const paidSeats = Number.isFinite(Number(seatCount)) ? Number(seatCount) : null;
   return Math.max(1, paidSeats ?? getPlan(planSlug ?? "base")?.includedSeats ?? 1);
+}
+
+export function getPlanLimits(planSlug: PlanSlug | null | undefined) {
+  if (planSlug === "manual") {
+    return {
+      whatsappInstances: 99,
+      prospectingSearchLimit: 500,
+      campaignBatchLimit: 200,
+    };
+  }
+
+  return getPlan(planSlug ?? "base")?.limits ?? plans[0].limits;
 }

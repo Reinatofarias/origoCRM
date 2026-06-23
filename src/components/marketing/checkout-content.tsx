@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { ArrowRight, Check, CreditCard, MessageCircle, ShieldCheck } from "lucide-react";
 import Image from "next/image";
@@ -45,13 +45,13 @@ export function CheckoutContent({
       const data = (await response.json()) as { url?: string; error?: string };
 
       if (!response.ok || !data.url) {
-        setCheckoutError(data.error ?? "NÃ£o foi possÃ­vel iniciar o pagamento.");
+        setCheckoutError(data.error ?? "Não foi possível iniciar o pagamento.");
         return;
       }
 
       window.location.assign(data.url);
     } catch {
-      setCheckoutError("NÃ£o foi possÃ­vel iniciar o pagamento.");
+      setCheckoutError("Não foi possível iniciar o pagamento.");
     } finally {
       setLoadingPlan(null);
     }
@@ -79,12 +79,12 @@ export function CheckoutContent({
                 <CreditCard className="h-3.5 w-3.5" />
                 Escolha seu plano
               </div>
-              <h1 className="mt-5 text-4xl font-semibold tracking-[-0.02em]">Escolha o plano ideal para sua operaÃ§Ã£o.</h1>
+              <h1 className="mt-5 text-4xl font-semibold tracking-[-0.02em]">Escolha o plano ideal para sua operação.</h1>
               <p className="mt-4 text-base leading-7 text-zinc-400">
-                Comece com o essencial para organizar seus leads e avance para WhatsApp, agenda, prospecÃ§Ã£o e campanhas conforme sua operaÃ§Ã£o crescer.
+                Comece organizando seus leads e evolua para WhatsApp, agenda, prospecção e campanhas conforme sua operação crescer.
               </p>
               <div className="mt-6 rounded-xl border border-white/10 bg-black/25 p-3">
-                <div className="text-sm font-semibold text-white">PerÃ­odo de contrataÃ§Ã£o</div>
+                <div className="text-sm font-semibold text-white">Período de contratação</div>
                 <div className="mt-3 grid gap-2 sm:grid-cols-3">
                   {billingPeriods.map((period) => (
                     <button
@@ -99,7 +99,7 @@ export function CheckoutContent({
                 </div>
               </div>
               <div className="mt-6 space-y-3">
-                {["Escolha o plano mais adequado", "Confirme mensal, semestral ou anual", "FaÃ§a o pagamento com seguranÃ§a", "Receba seu acesso apÃ³s a confirmaÃ§Ã£o"].map((step, index) => (
+                {["Escolha o plano", "Confirme o período", "Pague com segurança", "Receba seu acesso"].map((step, index) => (
                   <div className="reveal-up flex items-center gap-3 rounded-lg border border-white/10 bg-white/[0.035] p-3 text-sm text-zinc-300" key={step} style={{ "--delay": `${180 + index * 80}ms` } as CSSProperties}>
                     <Check className="h-4 w-4 text-[#25D366]" />
                     {step}
@@ -126,9 +126,9 @@ export function CheckoutContent({
                     <span className="absolute inset-x-0 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(139,92,246,0.6),transparent)] opacity-0 transition group-hover:opacity-100" />
                     <div>
                       <div className="font-semibold text-white">{plan.name}</div>
-                      <div className="mt-1 text-sm text-zinc-500">{formatCurrency(monthlyPrice)} / usuÃ¡rio / mÃªs</div>
+                      <div className="mt-1 text-sm text-zinc-500">{formatCurrency(monthlyPrice)} / usuário / mês</div>
                       <div className="mt-1 text-xs text-zinc-600">Total {billing.shortLabel}: {formatCurrency(total)}</div>
-                      {savings > 0 && <div className="mt-1 text-xs text-[#9AF0B8]">Economia de {formatCurrency(savings)} por usuÃ¡rio</div>}
+                      {savings > 0 && <div className="mt-1 text-xs text-[#9AF0B8]">Economia de {formatCurrency(savings)} por usuário</div>}
                     </div>
                     <ArrowRight className={`h-4 w-4 text-zinc-500 transition group-hover:text-white ${loadingPlan === plan.slug ? "animate-pulse" : ""}`} />
                   </button>
@@ -138,10 +138,10 @@ export function CheckoutContent({
               <div className="reveal-up mt-3 rounded-xl border border-[#25D366]/25 bg-[#25D366]/10 p-4 shadow-xl shadow-[#25D366]/10" style={{ "--delay": "560ms" } as CSSProperties}>
                 <div className="flex items-center gap-2 text-sm font-semibold text-[#9AF0B8]">
                   <MessageCircle className="h-4 w-4" />
-                  Como funciona a contrataÃ§Ã£o
+                  Próximo passo
                 </div>
                 <p className="mt-2 text-sm leading-6 text-zinc-300">
-                  Plano selecionado: <span className="font-semibold text-white">{selectedPlanName}</span> no perÃ­odo <span className="font-semibold text-white">{billing.label}</span>. Clique no card para pagar com segurança pelo Stripe.
+                  Plano selecionado: <span className="font-semibold text-white">{selectedPlanName}</span> no período <span className="font-semibold text-white">{billing.label}</span>. Clique no card para finalizar sua contratação.
                 </p>
               </div>
               {checkoutError && (
@@ -155,7 +155,7 @@ export function CheckoutContent({
 
         <div className="reveal-up mt-6 flex items-center gap-2 text-sm text-zinc-500" style={{ "--delay": "220ms" } as CSSProperties}>
           <ShieldCheck className="h-4 w-4 text-[#A78BFA]" />
-          Seu acesso Ã© individual e protegido para manter a operaÃ§Ã£o da equipe organizada.
+          Seu acesso é individual e protegido para manter sua operação organizada.
         </div>
       </div>
     </main>

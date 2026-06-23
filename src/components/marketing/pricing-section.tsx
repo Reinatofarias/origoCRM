@@ -15,7 +15,7 @@ export function PricingSection() {
       <div className="mt-8 flex flex-col gap-3 rounded-2xl border border-white/10 bg-white/[0.035] p-3 md:flex-row md:items-center md:justify-between">
         <div className="px-2">
           <div className="text-sm font-semibold text-white">Escolha a forma de contratação</div>
-          <p className="mt-1 text-sm text-zinc-500">Os valores abaixo sao por usuário, calculados por mes dentro do período escolhido.</p>
+          <p className="mt-1 text-sm text-zinc-500">Os valores abaixo são por usuário, calculados por mês dentro do período escolhido.</p>
         </div>
         <div className="grid gap-2 rounded-xl border border-white/10 bg-black/25 p-1 sm:grid-cols-3">
           {billingPeriods.map((item) => (

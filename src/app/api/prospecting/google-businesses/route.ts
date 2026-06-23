@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { getAuthenticatedOrganizationContext, requireServerPermission, requireServerPlanFeature } from "@/lib/server/auth";
+import { getPlanLimits, type PlanSlug } from "@/lib/plans";
 import { enforceRateLimit, isPayloadTooLarge, rateLimitJson } from "@/lib/server/security";
 import type { ProspectBusiness, ProspectBusinessSignal, ProspectingSearchInput } from "@/modules/prospecting";
 
@@ -41,6 +42,17 @@ export async function POST(request: NextRequest) {
   if (permissionError) return NextResponse.json({ error: permissionError }, { status: 403 });
   const planError = await requireServerPlanFeature(auth, "prospecting");
   if (planError) return NextResponse.json({ error: planError }, { status: 402 });
+  const { data: subscription } = auth.organizationId
+    ? await auth.supabase
+        .from("subscriptions")
+        .select("plan_slug")
+        .eq("organization_id", auth.organizationId)
+        .maybeSingle()
+    : { data: { plan_slug: "manual" } };
+  const limits = getPlanLimits((subscription as { plan_slug?: PlanSlug } | null)?.plan_slug ?? "base");
+  if (limits.prospectingSearchLimit <= 0) {
+    return NextResponse.json({ error: "Seu plano atual não inclui prospecção." }, { status: 402 });
+  }
   const rateLimit = await enforceRateLimit({
     request,
     scope: "prospecting.search",
@@ -80,7 +92,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const limit = Math.min(Math.max(Number(body.limit ?? 20), 1), 60);
+  const limit = Math.min(Math.max(Number(body.limit ?? 20), 1), limits.prospectingSearchLimit);
   const firstSearch = await collectSerpApiPlaces({
     apiKey,
     endpoint,

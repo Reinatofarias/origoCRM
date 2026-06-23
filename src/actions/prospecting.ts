@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 
 import { getAuthenticatedOrganizationContext, requireServerPermission, requireServerPlanFeature, withOrganizationId } from "@/lib/server/auth";
+import { getPlanLimits, type PlanSlug } from "@/lib/plans";
 import type { ProspectingCampaignInput } from "@/lib/types";
 
 type ActionResult<T = unknown> =
@@ -16,6 +17,23 @@ export async function createProspectingCampaign(input: ProspectingCampaignInput)
   if (permissionError) return { success: false, error: permissionError } satisfies ActionResult;
   const planError = await requireServerPlanFeature(auth, "campaigns");
   if (planError) return { success: false, error: planError } satisfies ActionResult;
+  const { data: subscription } = auth.organizationId
+    ? await auth.supabase
+        .from("subscriptions")
+        .select("plan_slug")
+        .eq("organization_id", auth.organizationId)
+        .maybeSingle()
+    : { data: { plan_slug: "manual" } };
+  const limits = getPlanLimits((subscription as { plan_slug?: PlanSlug } | null)?.plan_slug ?? "base");
+  if (limits.campaignBatchLimit <= 0) {
+    return { success: false, error: "Seu plano atual não inclui campanhas." } satisfies ActionResult;
+  }
+  if (input.contacts.length > limits.campaignBatchLimit) {
+    return {
+      success: false,
+      error: `Seu plano permite até ${limits.campaignBatchLimit} contatos por campanha.`,
+    } satisfies ActionResult;
+  }
 
   const { data: campaign, error } = await auth.supabase
     .from("prospecting_campaigns")

@@ -10,7 +10,7 @@ export const billingPeriods: Array<{
   {
     key: "monthly",
     label: "Mensal",
-    shortLabel: "mes",
+    shortLabel: "mês",
     months: 1,
     note: "Flexibilidade mensal",
   },
@@ -34,37 +34,37 @@ export const pricingPlans = [
   {
     name: "Origo Start",
     slug: "base",
-    description: "Para organizar a operação comercial sem planilha.",
+    description: "Para organizar leads, tarefas e WhatsApp sem planilhas.",
     prices: {
       monthly: 67,
       semiannual: 57,
       annual: 47,
     },
-    features: ["CRM com funil comercial", "Visão completa do lead", "Tarefas e follow-ups", "Mensagens prontas", "Tags e segmentação"],
+    features: ["CRM com funil comercial", "Visão completa do lead", "WhatsApp conectado", "Tarefas e follow-ups", "Mensagens prontas"],
     highlight: false,
   },
   {
     name: "Origo Pro",
     slug: "pro",
-    description: "Para vender pelo WhatsApp com contexto e rotina.",
+    description: "Para prospectar, conversar e acompanhar oportunidades.",
     prices: {
       monthly: 97,
       semiannual: 82,
       annual: 67,
     },
-    features: ["Tudo do Start", "Conversas WhatsApp", "Agenda Google", "Painel de prioridades", "Controle de acesso da equipe"],
+    features: ["Tudo do Start", "Prospecção no Google", "Campanhas WhatsApp", "Agenda Google", "Painel de prioridades"],
     highlight: false,
   },
   {
     name: "Origo Growth",
     slug: "prospecting",
-    description: "Para prospectar empresas e transformar listas em conversas.",
+    description: "Para crescer com mais volume, campanhas e controle comercial.",
     prices: {
       monthly: 147,
       semiannual: 127,
       annual: 97,
     },
-    features: ["Tudo do Pro", "Prospecção no Google", "Campanhas WhatsApp", "Controle de envios", "Histórico de campanhas"],
+    features: ["Tudo do Pro", "Limites maiores de prospecção", "Mais contatos por campanha", "Controle de envios", "Histórico de campanhas"],
     highlight: true,
   },
 ];
