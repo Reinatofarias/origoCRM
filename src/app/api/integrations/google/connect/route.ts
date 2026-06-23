@@ -10,15 +10,15 @@ export async function GET(request: Request) {
   const appUrl = process.env.APP_URL || "https://origocrm.vercel.app";
 
   if ("error" in auth) {
-    return NextResponse.redirect(new URL(`/settingsgoogleCalendar=auth_error`, appUrl));
+    return NextResponse.redirect(new URL(`/settings?googleCalendar=auth_error`, appUrl));
   }
   const permissionError = requireServerPermission(auth, "task:manage");
   if (permissionError) {
-    return NextResponse.redirect(new URL(`/settingsgoogleCalendar=forbidden`, appUrl));
+    return NextResponse.redirect(new URL(`/settings?googleCalendar=forbidden`, appUrl));
   }
   const planError = await requireServerPlanFeature(auth, "googleCalendar");
   if (planError) {
-    return NextResponse.redirect(new URL(`/settingsgoogleCalendar=plan_required`, appUrl));
+    return NextResponse.redirect(new URL(`/settings?googleCalendar=plan_required`, appUrl));
   }
   const rateLimit = await enforceRateLimit({
     request,
@@ -28,14 +28,14 @@ export async function GET(request: Request) {
     windowSeconds: 60,
   });
   if (!rateLimit.allowed) {
-    return NextResponse.redirect(new URL(`/settingsgoogleCalendar=rate_limited`, appUrl));
+    return NextResponse.redirect(new URL(`/settings?googleCalendar=rate_limited`, appUrl));
   }
 
   const state = crypto.randomUUID();
   const authorizationUrl = buildGoogleCalendarAuthorizationUrl(state);
 
   if (!authorizationUrl) {
-    return NextResponse.redirect(new URL(`/settingsgoogleCalendar=missing_config`, appUrl));
+    return NextResponse.redirect(new URL(`/settings?googleCalendar=missing_config`, appUrl));
   }
 
   const cookieStore = await cookies();
