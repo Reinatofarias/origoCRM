@@ -2,8 +2,10 @@ import { NextResponse } from "next/server";
 
 import {
   callEvolutionApi,
-  getEvolutionInstanceEndpoint,
+  getEvolutionInstanceEndpointForName,
   getEvolutionServerConfig,
+  getWhatsAppInstanceByOrganization,
+  updateWhatsAppInstance,
 } from "@/lib/server/evolution";
 import { getAuthenticatedOrganizationContext, requireServerPermission, withOrganizationId } from "@/lib/server/auth";
 import { enforceRateLimit, rateLimitJson } from "@/lib/server/security";
@@ -15,8 +17,10 @@ export async function DELETE(request: Request) {
   if ("error" in auth) {
     return NextResponse.json({ configured: false, error: "Não autenticado" }, { status: 401 });
   }
+
   const permissionError = requireServerPermission(auth, "whatsapp:manage");
   if (permissionError) return NextResponse.json({ configured: true, disconnected: false, error: permissionError }, { status: 403 });
+
   const rateLimit = await enforceRateLimit({
     request,
     scope: "evolution.disconnect",
@@ -27,9 +31,7 @@ export async function DELETE(request: Request) {
   if (!rateLimit.allowed) return rateLimitJson(rateLimit);
 
   const config = getEvolutionServerConfig();
-  const endpoint = getEvolutionInstanceEndpoint("/instance/logout");
-
-  if (!config || !endpoint) {
+  if (!config || !auth.organizationId) {
     return NextResponse.json({
       configured: false,
       disconnected: false,
@@ -37,31 +39,50 @@ export async function DELETE(request: Request) {
     });
   }
 
-  const response = await callEvolutionApi<Record<string, unknown>>(endpoint, {}, "DELETE");
+  const { instance, error: instanceError } = await getWhatsAppInstanceByOrganization(auth.organizationId);
+  if (!instance) {
+    return NextResponse.json({
+      configured: true,
+      disconnected: false,
+      error: instanceError ?? "Instância WhatsApp não encontrada",
+    }, { status: 400 });
+  }
+
+  const endpoint = getEvolutionInstanceEndpointForName("/instance/logout", instance.instance_name);
+  const response = endpoint
+    ? await callEvolutionApi<Record<string, unknown>>(endpoint, {}, "DELETE")
+    : { status: 400, error: "Instância inválida" };
 
   if (response.error || response.status >= 400) {
+    await updateWhatsAppInstance(instance.instance_name, { status: "error", last_error: response.error ?? "Erro ao desconectar" });
     return NextResponse.json(
       {
         configured: true,
         disconnected: false,
-        instanceName: config.instanceName?.trim() ?? "",
+        instanceName: instance.instance_name,
         error: response.error ?? "Não foi possível desconectar a Evolution",
       },
       { status: response.status >= 400 ? response.status : 502 },
     );
   }
 
+  await updateWhatsAppInstance(instance.instance_name, {
+    status: "disconnected",
+    disconnected_at: new Date().toISOString(),
+    last_error: null,
+  });
+
   await auth.supabase.from("audit_logs").insert(withOrganizationId({
     user_id: auth.user.id,
     entity_type: "whatsapp",
     action: "whatsapp.disconnected",
     summary: "WhatsApp desconectado",
-    metadata: { instanceName: config.instanceName?.trim() ?? "" },
+    metadata: { instanceName: instance.instance_name },
   }, auth.organizationId));
 
   return NextResponse.json({
     configured: true,
     disconnected: true,
-    instanceName: config.instanceName?.trim() ?? "",
+    instanceName: instance.instance_name,
   });
 }

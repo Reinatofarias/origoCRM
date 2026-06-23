@@ -4,8 +4,10 @@ import { revalidatePath } from "next/cache";
 
 import {
   callEvolutionApi,
+  ensureWhatsAppInstanceForOrganization,
   fetchContactProfilePictureUrl,
   getEvolutionInstanceEndpoint,
+  getEvolutionInstanceEndpointForName,
   logWhatsAppEvent as persistWhatsAppEvent,
   recordOutboundWhatsAppMessage,
   updateStoredWhatsAppMessageStatus,
@@ -28,6 +30,35 @@ type EvolutionSendTextRawResponse = EvolutionSendTextResponse & {
   message: { key: { id: string } };
   messageId: string;
 };
+
+async function resolveOrganizationEvolutionEndpoint(
+  auth: Awaited<ReturnType<typeof getAuthenticatedOrganizationContext>>,
+  path: string,
+) {
+  if ("error" in auth) return { endpoint: null, instanceId: null, instanceName: null, error: auth.error ?? "Não autenticado" };
+
+  if (!auth.organizationId) {
+    return {
+      endpoint: getEvolutionInstanceEndpoint(path),
+      instanceId: null,
+      instanceName: null,
+      error: null,
+    };
+  }
+
+  const { instance, error } = await ensureWhatsAppInstanceForOrganization({
+    organizationId: auth.organizationId,
+    userId: auth.user.id,
+  });
+  const endpoint = instance ? getEvolutionInstanceEndpointForName(path, instance.instance_name) : null;
+
+  return {
+    endpoint,
+    instanceId: instance?.id ?? null,
+    instanceName: instance?.instance_name ?? null,
+    error: endpoint ? null : error ?? "Conecte o WhatsApp da sua organização.",
+  };
+}
 
 export async function sendWhatsAppMessage(
   leadId: string,
@@ -59,7 +90,8 @@ export async function sendWhatsAppMessage(
   }
 
   const normalizedPhone = normalizePhone(phoneNumber);
-  const endpoint = getEvolutionInstanceEndpoint("/message/sendText");
+  const evolution = await resolveOrganizationEvolutionEndpoint(auth, "/message/sendText");
+  const endpoint = evolution.endpoint;
 
   if (!endpoint) {
     return { success: false, error: "Instância da Evolution não configurada" };
@@ -117,6 +149,7 @@ export async function sendWhatsAppMessage(
       phoneNumber: normalizedPhone,
       content: message,
       status,
+      whatsappInstanceId: evolution.instanceId,
     }),
   ]);
 
@@ -155,8 +188,9 @@ export async function sendWhatsAppConversationMessage(
   }
 
   const normalizedPhone = normalizePhone(phoneNumber);
-  const endpoint = getEvolutionInstanceEndpoint("/message/sendText");
-  if (!endpoint) return { success: false, error: "Instância da Evolution não configurada" };
+  const evolution = await resolveOrganizationEvolutionEndpoint(auth, "/message/sendText");
+  const endpoint = evolution.endpoint;
+  if (!endpoint) return { success: false, error: evolution.error ?? "Instância da Evolution não configurada" };
 
   const response = await callEvolutionApi<EvolutionSendTextRawResponse>(endpoint, {
     number: normalizedPhone,
@@ -175,7 +209,7 @@ export async function sendWhatsAppConversationMessage(
     response.data.key?.id ??
     response.data.message?.key?.id ??
     crypto.randomUUID();
-  const avatarUrl = await fetchContactProfilePictureUrl(normalizedPhone);
+  const avatarUrl = await fetchContactProfilePictureUrl(normalizedPhone, evolution.instanceName);
 
   const now = new Date().toISOString();
   let updatedLead: Lead | null = null;
@@ -215,6 +249,7 @@ export async function sendWhatsAppConversationMessage(
         direction: "outbound",
         content: message,
         status: normalizeEvolutionStatus(response.data.status),
+        whatsapp_instance_id: evolution.instanceId,
       }, auth.organizationId),
       { onConflict: "message_id", ignoreDuplicates: true },
     )
@@ -245,6 +280,7 @@ export async function sendWhatsAppConversationMessage(
     lastMessage: message,
     direction: "outbound",
     status: "responded",
+    whatsappInstanceId: evolution.instanceId,
   });
 
   revalidatePath("/");
@@ -270,8 +306,9 @@ export async function checkWhatsAppNumbers(phoneNumbers: string[]): Promise<{
   const numbers = Array.from(new Set(phoneNumbers.map(normalizePhone).filter(Boolean))).slice(0, 30);
   if (numbers.length === 0) return { success: false, error: "Nenhum numero para validar" };
 
-  const endpoint = getEvolutionInstanceEndpoint("/chat/whatsappNumbers");
-  if (!endpoint) return { success: false, error: "Instância da Evolution não configurada" };
+  const evolution = await resolveOrganizationEvolutionEndpoint(auth, "/chat/whatsappNumbers");
+  const endpoint = evolution.endpoint;
+  if (!endpoint) return { success: false, error: evolution.error ?? "Instância da Evolution não configurada" };
 
   const response = await callEvolutionApi<WhatsAppNumberCheckResponse>(endpoint, { numbers }, "POST");
 

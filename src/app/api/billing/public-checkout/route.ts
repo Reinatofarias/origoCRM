@@ -19,6 +19,7 @@ export async function POST(request: Request) {
   const metadata = {
     plan_slug: plan.slug,
     billing_period: billing.key,
+    seat_count: "1",
     source: "public_checkout",
   };
 

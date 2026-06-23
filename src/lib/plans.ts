@@ -20,7 +20,7 @@ export type PlanDefinition = {
   description: string;
   monthlyPrice: number;
   prices: Record<BillingPeriod, number>;
-  userLimit: number;
+  includedSeats: number;
   features: PlanFeature[];
   highlights: string[];
   featured?: boolean;
@@ -77,7 +77,7 @@ export const plans: PlanDefinition[] = [
       semiannual: 5700,
       annual: 4700,
     },
-    userLimit: 2,
+    includedSeats: 1,
     features: ["crm", "tasks", "templates"],
     highlights: ["Funil comercial", "Lead 360", "Tarefas do dia", "Mensagens prontas"],
   },
@@ -91,21 +91,21 @@ export const plans: PlanDefinition[] = [
       semiannual: 8200,
       annual: 6700,
     },
-    userLimit: 5,
+    includedSeats: 1,
     features: ["crm", "conversations", "tasks", "templates", "googleCalendar", "advancedDashboard"],
     highlights: ["Inbox WhatsApp", "Google Calendar", "Dashboard executivo", "Auditoria operacional"],
   },
   {
     slug: "prospecting",
     name: "Origo Growth",
-    description: "CRM completo com prospecção, campanhas e acompanhamento comercial.",
+    description: "CRM completo com prospecção, campanhas e limites maiores por usuário.",
     monthlyPrice: 14700,
     prices: {
       monthly: 14700,
       semiannual: 12700,
       annual: 9700,
     },
-    userLimit: 8,
+    includedSeats: 1,
     features: ["crm", "conversations", "tasks", "templates", "prospecting", "campaigns", "googleCalendar", "advancedDashboard"],
     highlights: ["Prospecção Google", "Campanhas WhatsApp", "Validação de contatos", "Tags comerciais"],
     featured: true,
@@ -147,7 +147,8 @@ export function planHasFeature(planSlug: PlanSlug | null | undefined, feature: P
   return Boolean(plan?.features.includes(feature));
 }
 
-export function getPlanUserLimit(planSlug: PlanSlug | null | undefined) {
+export function getPlanUserLimit(planSlug: PlanSlug | null | undefined, seatCount?: number | null) {
   if (planSlug === "manual") return 999;
-  return getPlan(planSlug ?? "base")?.userLimit ?? 1;
+  const paidSeats = Number.isFinite(Number(seatCount)) ? Number(seatCount) : null;
+  return Math.max(1, paidSeats ?? getPlan(planSlug ?? "base")?.includedSeats ?? 1);
 }

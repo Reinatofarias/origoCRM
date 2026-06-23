@@ -1,6 +1,8 @@
 import { type NextRequest, NextResponse } from "next/server";
 
 import {
+  extractEvolutionInstanceName,
+  getWhatsAppInstanceByName,
   logWhatsAppEvent,
   recordIncomingWhatsAppMessage,
   updateStoredWhatsAppMessageStatus,
@@ -40,7 +42,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       return NextResponse.json({ status: "received" });
     }
 
-    await handleWebhookEvent(payload.event, payload.data);
+    await handleWebhookEvent(payload.event, payload.data, extractEvolutionInstanceName(payload));
     return NextResponse.json({ status: "received" });
   } catch (error) {
     await logWhatsAppEvent("webhook.error", {
@@ -55,12 +57,14 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 async function handleWebhookEvent(
   eventType: EvolutionWebhookEvent,
   data: unknown,
+  instanceName: string | null,
 ): Promise<void> {
   const normalizedEvent = normalizeWebhookEvent(eventType);
+  const { instance } = instanceName ? await getWhatsAppInstanceByName(instanceName) : { instance: null };
 
   switch (normalizedEvent) {
     case "messages.upsert":
-      await handleMessageUpsert(data);
+      await handleMessageUpsert(data, instanceName);
       break;
     case "messages.update":
       await handleMessageUpdate(data);
@@ -72,10 +76,10 @@ async function handleWebhookEvent(
     case "presence.update":
       break;
     default:
-      await logWhatsAppEvent("webhook.unhandled_event", { eventType, normalizedEvent, data }, null, null);
+      await logWhatsAppEvent("webhook.unhandled_event", { eventType, normalizedEvent, data, instanceName }, null, instance?.organization_id ?? null, instance?.id ?? null);
   }
 
-  await logWhatsAppEvent(normalizedEvent, { data }, null, null);
+  await logWhatsAppEvent(normalizedEvent, { data, instanceName }, null, instance?.organization_id ?? null, instance?.id ?? null);
 }
 
 function normalizeWebhookEvent(eventType: string) {
@@ -84,9 +88,9 @@ function normalizeWebhookEvent(eventType: string) {
   return normalized;
 }
 
-async function handleMessageUpsert(data: unknown): Promise<void> {
+async function handleMessageUpsert(data: unknown, instanceName: string | null): Promise<void> {
   for (const message of extractWebhookItems<EvolutionIncomingMessage>(data)) {
-    await recordIncomingWhatsAppMessage(message);
+    await recordIncomingWhatsAppMessage(message, { instanceName });
   }
 }
 

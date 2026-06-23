@@ -1,8 +1,9 @@
 import Stripe from "stripe";
+import crypto from "node:crypto";
 
 import { createSupabaseServiceRoleClient } from "@/lib/server/supabase";
 import { isPayloadTooLarge } from "@/lib/server/security";
-import { getStripeClient } from "@/lib/server/stripe";
+import { getAppUrl, getStripeClient } from "@/lib/server/stripe";
 import type { BillingPeriod, PlanSlug } from "@/lib/plans";
 
 type StripeSubscriptionWithPeriods = Stripe.Subscription & {
@@ -27,6 +28,10 @@ async function upsertSubscriptionFromStripe(subscription: StripeSubscriptionWith
   const organizationId = metadata.organization_id;
   const planSlug = metadata.plan_slug as PlanSlug | undefined;
   const billingPeriod = metadata.billing_period as BillingPeriod | undefined;
+  const seatCount = Math.max(
+    1,
+    Number(metadata.seat_count ?? subscription.items.data[0]?.quantity ?? 1) || 1,
+  );
 
   if (!organizationId || !planSlug || !billingPeriod) {
     if (metadata.source === "public_checkout") return;
@@ -40,6 +45,7 @@ async function upsertSubscriptionFromStripe(subscription: StripeSubscriptionWith
         organization_id: organizationId,
         plan_slug: planSlug,
         billing_period: billingPeriod,
+        seat_count: seatCount,
         status: mapSubscriptionStatus(subscription.status),
         provider: "stripe",
         provider_customer_id: typeof subscription.customer === "string" ? subscription.customer : subscription.customer.id,
@@ -53,6 +59,137 @@ async function upsertSubscriptionFromStripe(subscription: StripeSubscriptionWith
     );
 
   if (error) throw new Error(error.message);
+}
+
+async function ensurePublicCheckoutOrganization(
+  session: Stripe.Checkout.Session,
+  subscription: StripeSubscriptionWithPeriods,
+) {
+  const supabase = createSupabaseServiceRoleClient();
+  if (!supabase) throw new Error("SUPABASE_SERVICE_ROLE_KEY não configurada.");
+
+  const email = session.customer_details?.email ?? session.customer_email;
+  if (!email) throw new Error("Checkout público sem email do cliente.");
+
+  const normalizedEmail = email.trim().toLowerCase();
+  const userId = await findOrInviteUserByEmail(normalizedEmail);
+  const organizationName =
+    session.customer_details?.name?.trim() ||
+    normalizedEmail.split("@")[0].replace(/[._-]+/g, " ").replace(/\b\w/g, (char) => char.toUpperCase()) ||
+    "OrigoCRM";
+
+  const { data: existingMember } = await supabase
+    .from("organization_members")
+    .select("organization_id")
+    .eq("user_id", userId)
+    .eq("role", "owner")
+    .eq("status", "active")
+    .limit(1)
+    .maybeSingle();
+
+  let organizationId = typeof existingMember?.organization_id === "string" ? existingMember.organization_id : null;
+
+  if (!organizationId) {
+    const { data: organization, error: organizationError } = await supabase
+      .from("organizations")
+      .insert({
+        name: organizationName,
+        slug: await makeOrganizationSlug(organizationName),
+        owner_user_id: userId,
+        status: "active",
+      })
+      .select("id")
+      .single();
+
+    if (organizationError) throw new Error(organizationError.message);
+    organizationId = String(organization.id);
+
+    const { error: memberError } = await supabase
+      .from("organization_members")
+      .upsert(
+        {
+          organization_id: organizationId,
+          user_id: userId,
+          role: "owner",
+          status: "active",
+        },
+        { onConflict: "organization_id,user_id" },
+      );
+
+    if (memberError) throw new Error(memberError.message);
+  }
+
+  await getStripeClient()?.subscriptions.update(subscription.id, {
+    metadata: {
+      ...subscription.metadata,
+      organization_id: organizationId,
+      user_id: userId,
+      plan_slug: session.metadata?.plan_slug ?? subscription.metadata.plan_slug,
+      billing_period: session.metadata?.billing_period ?? subscription.metadata.billing_period,
+      seat_count: session.metadata?.seat_count ?? String(subscription.items.data[0]?.quantity ?? 1),
+      source: "public_checkout",
+    },
+  });
+
+  return { organizationId, userId };
+}
+
+async function findOrInviteUserByEmail(email: string) {
+  const supabase = createSupabaseServiceRoleClient();
+  if (!supabase) throw new Error("SUPABASE_SERVICE_ROLE_KEY não configurada.");
+
+  const existingUserId = await findUserIdByEmail(email);
+  if (existingUserId) return existingUserId;
+
+  const { data, error } = await supabase.auth.admin.inviteUserByEmail(email, {
+    redirectTo: `${getAppUrl()}/login?checkout=success`,
+  });
+
+  if (!error && data.user?.id) return data.user.id;
+  const afterInviteUserId = await findUserIdByEmail(email);
+  if (afterInviteUserId) return afterInviteUserId;
+
+  throw new Error(error?.message ?? "Não foi possível criar o usuário após pagamento.");
+}
+
+async function findUserIdByEmail(email: string) {
+  const supabase = createSupabaseServiceRoleClient();
+  if (!supabase) return null;
+
+  for (let page = 1; page <= 10; page += 1) {
+    const { data, error } = await supabase.auth.admin.listUsers({ page, perPage: 100 });
+    if (error) return null;
+    const user = data.users.find((item) => item.email?.toLowerCase() === email);
+    if (user?.id) return user.id;
+    if (data.users.length < 100) break;
+  }
+
+  return null;
+}
+
+async function makeOrganizationSlug(name: string) {
+  const supabase = createSupabaseServiceRoleClient();
+  const base =
+    name
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 42) || "organizacao";
+
+  for (let index = 0; index < 20; index += 1) {
+    const suffix = index === 0 ? "" : `-${index + 1}`;
+    const slug = `${base}${suffix}`;
+    const { data } = await supabase!
+      .from("organizations")
+      .select("id")
+      .eq("slug", slug)
+      .maybeSingle();
+    if (!data) return slug;
+  }
+
+  return `${base}-${crypto.randomUUID().slice(0, 8)}`;
 }
 
 async function markSubscriptionStatus(providerSubscriptionId: string, status: "past_due" | "canceled") {
@@ -97,11 +234,17 @@ export async function POST(request: Request) {
         const subscription = await stripe.subscriptions.retrieve(
           typeof session.subscription === "string" ? session.subscription : session.subscription.id,
         );
+        const publicCheckout =
+          session.metadata?.source === "public_checkout" && !session.metadata?.organization_id;
+        const publicContext = publicCheckout
+          ? await ensurePublicCheckoutOrganization(session, subscription as unknown as StripeSubscriptionWithPeriods)
+          : null;
 
         await upsertSubscriptionFromStripe(subscription as unknown as StripeSubscriptionWithPeriods, {
-          organization_id: session.metadata?.organization_id,
+          organization_id: session.metadata?.organization_id ?? publicContext?.organizationId,
           plan_slug: session.metadata?.plan_slug,
           billing_period: session.metadata?.billing_period,
+          seat_count: session.metadata?.seat_count,
         });
       }
     }

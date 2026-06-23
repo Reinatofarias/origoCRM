@@ -4462,7 +4462,7 @@ function SettingsView({
   const canManageBilling = effectivePermissions.has("billing:manage");
   const currentSubscription = organizationContext?.subscription ?? null;
   const currentPlan = getPlan(currentSubscription?.plan_slug ?? "manual");
-  const teamUserLimit = getPlanUserLimit(currentSubscription?.plan_slug ?? "manual");
+  const teamUserLimit = getPlanUserLimit(currentSubscription?.plan_slug ?? "manual", currentSubscription?.seat_count);
   const activeTeamSeats = organizationMembers.filter((member) => member.status === "active").length;
   const pendingTeamSeats = organizationInvitations.filter((invite) => invite.status === "pending").length;
   const usedTeamSeats = activeTeamSeats + pendingTeamSeats;

@@ -2,7 +2,8 @@ import { NextResponse } from "next/server";
 
 import {
   callEvolutionApi,
-  getEvolutionInstanceEndpoint,
+  ensureWhatsAppInstanceForOrganization,
+  getEvolutionInstanceEndpointForName,
   getEvolutionServerConfig,
 } from "@/lib/server/evolution";
 import { getAuthenticatedOrganizationContext, requireServerPermission } from "@/lib/server/auth";
@@ -11,21 +12,21 @@ import { enforceRateLimit, rateLimitJson } from "@/lib/server/security";
 export const dynamic = "force-dynamic";
 
 type EvolutionQrCodeResponse = {
-  base64: string;
-  code: string;
-  pairingCode: string | null;
-  count: number;
-  qrcode:
+  base64?: string;
+  code?: string;
+  pairingCode?: string | null;
+  count?: number;
+  qrcode?:
     | string
     | {
-        base64: string;
-        code: string;
-        pairingCode: string | null;
-        count: number;
+        base64?: string;
+        code?: string;
+        pairingCode?: string | null;
+        count?: number;
       };
-  qr: string;
-  status: string;
-  state: string;
+  qr?: string;
+  status?: string;
+  state?: string;
 };
 
 export async function GET(request: Request) {
@@ -33,8 +34,10 @@ export async function GET(request: Request) {
   if ("error" in auth) {
     return NextResponse.json({ configured: false, error: "Não autenticado" }, { status: 401 });
   }
+
   const permissionError = requireServerPermission(auth, "whatsapp:manage");
   if (permissionError) return NextResponse.json({ configured: true, error: permissionError }, { status: 403 });
+
   const rateLimit = await enforceRateLimit({
     request,
     scope: "evolution.qrcode",
@@ -45,13 +48,27 @@ export async function GET(request: Request) {
   if (!rateLimit.allowed) return rateLimitJson(rateLimit);
 
   const config = getEvolutionServerConfig();
-  const endpoint = getEvolutionInstanceEndpoint("/instance/connect");
-
-  if (!config || !endpoint) {
+  if (!config || !auth.organizationId) {
     return NextResponse.json({
       configured: false,
       error: "Evolution API não configurada",
     });
+  }
+
+  const { instance, error: instanceError } = await ensureWhatsAppInstanceForOrganization({
+    organizationId: auth.organizationId,
+    userId: auth.user.id,
+  });
+  const endpoint = instance ? getEvolutionInstanceEndpointForName("/instance/connect", instance.instance_name) : null;
+
+  if (!instance || !endpoint) {
+    return NextResponse.json(
+      {
+        configured: true,
+        error: instanceError ?? "Instância WhatsApp não encontrada",
+      },
+      { status: 400 },
+    );
   }
 
   const response = await callEvolutionApi<EvolutionQrCodeResponse>(endpoint, {}, "GET");
@@ -60,6 +77,7 @@ export async function GET(request: Request) {
     return NextResponse.json(
       {
         configured: true,
+        instanceName: instance.instance_name,
         error: response.error ?? "Não foi possível gerar QR Code",
       },
       { status: response.status >= 400 ? response.status : 502 },
@@ -72,7 +90,7 @@ export async function GET(request: Request) {
     return NextResponse.json(
       {
         configured: true,
-        instanceName: config.instanceName?.trim() ?? "",
+        instanceName: instance.instance_name,
         count: qrCode.count,
         state: qrCode.state,
         error:
@@ -84,7 +102,7 @@ export async function GET(request: Request) {
 
   return NextResponse.json({
     configured: true,
-    instanceName: config.instanceName?.trim() ?? "",
+    instanceName: instance.instance_name,
     base64: qrCode.base64,
     code: qrCode.code,
     pairingCode: qrCode.pairingCode,
@@ -100,10 +118,10 @@ function normalizeQrCodeResponse(data: EvolutionQrCodeResponse) {
     data.base64 ??
     nested?.base64 ??
     (typeof qrcode === "string" && qrcode.startsWith("data:image") ? qrcode : undefined) ??
-    (data.qr.startsWith("data:image") ? data.qr : undefined);
+    (data.qr?.startsWith("data:image") ? data.qr : undefined);
 
   return {
-    base64: formatQrCodeDataUrl(rawBase64),
+    base64: rawBase64 ? formatQrCodeDataUrl(rawBase64) : undefined,
     code: data.code ?? nested?.code ?? (typeof qrcode === "string" ? qrcode : undefined),
     pairingCode: data.pairingCode ?? nested?.pairingCode ?? null,
     count: data.count ?? nested?.count,
@@ -112,6 +130,5 @@ function normalizeQrCodeResponse(data: EvolutionQrCodeResponse) {
 }
 
 function formatQrCodeDataUrl(value: string) {
-  if (!value) return undefined;
   return value.startsWith("data:image") ? value : `data:image/png;base64,${value}`;
 }

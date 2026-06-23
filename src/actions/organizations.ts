@@ -129,11 +129,12 @@ export async function createOrganizationInvitation(email: string, role: CrmRole)
 
   const { data: subscription } = await auth.supabase
     .from("subscriptions")
-    .select("plan_slug")
+    .select("plan_slug,seat_count")
     .eq("organization_id", auth.organizationId)
     .maybeSingle();
 
-  const userLimit = getPlanUserLimit((subscription as Pick<Subscription, "plan_slug"> | null)?.plan_slug ?? "manual");
+  const currentSubscription = subscription as Pick<Subscription, "plan_slug" | "seat_count"> | null;
+  const userLimit = getPlanUserLimit(currentSubscription?.plan_slug ?? "manual", currentSubscription?.seat_count);
   const [{ count: activeMembers }, { count: pendingInvites }] = await Promise.all([
     auth.supabase
       .from("organization_members")
@@ -149,7 +150,7 @@ export async function createOrganizationInvitation(email: string, role: CrmRole)
   ]);
 
   if ((activeMembers ?? 0) + (pendingInvites ?? 0) >= userLimit) {
-    return { success: false, error: `Seu plano permite até ${userLimit} usuário(s).` };
+    return { success: false, error: `Sua assinatura possui ${userLimit} assento(s) ativo(s).` };
   }
 
   const { data: existingInvite } = await auth.supabase

@@ -144,6 +144,7 @@ export type Subscription = {
   plan_slug: "base" | "pro" | "prospecting" | "premium" | "manual";
   billing_period: "monthly" | "semiannual" | "annual";
   status: "trialing" | "active" | "past_due" | "canceled" | "paused";
+  seat_count: number;
   provider: string | null;
   provider_customer_id: string | null;
   provider_subscription_id: string | null;

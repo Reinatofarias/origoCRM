@@ -41,6 +41,7 @@ export async function POST(request: Request) {
     user_id: auth.user.id,
     plan_slug: plan.slug,
     billing_period: billing.key,
+    seat_count: "1",
   };
 
   const { data: currentSubscription } = await auth.supabase
