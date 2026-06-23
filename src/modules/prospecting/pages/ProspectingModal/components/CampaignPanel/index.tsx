@@ -70,14 +70,14 @@ export function CampaignPanel({
             Campanha WhatsApp
           </div>
           <h3 className="mt-2 text-lg font-semibold text-white">Disparo para prospects</h3>
-          <p className="mt-1 text-sm leading-6 text-zinc-400">Trabalhe por lotes de {batchLimit}. Enviados e ignorados nao entram no proximo lote.</p>
+          <p className="mt-1 text-sm leading-6 text-zinc-400">Trabalhe por lotes de {batchLimit}. Enviados e ignorados não entram no próximo lote.</p>
         </div>
         <ShieldCheck className="h-5 w-5 text-[#25D366]" />
       </div>
 
       <div className="mt-5 grid grid-cols-3 gap-2">
         <Metric label={`Lote / ${batchLimit}`} value={selectedCount} />
-        <Metric label="Enviaveis" value={sendableCount} />
+        <Metric label="Enviáveis" value={sendableCount} />
         <Metric label="Enviados" value={sentCount} />
       </div>
       <div className="mt-2 grid grid-cols-2 gap-2">
@@ -176,7 +176,7 @@ export function CampaignPanel({
             type="button"
           >
             <MessageCircle className="h-4 w-4" />
-            Selecionar proximos {batchLimit}
+            Selecionar próximos {batchLimit}
           </button>
           <button
             className="flex h-10 items-center justify-center gap-2 rounded-xl border border-white/10 px-3 text-xs text-zinc-300 transition hover:bg-white/[0.06]"

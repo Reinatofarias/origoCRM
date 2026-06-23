@@ -44,6 +44,7 @@ export function ProspectingMobile({
   onValidateWhatsApp,
   onlyWhatsApp,
   previewMessage,
+  searchLimit,
   selectedBusinessIds,
   selectedTemplateId,
   selectedBusiness,
@@ -85,6 +86,7 @@ export function ProspectingMobile({
   onValidateWhatsApp: () => void;
   onlyWhatsApp: boolean;
   previewMessage: string;
+  searchLimit: number;
   selectedBusinessIds: Set<string>;
   selectedTemplateId: string;
   selectedBusiness: ProspectBusiness | null;
@@ -134,7 +136,7 @@ export function ProspectingMobile({
         </div>
       </section>
       <div className="mt-4 space-y-4">
-        <ProspectingSearchForm isLoading={isLoading} onSearch={onSearch} />
+        <ProspectingSearchForm isLoading={isLoading} maxLimit={searchLimit} onSearch={onSearch} />
         <CampaignPanel
           batchLimit={batchLimit}
           failedCount={failedCount}

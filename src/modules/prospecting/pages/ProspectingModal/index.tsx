@@ -16,17 +16,21 @@ import { normalizeProspectingWhatsAppPhone } from "../../utils/phone";
 import { ProspectingDesktop } from "./desktop";
 import { ProspectingMobile } from "./mobile";
 
-const CAMPAIGN_BATCH_LIMIT = 20;
+const DEFAULT_CAMPAIGN_BATCH_LIMIT = 20;
+const DEFAULT_SEARCH_LIMIT = 60;
 
 export function ProspectingModal({
+  campaignBatchLimit = DEFAULT_CAMPAIGN_BATCH_LIMIT,
   existingLeadPhones,
   onAddLead,
   onClose,
   onSendProspectingMessage,
   onValidateWhatsAppNumbers,
   onCampaignCompleted,
+  searchLimit = DEFAULT_SEARCH_LIMIT,
   templates,
 }: {
+  campaignBatchLimit?: number;
   existingLeadPhones: Set<string>;
   onAddLead: (input: LeadInput) => Promise<void> | void;
   onClose: () => void;
@@ -38,6 +42,7 @@ export function ProspectingModal({
     error: string;
   }>;
   templates: MessageTemplate[];
+  searchLimit?: number;
 }) {
   const [queryClient] = useState(
     () =>
@@ -52,12 +57,14 @@ export function ProspectingModal({
   return (
     <QueryClientProvider client={queryClient}>
       <ProspectingModalContent
+        campaignBatchLimit={campaignBatchLimit}
         existingLeadPhones={existingLeadPhones}
         onAddLead={onAddLead}
         onClose={onClose}
         onSendProspectingMessage={onSendProspectingMessage}
         onCampaignCompleted={onCampaignCompleted}
         onValidateWhatsAppNumbers={onValidateWhatsAppNumbers}
+        searchLimit={searchLimit}
         templates={templates}
       />
     </QueryClientProvider>
@@ -65,14 +72,17 @@ export function ProspectingModal({
 }
 
 function ProspectingModalContent({
+  campaignBatchLimit,
   existingLeadPhones,
   onAddLead,
   onClose,
   onSendProspectingMessage,
   onCampaignCompleted,
   onValidateWhatsAppNumbers,
+  searchLimit,
   templates,
 }: {
+  campaignBatchLimit: number;
   existingLeadPhones: Set<string>;
   onAddLead: (input: LeadInput) => Promise<void> | void;
   onClose: () => void;
@@ -83,9 +93,12 @@ function ProspectingModalContent({
     numbers: Array<{ number: string; exists: boolean; jid: string }>;
     error: string;
   }>;
+  searchLimit: number;
   templates: MessageTemplate[];
 }) {
   const prospecting = useProspecting();
+  const effectiveBatchLimit = Math.max(1, campaignBatchLimit || DEFAULT_CAMPAIGN_BATCH_LIMIT);
+  const effectiveSearchLimit = Math.max(20, searchLimit || DEFAULT_SEARCH_LIMIT);
   const [selectedBusinessIds, setSelectedBusinessIds] = useState<Set<string>>(() => new Set());
   const [dispatchStates, setDispatchStates] = useState<Record<string, ProspectingDispatchState>>({});
   const [selectedTemplateId, setSelectedTemplateId] = useState(() => templates[0].id ?? "");
@@ -191,8 +204,8 @@ function ProspectingModalContent({
       const next = new Set(current);
       if (next.has(business.id)) next.delete(business.id);
       else {
-        if (next.size >= CAMPAIGN_BATCH_LIMIT) {
-          setCampaignNotice(`Lote limitado a ${CAMPAIGN_BATCH_LIMIT} contatos. Envie ou limpe para selecionar novos.`);
+        if (next.size >= effectiveBatchLimit) {
+          setCampaignNotice(`Lote limitado a ${effectiveBatchLimit} contatos. Envie ou limpe para selecionar novos.`);
           return current;
         }
         next.add(business.id);
@@ -213,20 +226,20 @@ function ProspectingModalContent({
         onlyWhatsApp,
         validationState: validationStates[business.id],
       }))
-      .slice(0, CAMPAIGN_BATCH_LIMIT);
+      .slice(0, effectiveBatchLimit);
 
     setSelectedBusinessIds(new Set(selected.map((business) => business.id)));
     setCampaignNotice(
       selected.length === 0
         ? "Nenhum contato elegivel para o proximo lote."
-        : `Lote preparado com ${selected.length}/${CAMPAIGN_BATCH_LIMIT} contatos elegiveis.`,
+        : `Lote preparado com ${selected.length}/${effectiveBatchLimit} contatos elegíveis.`,
     );
   }
 
   function selectFailedProspects() {
     const selected = prospecting.businesses
       .filter((business) => dispatchStates[business.id]?.status === "failed")
-      .slice(0, CAMPAIGN_BATCH_LIMIT);
+      .slice(0, effectiveBatchLimit);
 
     setSelectedBusinessIds(new Set(selected.map((business) => business.id)));
     setCampaignNotice(selected.length === 0 ? "Nenhuma falha disponivel para reenviar." : `${selected.length} falhas selecionadas para reenvio.`);
@@ -270,7 +283,7 @@ function ProspectingModalContent({
     setSelectedBusinessIds(new Set(toValidate.filter((business) => {
       const item = checked.get(normalizeProspectingWhatsAppPhone(business.phone));
       return item?.exists;
-    }).slice(0, CAMPAIGN_BATCH_LIMIT).map((business) => business.id)));
+    }).slice(0, effectiveBatchLimit).map((business) => business.id)));
     setOnlyWhatsApp(true);
     setCampaignNotice(`Validacao concluida. ${validWhatsAppCountAfterCheck(toValidate, checked)} contatos com WhatsApp encontrados.`);
     setIsValidatingWhatsApp(false);
@@ -283,12 +296,12 @@ function ProspectingModalContent({
       return next;
     });
     setSelectedBusinessIds(new Set());
-    setCampaignNotice("Contatos ignorados nao entram nos proximos lotes.");
+    setCampaignNotice("Contatos ignorados não entram nos próximos lotes.");
   }
 
   async function startCampaign() {
     if (!selectedTemplate || sendableBusinesses.length === 0 || isSendingCampaign) return;
-    const campaignBusinesses = sendableBusinesses.slice(0, CAMPAIGN_BATCH_LIMIT);
+    const campaignBusinesses = sendableBusinesses.slice(0, effectiveBatchLimit);
 
     setIsSendingCampaign(true);
     setCampaignNotice(`Campanha iniciada para ${campaignBusinesses.length} contatos validados.`);
@@ -352,7 +365,7 @@ function ProspectingModalContent({
         contacts: campaignContacts,
       });
     }
-    setCampaignNotice("Campanha finalizada. Use Selecionar proximos 20 para montar outro lote sem repetir enviados.");
+    setCampaignNotice(`Campanha finalizada. Use Selecionar próximos ${effectiveBatchLimit} para montar outro lote sem repetir enviados.`);
   }
 
   return (
@@ -363,7 +376,7 @@ function ProspectingModalContent({
           addedLeadIds={prospecting.addedLeadIds}
           approach={prospecting.generatedApproach}
           businesses={prospecting.businesses}
-          batchLimit={CAMPAIGN_BATCH_LIMIT}
+          batchLimit={effectiveBatchLimit}
           campaignNotice={campaignNotice}
           dispatchStates={dispatchStates}
           existingLeadPhones={existingLeadPhones}
@@ -380,6 +393,7 @@ function ProspectingModalContent({
           onExportBusinesses={exportBusinessesCsv}
           onIntervalChange={setIntervalSeconds}
           onSearch={search}
+          searchLimit={effectiveSearchLimit}
           onSelectFailedProspects={selectFailedProspects}
           onSelectPhoneProspects={selectPhoneProspects}
           onSelectBusiness={prospecting.setSelectedBusiness}
@@ -405,7 +419,7 @@ function ProspectingModalContent({
           addedLeadIds={prospecting.addedLeadIds}
           approach={prospecting.generatedApproach}
           businesses={prospecting.businesses}
-          batchLimit={CAMPAIGN_BATCH_LIMIT}
+          batchLimit={effectiveBatchLimit}
           campaignNotice={campaignNotice}
           dispatchStates={dispatchStates}
           existingLeadPhones={existingLeadPhones}
@@ -422,6 +436,7 @@ function ProspectingModalContent({
           onExportBusinesses={exportBusinessesCsv}
           onIntervalChange={setIntervalSeconds}
           onSearch={search}
+          searchLimit={effectiveSearchLimit}
           onSelectFailedProspects={selectFailedProspects}
           onSelectPhoneProspects={selectPhoneProspects}
           onSelectBusiness={prospecting.setSelectedBusiness}

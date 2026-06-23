@@ -225,6 +225,7 @@ import {
   formatMoneyFromCents,
   getBillingPeriod,
   getPlan,
+  getPlanLimits,
   getPlanMonthlyEquivalentCents,
   getPlanPriceCents,
   getPlanUserLimit,
@@ -421,6 +422,7 @@ function Workspace({
   const organizationId = organizationContext?.organization.id ?? null;
   const currentRole: CrmRole = organizationContext?.member.role ?? "owner";
   const currentPlanSlug: PlanSlug = organizationContext?.subscription?.plan_slug ?? "manual";
+  const currentPlanLimits = useMemo(() => getPlanLimits(currentPlanSlug), [currentPlanSlug]);
   const currentPermissions = useMemo(() => getPermissionsForRole(currentRole), [currentRole]);
   const canCreateLead = currentPermissions.has("lead:create");
   const canDeleteLeads = currentPermissions.has("lead:delete");
@@ -1926,6 +1928,7 @@ function Workspace({
       )}
       {prospectingOpen && (
         <ProspectingModal
+          campaignBatchLimit={currentPlanLimits.campaignBatchLimit}
           existingLeadPhones={existingLeadPhones}
           onAddLead={async (input) => {
             await saveLead(input);
@@ -1958,6 +1961,7 @@ function Workspace({
               error: result.error ?? "",
             };
           }}
+          searchLimit={currentPlanLimits.prospectingSearchLimit}
           templates={templates}
         />
       )}

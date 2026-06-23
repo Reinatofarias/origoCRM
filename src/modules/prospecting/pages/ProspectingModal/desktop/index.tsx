@@ -44,6 +44,7 @@ export function ProspectingDesktop({
   onValidateWhatsApp,
   onlyWhatsApp,
   previewMessage,
+  searchLimit,
   selectedBusinessIds,
   selectedTemplateId,
   selectedBusiness,
@@ -85,6 +86,7 @@ export function ProspectingDesktop({
   onValidateWhatsApp: () => void;
   onlyWhatsApp: boolean;
   previewMessage: string;
+  searchLimit: number;
   selectedBusinessIds: Set<string>;
   selectedTemplateId: string;
   selectedBusiness: ProspectBusiness | null;
@@ -138,7 +140,7 @@ export function ProspectingDesktop({
           </div>
         </div>
         <div className="grid h-[calc(100%-13rem)] min-h-0 grid-rows-[auto_1fr] gap-5 p-5">
-          <ProspectingSearchForm isLoading={isLoading} onSearch={onSearch} />
+          <ProspectingSearchForm isLoading={isLoading} maxLimit={searchLimit} onSearch={onSearch} />
           <div className="min-h-0 overflow-y-auto pr-1">
             {isLoading && <ProspectingSkeleton />}
             {!isLoading && businesses.length === 0 && (
