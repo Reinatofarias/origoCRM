@@ -209,16 +209,21 @@ export async function callEvolutionApi<T>(
 
   try {
     const canSendBody = method !== "GET";
-    const response = await fetch(`${config.apiUrl}${endpoint}`, {
+    const requestInit: RequestInit = {
       method,
       headers: {
         "Content-Type": "application/json",
         apikey: config.apiKey,
       },
-      body: canSendBody && data ? JSON.stringify(data) : undefined,
       cache: "no-store",
       signal: controller.signal,
-    });
+    };
+
+    if (canSendBody && data && Object.keys(data).length > 0) {
+      requestInit.body = JSON.stringify(data);
+    }
+
+    const response = await fetch(`${config.apiUrl}${endpoint}`, requestInit);
 
     const responseData = (await response.json().catch(() => null)) as
       | (T & { message: string })
