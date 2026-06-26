@@ -5522,10 +5522,11 @@ function SettingsView({
                   <span className="text-xs uppercase text-zinc-500">Papel</span>
                   <select
                     className="mt-1 h-9 w-full rounded-lg border border-white/10 bg-black/30 px-3 text-sm text-zinc-100 outline-none focus:border-[#8B5CF6] disabled:opacity-60"
-                    disabled={!canManageTeam || member.status !== "active"}
+                    disabled={!canManageTeam || member.status !== "active" || member.role === "owner"}
                     onChange={(event) => void changeOrganizationMemberRole(member.id, event.target.value as CrmRole)}
                     value={member.role}
                   >
+                    {member.role === "owner" && <option value="owner">{crmRoleLabels.owner}</option>}
                     {roleOptions.map((option) => (
                       <option key={option} value={option}>{crmRoleLabels[option]}</option>
                     ))}
@@ -5533,7 +5534,7 @@ function SettingsView({
                 </label>
                 <button
                   className="flex h-9 items-center justify-center rounded-lg border border-red-400/20 bg-red-500/10 px-3 text-sm text-red-200 transition hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-40"
-                  disabled={!canManageTeam || member.user_id === user.id || member.status !== "active"}
+                  disabled={!canManageTeam || member.user_id === user.id || member.status !== "active" || member.role === "owner"}
                   onClick={() => void deactivateOrganizationMember(member.id)}
                   type="button"
                 >

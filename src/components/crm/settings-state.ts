@@ -23,7 +23,7 @@ export const settingsTabs: Array<{ id: SettingsTab; label: string }> = [
   { id: "data", label: "Dados" },
 ];
 
-export const roleOptions: CrmRole[] = ["owner", "admin", "manager", "seller", "support", "viewer"];
+export const roleOptions: CrmRole[] = ["admin", "manager", "seller", "support", "viewer"];
 
 export const modulePermissionGroups: Array<{ label: string; permissions: CrmPermission[] }> = [
   { label: "CRM", permissions: ["lead:create", "lead:update", "pipeline:update"] },

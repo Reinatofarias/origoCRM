@@ -28,6 +28,7 @@ export type OrganizationInvitationRow = Pick<
 >;
 
 const inviteRoles: CrmRole[] = ["admin", "manager", "seller", "support", "viewer"];
+const assignableRoles: CrmRole[] = ["admin", "manager", "seller", "support", "viewer"];
 
 function normalizeInviteEmail(email: string) {
   return email.trim().toLowerCase();
@@ -222,6 +223,7 @@ export async function updateOrganizationMemberRole(memberId: string, role: CrmRo
     return { success: false, error: "Apenas proprietário ou administrador pode alterar papéis da equipe." };
   }
   if (!auth.organizationId) return { success: false, error: "Base SaaS pendente." };
+  if (!assignableRoles.includes(role)) return { success: false, error: "Proprietário não pode ser definido por edição de papel." };
 
   const { data: currentMember, error: currentError } = await auth.supabase
     .from("organization_members")
@@ -234,16 +236,7 @@ export async function updateOrganizationMemberRole(memberId: string, role: CrmRo
   if (!currentMember) return { success: false, error: "Membro não encontrado." };
 
   const current = currentMember as OrganizationMemberRow;
-  if (current.role === "owner" && role !== "owner") {
-    const { count } = await auth.supabase
-      .from("organization_members")
-      .select("id", { count: "exact", head: true })
-      .eq("organization_id", auth.organizationId)
-      .eq("role", "owner")
-      .eq("status", "active");
-
-    if ((count ?? 0) <= 1) return { success: false, error: "A organização precisa manter pelo menos um proprietário ativo." };
-  }
+  if (current.role === "owner") return { success: false, error: "Proprietário não pode ter papel alterado por esta tela." };
 
   const { data, error } = await auth.supabase
     .from("organization_members")
@@ -284,14 +277,7 @@ export async function disableOrganizationMember(memberId: string): Promise<Actio
   if (current.user_id === auth.user.id) return { success: false, error: "Você não pode desativar seu próprio acesso." };
 
   if (current.role === "owner") {
-    const { count } = await auth.supabase
-      .from("organization_members")
-      .select("id", { count: "exact", head: true })
-      .eq("organization_id", auth.organizationId)
-      .eq("role", "owner")
-      .eq("status", "active");
-
-    if ((count ?? 0) <= 1) return { success: false, error: "A organização precisa manter pelo menos um proprietário ativo." };
+    return { success: false, error: "Proprietário não pode ser desativado por esta tela." };
   }
 
   const { data, error } = await auth.supabase
