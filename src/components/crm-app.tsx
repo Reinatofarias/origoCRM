@@ -4590,6 +4590,7 @@ function SettingsView({
   const [inviteLoading, setInviteLoading] = useState(false);
   const [teamFeedback, setTeamFeedback] = useState("");
   const [selectedBillingPeriod, setSelectedBillingPeriod] = useState<BillingPeriod>(() => organizationContext?.subscription?.billing_period ?? "monthly");
+  const [selectedSeatCount, setSelectedSeatCount] = useState(() => Math.max(1, organizationContext?.subscription?.seat_count ?? 1));
   const [billingLoading, setBillingLoading] = useState<PlanSlug | "portal" | null>(null);
   const [billingFeedback, setBillingFeedback] = useState("");
   const lastWebhook = whatsappLogs[0] ?? null;
@@ -5104,7 +5105,7 @@ function SettingsView({
       const response = await fetch("/api/billing/checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ planSlug, billingPeriod: selectedBillingPeriod }),
+        body: JSON.stringify({ planSlug, billingPeriod: selectedBillingPeriod, seatCount: selectedSeatCount }),
       });
       const data = await response.json();
       if (!response.ok || data.error || !data.url) {
@@ -5816,22 +5817,41 @@ function SettingsView({
                 : "Nenhuma assinatura vinculada à organização."}
             </p>
           </div>
-          <div className="flex flex-wrap gap-2">
-            {billingPeriods.map((period) => (
-              <button
-                className={`h-9 rounded-lg border px-3 text-sm transition ${
-                  selectedBillingPeriod === period.key
-                    ?
-                     "border-[#8B5CF6]/60 bg-[#8B5CF6]/15 text-white"
-                    : "border-white/10 text-zinc-400 hover:bg-white/[0.06]"
-                }`}
-                key={period.key}
-                onClick={() => setSelectedBillingPeriod(period.key)}
-                type="button"
-              >
-                {period.label}
-              </button>
-            ))}
+          <div className="flex flex-wrap items-end gap-2">
+            <div>
+              <div className="mb-1 text-xs uppercase tracking-[0.18em] text-zinc-500">Período</div>
+              <div className="flex flex-wrap gap-2">
+                {billingPeriods.map((period) => (
+                  <button
+                    className={`h-9 rounded-lg border px-3 text-sm transition ${
+                      selectedBillingPeriod === period.key
+                        ?
+                         "border-[#8B5CF6]/60 bg-[#8B5CF6]/15 text-white"
+                        : "border-white/10 text-zinc-400 hover:bg-white/[0.06]"
+                    }`}
+                    key={period.key}
+                    onClick={() => setSelectedBillingPeriod(period.key)}
+                    type="button"
+                  >
+                    {period.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <label className="block">
+              <span className="mb-1 block text-xs uppercase tracking-[0.18em] text-zinc-500">Assentos</span>
+              <input
+                className="h-9 w-24 rounded-lg border border-white/10 bg-black/25 px-3 text-sm text-zinc-100 outline-none transition focus:border-[#8B5CF6]/60"
+                max={50}
+                min={1}
+                onChange={(event) => {
+                  const value = Number(event.target.value);
+                  setSelectedSeatCount(Math.min(50, Math.max(1, Number.isFinite(value) ? Math.floor(value) : 1)));
+                }}
+                type="number"
+                value={selectedSeatCount}
+              />
+            </label>
             {currentSubscription?.provider_customer_id && (
               <button
                 className="flex h-9 items-center justify-center gap-2 rounded-lg border border-white/10 px-3 text-sm text-zinc-200 transition hover:bg-white/[0.06] disabled:opacity-60"
@@ -5856,6 +5876,8 @@ function SettingsView({
             const isCurrent = currentSubscription?.plan_slug === plan.slug;
             const price = getPlanPriceCents(plan.slug, selectedBillingPeriod);
             const monthly = getPlanMonthlyEquivalentCents(plan.slug, selectedBillingPeriod);
+            const periodTotal = price * selectedSeatCount;
+            const monthlyTotal = monthly * selectedSeatCount;
             return (
               <div
                 className={`flex min-h-80 flex-col rounded-xl border p-4 transition ${
@@ -5876,8 +5898,17 @@ function SettingsView({
                 <div className="mt-4">
                   <div className="text-2xl font-semibold text-zinc-100">{formatMoneyFromCents(monthly)}</div>
                   <div className="mt-1 text-xs text-zinc-500">
-                    por mês, cobrado {getBillingPeriod(selectedBillingPeriod).shortLabel}
-                    {selectedBillingPeriod !== "monthly" ? ` (${formatMoneyFromCents(price)} no período)` : ""}
+                    por usuário/mês, cobrado {getBillingPeriod(selectedBillingPeriod).shortLabel}
+                  </div>
+                  <div className="mt-3 rounded-lg border border-white/10 bg-black/20 p-3 text-xs text-zinc-400">
+                    <div className="flex items-center justify-between gap-3">
+                      <span>{selectedSeatCount} assento(s)</span>
+                      <span className="font-semibold text-zinc-100">{formatMoneyFromCents(monthlyTotal)}/mês</span>
+                    </div>
+                    <div className="mt-1 flex items-center justify-between gap-3">
+                      <span>Total do período</span>
+                      <span className="font-semibold text-zinc-100">{formatMoneyFromCents(periodTotal)}</span>
+                    </div>
                   </div>
                 </div>
                 <div className="mt-4 space-y-2">

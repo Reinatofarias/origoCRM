@@ -25,9 +25,15 @@ export async function POST(request: Request) {
   const stripe = getStripeClient();
   if (!stripe) return Response.json({ error: "STRIPE_SECRET_KEY não configurada." }, { status: 500 });
 
-  const body = (await request.json().catch(() => null)) as { planSlug: PlanSlug; billingPeriod: BillingPeriod } | null;
+  const body = (await request.json().catch(() => null)) as {
+    planSlug: PlanSlug;
+    billingPeriod: BillingPeriod;
+    seatCount?: number;
+  } | null;
   const planSlug = body?.planSlug;
   const billingPeriod = body?.billingPeriod ?? "monthly";
+  const parsedSeatCount = Number(body?.seatCount ?? 1);
+  const seatCount = Math.min(50, Math.max(1, Number.isFinite(parsedSeatCount) ? Math.floor(parsedSeatCount) : 1));
   const plan = planSlug ? getPlan(planSlug) : null;
 
   if (!plan || !["monthly", "semiannual", "annual"].includes(billingPeriod)) {
@@ -41,7 +47,7 @@ export async function POST(request: Request) {
     user_id: auth.user.id,
     plan_slug: plan.slug,
     billing_period: billing.key,
-    seat_count: "1",
+    seat_count: String(seatCount),
   };
 
   const { data: currentSubscription } = await auth.supabase
@@ -57,7 +63,7 @@ export async function POST(request: Request) {
     client_reference_id: auth.organizationId,
     line_items: [
       {
-        quantity: 1,
+        quantity: seatCount,
         price_data: {
           currency: "brl",
           unit_amount: getPlanPriceCents(plan.slug, billing.key),
