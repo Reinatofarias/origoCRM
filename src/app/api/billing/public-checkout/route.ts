@@ -1,7 +1,20 @@
 import { getAppUrl, getStripeClient } from "@/lib/server/stripe";
+import { enforceRateLimit, getClientIp, isPayloadTooLarge, rateLimitJson } from "@/lib/server/security";
 import { getBillingPeriod, getPlan, getPlanPriceCents, type BillingPeriod, type PlanSlug } from "@/lib/plans";
 
 export async function POST(request: Request) {
+  const rateLimit = await enforceRateLimit({
+    request,
+    scope: "billing.public_checkout",
+    identifier: getClientIp(request),
+    limit: 10,
+    windowSeconds: 60,
+  });
+  if (!rateLimit.allowed) return rateLimitJson(rateLimit);
+  if (isPayloadTooLarge(request, 10_000)) {
+    return Response.json({ error: "Payload muito grande." }, { status: 413 });
+  }
+
   const stripe = getStripeClient();
   if (!stripe) return Response.json({ error: "Stripe não configurado." }, { status: 500 });
 

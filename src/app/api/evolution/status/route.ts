@@ -8,6 +8,7 @@ import {
   updateWhatsAppInstance,
 } from "@/lib/server/evolution";
 import { getAuthenticatedOrganizationContext, requireServerPermission, requireServerPlanFeature } from "@/lib/server/auth";
+import { enforceRateLimit, rateLimitJson } from "@/lib/server/security";
 
 export const dynamic = "force-dynamic";
 
@@ -23,7 +24,7 @@ type EvolutionConnectionStateResponse = {
   state?: string;
 };
 
-export async function GET() {
+export async function GET(request: Request) {
   const auth = await getAuthenticatedOrganizationContext();
   if ("error" in auth) {
     return NextResponse.json({ configured: false, error: "Não autenticado" }, { status: 401 });
@@ -38,6 +39,15 @@ export async function GET() {
   if (planError) {
     return NextResponse.json({ configured: true, connected: false, state: "plan_blocked", error: planError }, { status: 402 });
   }
+
+  const rateLimit = await enforceRateLimit({
+    request,
+    scope: "evolution.status",
+    identifier: auth.organizationId ?? auth.user.id,
+    limit: 30,
+    windowSeconds: 60,
+  });
+  if (!rateLimit.allowed) return rateLimitJson(rateLimit);
 
   const config = getEvolutionServerConfig();
   if (!config || !auth.organizationId) {
