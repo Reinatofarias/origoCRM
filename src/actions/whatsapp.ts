@@ -6,7 +6,6 @@ import {
   callEvolutionApi,
   ensureWhatsAppInstanceForOrganization,
   fetchContactProfilePictureUrl,
-  getEvolutionInstanceEndpoint,
   getEvolutionInstanceEndpointForName,
   logWhatsAppEvent as persistWhatsAppEvent,
   recordOutboundWhatsAppMessage,
@@ -39,10 +38,10 @@ async function resolveOrganizationEvolutionEndpoint(
 
   if (!auth.organizationId) {
     return {
-      endpoint: getEvolutionInstanceEndpoint(path),
+      endpoint: null,
       instanceId: null,
       instanceName: null,
-      error: null,
+      error: "Base SaaS pendente. Entre novamente para criar sua organizaÃ§Ã£o antes de conectar o WhatsApp.",
     };
   }
 

@@ -14,7 +14,6 @@ import { createSupabaseServiceRoleClient } from "./supabase";
 type EvolutionServerConfig = {
   apiUrl: string;
   apiKey: string;
-  instanceName?: string;
   webhookKey?: string;
 };
 
@@ -44,20 +43,12 @@ export function getEvolutionServerConfig(): EvolutionServerConfig | null {
   return {
     apiUrl: apiUrl.replace(/\/+$/, ""),
     apiKey,
-    instanceName: process.env.EVOLUTION_INSTANCE_NAME,
     webhookKey: process.env.EVOLUTION_WEBHOOK_KEY,
   };
 }
 
 export function isEvolutionServerConfigured() {
   return Boolean(getEvolutionServerConfig());
-}
-
-export function getEvolutionInstanceEndpoint(path: string) {
-  const config = getEvolutionServerConfig();
-  if (!config?.instanceName) return null;
-
-  return getEvolutionInstanceEndpointForName(path, config.instanceName);
 }
 
 export function getEvolutionInstanceEndpointForName(path: string, instanceName: string) {
@@ -338,9 +329,9 @@ export async function recordOutboundWhatsAppMessage(input: {
 }
 
 export async function fetchContactProfilePictureUrl(phoneNumber: string, instanceName?: string | null) {
-  const endpoint = instanceName
-    ? getEvolutionInstanceEndpointForName("/chat/fetchProfilePictureUrl", instanceName)
-    : getEvolutionInstanceEndpoint("/chat/fetchProfilePictureUrl");
+  if (!instanceName) return null;
+
+  const endpoint = getEvolutionInstanceEndpointForName("/chat/fetchProfilePictureUrl", instanceName);
   if (!endpoint) return null;
 
   const response = await callEvolutionApi<{ profilePictureUrl: string }>(
