@@ -35,15 +35,22 @@ export type WhatsAppInstanceRecord = {
 };
 
 export function getEvolutionServerConfig(): EvolutionServerConfig | null {
-  const apiUrl = process.env.EVOLUTION_API_URL;
-  const apiKey = process.env.EVOLUTION_API_KEY;
+  const apiUrl = process.env.EVOLUTION_API_URL?.trim();
+  const apiKey = process.env.EVOLUTION_API_KEY?.trim();
 
   if (!apiUrl || !apiKey) return null;
+
+  try {
+    const parsedUrl = new URL(apiUrl);
+    if (!['http:', 'https:'].includes(parsedUrl.protocol)) return null;
+  } catch {
+    return null;
+  }
 
   return {
     apiUrl: apiUrl.replace(/\/+$/, ""),
     apiKey,
-    webhookKey: process.env.EVOLUTION_WEBHOOK_KEY,
+    webhookKey: process.env.EVOLUTION_WEBHOOK_KEY?.trim(),
   };
 }
 
@@ -237,14 +244,27 @@ export async function callEvolutionApi<T>(
       data: responseData as T,
     };
   } catch (error) {
+    const transportError = describeEvolutionTransportError(error);
+    let apiHost = "invalid-url";
+    try {
+      apiHost = new URL(config.apiUrl).host;
+    } catch {
+      // Configuration validation already handles malformed URLs.
+    }
+    console.error("[evolution] request failed", {
+      apiHost,
+      endpoint,
+      method,
+      code: transportError.code,
+      message: transportError.technicalMessage,
+    });
+
     return {
       status: error instanceof DOMException && error.name === "AbortError" ? 504 : 500,
       error:
         error instanceof DOMException && error.name === "AbortError"
           ? "Tempo limite ao consultar a Evolution API"
-          : error instanceof Error
-            ? error.message
-            : "Erro desconhecido",
+          : transportError.userMessage,
     };
   } finally {
     clearTimeout(timeout);
@@ -326,6 +346,42 @@ export async function recordOutboundWhatsAppMessage(input: {
     status: "responded",
     whatsappInstanceId: input.whatsappInstanceId ?? null,
   });
+}
+
+function describeEvolutionTransportError(error: unknown) {
+  const cause = error instanceof Error && error.cause && typeof error.cause === "object"
+    ? (error.cause as { code?: string; message?: string })
+    : null;
+  const code = cause?.code ?? "UNKNOWN";
+  const technicalMessage = cause?.message ?? (error instanceof Error ? error.message : "Unknown transport error");
+
+  if (code === "ENOTFOUND" || code === "EAI_AGAIN") {
+    return {
+      code,
+      technicalMessage,
+      userMessage: "O endereço da Evolution não foi encontrado. Revise EVOLUTION_API_URL na Vercel.",
+    };
+  }
+  if (code === "ECONNREFUSED") {
+    return {
+      code,
+      technicalMessage,
+      userMessage: "A Evolution recusou a conexão. Confirme se a API está pública e em execução.",
+    };
+  }
+  if (code.includes("CERT") || code.includes("TLS")) {
+    return {
+      code,
+      technicalMessage,
+      userMessage: "A conexão segura com a Evolution falhou. Verifique o certificado HTTPS da API.",
+    };
+  }
+
+  return {
+    code,
+    technicalMessage,
+    userMessage: "Não foi possível acessar a Evolution. Confirme a URL pública HTTPS e a disponibilidade da API.",
+  };
 }
 
 export async function fetchContactProfilePictureUrl(phoneNumber: string, instanceName?: string | null) {

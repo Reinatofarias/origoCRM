@@ -101,7 +101,7 @@ function ProspectingModalContent({
   const effectiveSearchLimit = Math.max(20, searchLimit || DEFAULT_SEARCH_LIMIT);
   const [selectedBusinessIds, setSelectedBusinessIds] = useState<Set<string>>(() => new Set());
   const [dispatchStates, setDispatchStates] = useState<Record<string, ProspectingDispatchState>>({});
-  const [selectedTemplateId, setSelectedTemplateId] = useState(() => templates[0].id ?? "");
+  const [selectedTemplateId, setSelectedTemplateId] = useState(() => templates[0]?.id ?? "");
   const [intervalSeconds, setIntervalSeconds] = useState(12);
   const [isSendingCampaign, setIsSendingCampaign] = useState(false);
   const [isValidatingWhatsApp, setIsValidatingWhatsApp] = useState(false);
@@ -114,7 +114,7 @@ function ProspectingModalContent({
     () => prospecting.businesses.filter((business) => selectedBusinessIds.has(business.id)),
     [prospecting.businesses, selectedBusinessIds],
   );
-  const selectedTemplateIdForUi = selectedTemplateId || templates[0].id || "";
+  const selectedTemplateIdForUi = selectedTemplateId || templates[0]?.id || "";
   const selectedTemplate = templates.find((template) => template.id === selectedTemplateIdForUi) ?? null;
   const sendableBusinesses = selectedBusinesses.filter((business) => {
     const phone = normalizeProspectingWhatsAppPhone(business.phone);
