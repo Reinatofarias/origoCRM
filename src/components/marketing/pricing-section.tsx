@@ -7,7 +7,7 @@ import { useState } from "react";
 import { billingPeriods, formatCurrency, getBillingPeriod, getPlanSavings, pricingPlans, type BillingPeriod } from "./pricing-data";
 
 export function PricingSection() {
-  const [period, setPeriod] = useState<BillingPeriod>("annual");
+  const [period, setPeriod] = useState<BillingPeriod>("monthly");
   const billing = getBillingPeriod(period);
 
   return (

@@ -9,11 +9,11 @@ import { billingPeriods, formatCurrency, getBillingPeriod, getPlanSavings, prici
 
 function getInitialPeriod(value: string | null): BillingPeriod {
   if (value === "semiannual" || value === "annual" || value === "monthly") return value;
-  return "annual";
+  return "monthly";
 }
 
 export function CheckoutContent({
-  initialPeriod = "annual",
+  initialPeriod = "monthly",
   initialPlan = "prospecting",
 }: {
   initialPeriod: string | null;
