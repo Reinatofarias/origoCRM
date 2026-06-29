@@ -9,6 +9,7 @@ import type {
   EvolutionWebhookEvent,
 } from "@/lib/types";
 import { normalizePhone } from "@/lib/utils";
+import { buildWhatsAppInstanceName } from "@/lib/whatsapp-instances";
 import { createSupabaseServiceRoleClient } from "./supabase";
 
 type EvolutionServerConfig = {
@@ -63,10 +64,6 @@ export function getEvolutionInstanceEndpointForName(path: string, instanceName: 
 
   const normalizedPath = path.startsWith("/") ? path : `/${path}`;
   return `${normalizedPath}/${encodeURIComponent(instanceName.trim())}`;
-}
-
-export function buildWhatsAppInstanceName(organizationId: string) {
-  return `origo_${organizationId.replace(/-/g, "").slice(0, 24)}`;
 }
 
 export async function getWhatsAppInstanceByOrganization(organizationId: string) {

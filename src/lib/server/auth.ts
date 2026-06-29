@@ -2,7 +2,7 @@ import "server-only";
 
 import { createSupabaseServerClient } from "./supabase";
 import { can, type CrmPermission } from "@/lib/permissions";
-import { planHasFeature, type PlanFeature } from "@/lib/plans";
+import { isSubscriptionOperational, planHasFeature, type PlanFeature } from "@/lib/plans";
 import type { Organization, OrganizationMember } from "@/lib/types";
 
 function defaultOrganizationName(email?: string | null) {
@@ -204,11 +204,11 @@ export async function requireServerPlanFeature(auth: AuthenticatedOrganizationCo
 
   const subscription = data as { plan_slug: string | null; status: string | null; provider: string | null } | null;
   if (!subscription) return "Assinatura não encontrada para esta organização.";
-  if (subscription.plan_slug === "manual" || subscription.provider === "manual") return null;
-
-  if (!["active", "trialing"].includes(subscription.status ?? "")) {
+  if (!isSubscriptionOperational(subscription.status, subscription.provider)) {
     return "A assinatura precisa estar ativa para usar este recurso.";
   }
+
+  if (subscription.plan_slug === "manual" || subscription.provider === "manual") return null;
 
   if (!planHasFeature(subscription.plan_slug as Parameters<typeof planHasFeature>[0], feature)) {
     return `Seu plano atual não inclui ${planFeatureLabels[feature]}.`;

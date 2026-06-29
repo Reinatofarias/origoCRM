@@ -167,6 +167,14 @@ export function planHasFeature(planSlug: PlanSlug | null | undefined, feature: P
   return Boolean(plan?.features.includes(feature));
 }
 
+export function isSubscriptionOperational(
+  status: string | null | undefined,
+  provider: string | null | undefined,
+) {
+  if (provider === "manual") return true;
+  return status === "active" || status === "trialing";
+}
+
 export function getPlanUserLimit(planSlug: PlanSlug | null | undefined, seatCount?: number | null) {
   if (planSlug === "manual") return 999;
   const paidSeats = Number.isFinite(Number(seatCount)) ? Number(seatCount) : null;

@@ -36,7 +36,7 @@ import {
 } from "lucide-react";
 import Image from "next/image";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { FormEvent, KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, KeyboardEvent, useCallback, useEffect, useMemo, useState } from "react";
 
 import { recordAuditLog as recordAuditLogAction } from "@/actions/audit";
 import {
@@ -119,7 +119,6 @@ import {
 } from "@/components/crm/dashboard-rows";
 import { DashboardWhatsAppHealth } from "@/components/crm/dashboard-whatsapp-health";
 import {
-  applyConversationRealtimeEvent,
   applyMessageRealtimeEvent,
   conversationStatus,
   conversationStatusLabel,
@@ -141,6 +140,7 @@ import {
   type ConversationSort,
   type ConversationStatusFilter,
 } from "@/components/crm/conversation-state";
+import { useConversationInbox } from "@/components/crm/use-conversation-inbox";
 import {
   ContactAvatar,
   ConversationDateDivider,
@@ -229,6 +229,7 @@ import {
   getPlanMonthlyEquivalentCents,
   getPlanPriceCents,
   getPlanUserLimit,
+  isSubscriptionOperational,
   planHasFeature,
   plans,
   type BillingPeriod,
@@ -304,8 +305,6 @@ type AuditLogInput = {
   metadata?: Record<string, unknown>;
 };
 type LeadCreateTab = "summary" | "commercial" | "tasks" | "contact" | "history";
-type ConversationRealtimeStatus = "connecting" | "connected" | "fallback" | "disabled";
-
 export function CrmApp({
   initialView = "dashboard",
   initialSettingsTab = "system",
@@ -427,12 +426,19 @@ function Workspace({
   const organizationId = organizationContext?.organization.id ?? null;
   const currentRole: CrmRole = organizationContext?.member.role ?? "owner";
   const currentPlanSlug: PlanSlug = organizationContext?.subscription?.plan_slug ?? "manual";
+  const currentSubscriptionOperational = isSubscriptionOperational(
+    organizationContext?.subscription?.status,
+    organizationContext?.subscription?.provider,
+  );
   const currentPlanLimits = useMemo(() => getPlanLimits(currentPlanSlug), [currentPlanSlug]);
   const currentPermissions = useMemo(() => getPermissionsForRole(currentRole), [currentRole]);
   const canCreateLead = currentPermissions.has("lead:create");
   const canDeleteLeads = currentPermissions.has("lead:delete");
   const canUpdatePipeline = currentPermissions.has("pipeline:update");
-  const canUseProspecting = currentPermissions.has("prospecting:use") && planHasFeature(currentPlanSlug, "prospecting");
+  const canUseProspecting =
+    currentSubscriptionOperational &&
+    currentPermissions.has("prospecting:use") &&
+    planHasFeature(currentPlanSlug, "prospecting");
   const canManageTemplates = currentPermissions.has("template:manage");
   const leads = remoteLeads;
   const archivedLeads = remoteArchivedLeads;
@@ -3335,11 +3341,17 @@ function Conversations({
   onLeadCreated: (lead: Lead) => void;
   onOpenLead: (lead: Lead) => void;
 }) {
-  const supabase = useMemo(() => createSupabaseClient(), []);
-  const [messages, setMessages] = useState<WhatsAppMessage[]>([]);
-  const [storedConversations, setStoredConversations] = useState<WhatsAppConversation[]>([]);
-  const [loading, setLoading] = useState(Boolean(supabase));
   const [selectedPhone, setSelectedPhone] = useState<string | null>(null);
+  const {
+    loading,
+    messages,
+    readPhones,
+    realtimeStatus,
+    setMessages,
+    setReadPhones,
+    setStoredConversations,
+    storedConversations,
+  } = useConversationInbox(organizationId, selectedPhone);
   const [replyText, setReplyText] = useState("");
   const [templateQuery, setTemplateQuery] = useState("");
   const [conversationQuery, setConversationQuery] = useState("");
@@ -3347,7 +3359,6 @@ function Conversations({
   const [leadFilter, setLeadFilter] = useState<ConversationLeadFilter>("all");
   const [priorityFilter, setPriorityFilter] = useState<ConversationPriorityFilter>("all");
   const [sortMode, setSortMode] = useState<ConversationSort>("recent");
-  const [readPhones, setReadPhones] = useState<Set<string>>(() => new Set());
   const [sending, setSending] = useState(false);
   const [savingLead, setSavingLead] = useState(false);
   const [conversationActionLoading, setConversationActionLoading] = useState<"resolved" | "archived" | null>(null);
@@ -3356,161 +3367,6 @@ function Conversations({
   const [actionError, setActionError] = useState("");
   const [leadModalOpen, setLeadModalOpen] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(false);
-  const [realtimeStatus, setRealtimeStatus] = useState<ConversationRealtimeStatus>(supabase ? "connecting" : "disabled");
-  const [realtimeRetryKey, setRealtimeRetryKey] = useState(0);
-  const selectedPhoneRef = useRef<string | null>(null);
-
-  useEffect(() => {
-    selectedPhoneRef.current = selectedPhone;
-  }, [selectedPhone]);
-
-  const refreshConversationInbox = useCallback(
-    async ({ silent = false }: { silent?: boolean } = {}) => {
-      if (!supabase) {
-        setLoading(false);
-        return;
-      }
-
-      if (!silent) setLoading(true);
-
-      const messageQuery = organizationId
-        ? supabase.from("whatsapp_messages").select("*").eq("organization_id", organizationId)
-        : supabase.from("whatsapp_messages").select("*");
-      const conversationQuery = organizationId
-        ? supabase.from("whatsapp_conversations").select("*").eq("organization_id", organizationId)
-        : supabase.from("whatsapp_conversations").select("*");
-
-      const [messageResult, conversationResult] = await Promise.all([
-        messageQuery.order("created_at", { ascending: true }),
-        conversationQuery.order("updated_at", { ascending: false }),
-      ]);
-
-      if (!messageResult.error) {
-        setMessages((messageResult.data as WhatsAppMessage[] | null) ?? []);
-      }
-      if (!conversationResult.error) {
-        setStoredConversations((conversationResult.data as WhatsAppConversation[] | null) ?? []);
-      }
-      setLoading(false);
-    },
-    [organizationId, supabase],
-  );
-
-  useEffect(() => {
-    if (!supabase) {
-      return;
-    }
-
-    let mounted = true;
-
-    queueMicrotask(() => {
-      if (mounted) void refreshConversationInbox();
-    });
-
-    let reconnectTimer: number | null = null;
-    const scheduleRealtimeReconnect = () => {
-      if (reconnectTimer || !mounted) return;
-      reconnectTimer = window.setTimeout(() => {
-        reconnectTimer = null;
-        if (mounted) setRealtimeRetryKey((current) => current + 1);
-      }, 5000);
-    };
-
-    const connectingTimer = window.setTimeout(() => {
-      if (mounted) setRealtimeStatus("connecting");
-    }, 0);
-
-    const realtimeFilter = organizationId ? `organization_id=eq.${organizationId}` : undefined;
-
-    const messageChannel = supabase
-      .channel(`whatsapp-messages:${organizationId ?? "all"}`)
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "whatsapp_messages", filter: realtimeFilter },
-        (payload) => {
-          if (!mounted) return;
-          const nextMessage = payload.new as WhatsAppMessage;
-          if (payload.eventType !== "DELETE" && organizationId && nextMessage.organization_id !== organizationId) return;
-          if (
-            payload.eventType === "INSERT" &&
-            nextMessage.direction === "inbound" &&
-            nextMessage.phone_number !== selectedPhoneRef.current
-          ) {
-            setReadPhones((current) => {
-              if (!current.has(nextMessage.phone_number)) return current;
-              const next = new Set(current);
-              next.delete(nextMessage.phone_number);
-              return next;
-            });
-          }
-          setMessages((current) => applyMessageRealtimeEvent(current, payload));
-        },
-      )
-      .subscribe((status) => {
-        if (!mounted) return;
-        if (status === "SUBSCRIBED") setRealtimeStatus("connected");
-        if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") {
-          setRealtimeStatus("fallback");
-          scheduleRealtimeReconnect();
-        }
-      });
-    const conversationChannel = supabase
-      .channel(`whatsapp-conversations:${organizationId ?? "all"}`)
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "whatsapp_conversations", filter: realtimeFilter },
-        (payload) => {
-          if (!mounted) return;
-          const nextConversation = payload.new as WhatsAppConversation;
-          if (payload.eventType !== "DELETE" && organizationId && nextConversation.organization_id !== organizationId) return;
-          setStoredConversations((current) => applyConversationRealtimeEvent(current, payload));
-        },
-      )
-      .subscribe((status) => {
-        if (!mounted) return;
-        if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") {
-          setRealtimeStatus("fallback");
-          scheduleRealtimeReconnect();
-        }
-      });
-
-    return () => {
-      mounted = false;
-      window.clearTimeout(connectingTimer);
-      if (reconnectTimer) window.clearTimeout(reconnectTimer);
-      supabase.removeChannel(messageChannel);
-      supabase.removeChannel(conversationChannel);
-    };
-  }, [organizationId, realtimeRetryKey, refreshConversationInbox, supabase]);
-
-  useEffect(() => {
-    if (!supabase) return;
-
-    const interval = window.setInterval(() => {
-      if (realtimeStatus !== "connected") {
-        void refreshConversationInbox({ silent: true });
-      }
-    }, 15000);
-
-    const handleFocus = () => {
-      void refreshConversationInbox({ silent: true });
-    };
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === "visible") {
-        void refreshConversationInbox({ silent: true });
-      }
-    };
-
-    window.addEventListener("focus", handleFocus);
-    document.addEventListener("visibilitychange", handleVisibilityChange);
-
-    return () => {
-      window.clearInterval(interval);
-      window.removeEventListener("focus", handleFocus);
-      document.removeEventListener("visibilitychange", handleVisibilityChange);
-    };
-  }, [refreshConversationInbox, realtimeStatus, supabase]);
-
   const conversations = useMemo(() => {
     const grouped = new Map<string, WhatsAppMessage[]>();
     const repeatedOutboundNames = getRepeatedOutboundContactNames(messages);
@@ -3649,18 +3505,9 @@ function Conversations({
         return next;
       });
 
-      if (supabase) {
-        void supabase
-          .from("whatsapp_conversations")
-          .update({
-            unread_count: 0,
-            last_read_at: new Date().toISOString(),
-            status,
-          })
-          .eq("phone_number", phone);
-      }
+      void updateWhatsAppConversationStatus(phone, status);
     },
-    [supabase],
+    [setReadPhones],
   );
 
   function selectConversation(phone: string) {
@@ -3712,8 +3559,10 @@ function Conversations({
 
     setActionError("");
     setSending(true);
-    const nextFollowupAt = replyFollowupDays
-      ? addDays(Number(replyFollowupDays))
+    const selectedFollowupDays = replyFollowupDays;
+    const selectedMoveStatus = replyMoveStatus;
+    const nextFollowupAt = selectedFollowupDays
+      ? addDays(Number(selectedFollowupDays))
       : null;
     const result = await sendWhatsAppConversationMessage(
       selectedConversation.phone,
@@ -3721,7 +3570,7 @@ function Conversations({
       selectedConversationLead?.id ?? null,
       {
         nextFollowupAt,
-        moveStatus: replyMoveStatus || null,
+        moveStatus: selectedMoveStatus || null,
       },
     );
     setSending(false);
@@ -3758,8 +3607,8 @@ function Conversations({
       metadata: {
         phone: selectedConversation.phone,
         lead_id: selectedConversationLead?.id ?? null,
-        move_status: replyMoveStatus || null,
-        followup_days: replyFollowupDays || null,
+        move_status: selectedMoveStatus || null,
+        followup_days: selectedFollowupDays || null,
       },
     });
   }

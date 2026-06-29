@@ -5,12 +5,88 @@ import { createSupabaseServiceRoleClient } from "@/lib/server/supabase";
 import { isPayloadTooLarge } from "@/lib/server/security";
 import { getAppUrl, getStripeClient } from "@/lib/server/stripe";
 import { ensureWhatsAppInstanceForOrganization } from "@/lib/server/evolution";
+import { shouldRetryStripeWebhookEvent } from "@/lib/stripe-webhook-events";
 import type { BillingPeriod, PlanSlug } from "@/lib/plans";
 
 type StripeSubscriptionWithPeriods = Stripe.Subscription & {
   current_period_start: number;
   current_period_end: number;
 };
+
+type StripeWebhookEventRow = {
+  status: "processing" | "completed" | "failed";
+  attempts: number;
+  updated_at: string;
+};
+
+function isMissingWebhookEventsTable(message: string) {
+  const normalized = message.toLowerCase();
+  return normalized.includes("stripe_webhook_events") && (
+    normalized.includes("relation") || normalized.includes("schema cache") || normalized.includes("does not exist")
+  );
+}
+
+async function beginWebhookEvent(event: Stripe.Event) {
+  const supabase = createSupabaseServiceRoleClient();
+  if (!supabase) throw new Error("SUPABASE_SERVICE_ROLE_KEY não configurada.");
+
+  const now = new Date().toISOString();
+  const { error: insertError } = await supabase.from("stripe_webhook_events").insert({
+    id: event.id,
+    event_type: event.type,
+    status: "processing",
+    attempts: 1,
+    updated_at: now,
+  });
+
+  if (!insertError) return { shouldProcess: true, trackingEnabled: true };
+  if (isMissingWebhookEventsTable(insertError.message)) {
+    console.warn("[stripe] idempotency table missing; processing without persistence", { eventId: event.id });
+    return { shouldProcess: true, trackingEnabled: false };
+  }
+  if (insertError.code !== "23505") throw new Error(insertError.message);
+
+  const { data, error } = await supabase
+    .from("stripe_webhook_events")
+    .select("status,attempts,updated_at")
+    .eq("id", event.id)
+    .maybeSingle();
+
+  if (error) throw new Error(error.message);
+  const existing = data as StripeWebhookEventRow | null;
+  if (!existing) throw new Error("Evento Stripe duplicado sem registro de controle.");
+  if (!shouldRetryStripeWebhookEvent({ status: existing.status, updatedAt: existing.updated_at })) {
+    return { shouldProcess: false, trackingEnabled: true };
+  }
+
+  const { error: retryError } = await supabase
+    .from("stripe_webhook_events")
+    .update({
+      status: "processing",
+      attempts: existing.attempts + 1,
+      error_message: null,
+      updated_at: now,
+    })
+    .eq("id", event.id);
+
+  if (retryError) throw new Error(retryError.message);
+  return { shouldProcess: true, trackingEnabled: true };
+}
+
+async function finishWebhookEvent(eventId: string, status: "completed" | "failed", errorMessage?: string) {
+  const supabase = createSupabaseServiceRoleClient();
+  if (!supabase) return;
+
+  await supabase
+    .from("stripe_webhook_events")
+    .update({
+      status,
+      error_message: errorMessage ?? null,
+      processed_at: status === "completed" ? new Date().toISOString() : null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", eventId);
+}
 
 function fromUnixTimestamp(timestamp: number | null) {
   return timestamp ? new Date(timestamp * 1000).toISOString() : null;
@@ -234,7 +310,15 @@ export async function POST(request: Request) {
     return Response.json({ error: message }, { status: 400 });
   }
 
+  let trackingEnabled = false;
+
   try {
+    const eventControl = await beginWebhookEvent(event);
+    trackingEnabled = eventControl.trackingEnabled;
+    if (!eventControl.shouldProcess) {
+      return Response.json({ received: true, duplicate: true });
+    }
+
     if (event.type === "checkout.session.completed") {
       const session = event.data.object as Stripe.Checkout.Session;
       if (session.mode === "subscription" && session.subscription) {
@@ -266,8 +350,11 @@ export async function POST(request: Request) {
         typeof invoice.subscription === "string" ? invoice.subscription : invoice.subscription?.id;
       if (subscriptionId) await markSubscriptionStatus(subscriptionId, "past_due");
     }
+
+    if (trackingEnabled) await finishWebhookEvent(event.id, "completed");
   } catch (error) {
     const message = error instanceof Error ? error.message : "Erro ao processar webhook.";
+    if (trackingEnabled) await finishWebhookEvent(event.id, "failed", message);
     return Response.json({ error: message }, { status: 500 });
   }
 
