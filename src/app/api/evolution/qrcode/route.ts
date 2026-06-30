@@ -2,10 +2,12 @@ import { NextResponse } from "next/server";
 
 import {
   callEvolutionApi,
-  getEvolutionInstanceEndpoint,
+  ensureWhatsAppInstanceForOrganization,
+  getEvolutionInstanceEndpointForName,
   getEvolutionServerConfig,
 } from "@/lib/server/evolution";
-import { createSupabaseServerClient } from "@/lib/server/supabase";
+import { getAuthenticatedOrganizationContext, requireServerPermission, requireServerPlanFeature } from "@/lib/server/auth";
+import { enforceRateLimit, rateLimitJson } from "@/lib/server/security";
 
 export const dynamic = "force-dynamic";
 
@@ -27,40 +29,59 @@ type EvolutionQrCodeResponse = {
   state?: string;
 };
 
-async function requireUser() {
-  const supabase = await createSupabaseServerClient();
-  if (!supabase) return null;
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  return user ?? null;
-}
-
-export async function GET() {
-  const user = await requireUser();
-  if (!user) {
-    return NextResponse.json({ configured: false, error: "Nao autenticado" }, { status: 401 });
+export async function GET(request: Request) {
+  const auth = await getAuthenticatedOrganizationContext();
+  if ("error" in auth) {
+    return NextResponse.json({ configured: false, error: "Não autenticado" }, { status: 401 });
   }
 
-  const config = getEvolutionServerConfig();
-  const endpoint = getEvolutionInstanceEndpoint("/instance/connect");
+  const permissionError = requireServerPermission(auth, "whatsapp:manage");
+  if (permissionError) return NextResponse.json({ configured: true, error: permissionError }, { status: 403 });
 
-  if (!config || !endpoint) {
+  const planError = await requireServerPlanFeature(auth, "conversations");
+  if (planError) return NextResponse.json({ configured: true, error: planError }, { status: 402 });
+
+  const rateLimit = await enforceRateLimit({
+    request,
+    scope: "evolution.qrcode",
+    identifier: auth.organizationId ?? auth.user.id,
+    limit: 10,
+    windowSeconds: 60,
+  });
+  if (!rateLimit.allowed) return rateLimitJson(rateLimit);
+
+  const config = getEvolutionServerConfig();
+  if (!config || !auth.organizationId) {
     return NextResponse.json({
       configured: false,
-      error: "Evolution API nao configurada",
+      error: "Evolution API não configurada",
     });
   }
 
-  const response = await callEvolutionApi<EvolutionQrCodeResponse>(endpoint, undefined, "GET");
+  const { instance, error: instanceError } = await ensureWhatsAppInstanceForOrganization({
+    organizationId: auth.organizationId,
+    userId: auth.user.id,
+  });
+  const endpoint = instance ? getEvolutionInstanceEndpointForName("/instance/connect", instance.instance_name) : null;
+
+  if (!instance || !endpoint) {
+    return NextResponse.json(
+      {
+        configured: true,
+        error: instanceError ?? "Instância WhatsApp não encontrada",
+      },
+      { status: 400 },
+    );
+  }
+
+  const response = await callEvolutionApi<EvolutionQrCodeResponse>(endpoint, {}, "GET");
 
   if (response.error || !response.data) {
     return NextResponse.json(
       {
         configured: true,
-        error: response.error ?? "Nao foi possivel gerar QR Code",
+        instanceName: instance.instance_name,
+        error: response.error ?? "Não foi possível gerar QR Code",
       },
       { status: response.status >= 400 ? response.status : 502 },
     );
@@ -72,11 +93,11 @@ export async function GET() {
     return NextResponse.json(
       {
         configured: true,
-        instanceName: config.instanceName?.trim() ?? "",
+        instanceName: instance.instance_name,
         count: qrCode.count,
         state: qrCode.state,
         error:
-          "A Evolution respondeu sem QR Code. Verifique se a instancia existe e nao esta presa em connecting.",
+          "A Evolution respondeu sem QR Code. Verifique se a instância existe e não está presa em connecting.",
       },
       { status: 502 },
     );
@@ -84,7 +105,7 @@ export async function GET() {
 
   return NextResponse.json({
     configured: true,
-    instanceName: config.instanceName?.trim() ?? "",
+    instanceName: instance.instance_name,
     base64: qrCode.base64,
     code: qrCode.code,
     pairingCode: qrCode.pairingCode,
@@ -103,7 +124,7 @@ function normalizeQrCodeResponse(data: EvolutionQrCodeResponse) {
     (data.qr?.startsWith("data:image") ? data.qr : undefined);
 
   return {
-    base64: formatQrCodeDataUrl(rawBase64),
+    base64: rawBase64 ? formatQrCodeDataUrl(rawBase64) : undefined,
     code: data.code ?? nested?.code ?? (typeof qrcode === "string" ? qrcode : undefined),
     pairingCode: data.pairingCode ?? nested?.pairingCode ?? null,
     count: data.count ?? nested?.count,
@@ -111,7 +132,6 @@ function normalizeQrCodeResponse(data: EvolutionQrCodeResponse) {
   };
 }
 
-function formatQrCodeDataUrl(value?: string) {
-  if (!value) return undefined;
+function formatQrCodeDataUrl(value: string) {
   return value.startsWith("data:image") ? value : `data:image/png;base64,${value}`;
 }

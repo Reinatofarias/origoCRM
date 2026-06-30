@@ -1,11 +1,5 @@
-/**
- * Página de Templates de Mensagens
- */
+import { CrmApp } from "@/components/crm-app";
+
 export default function TemplatesPage() {
-  return (
-    <div>
-      {/* TODO: Implementar gestão de templates */}
-      <h1>Mensagens Prontas</h1>
-    </div>
-  );
+  return <CrmApp initialView="settings" initialSettingsTab="templates" />;
 }

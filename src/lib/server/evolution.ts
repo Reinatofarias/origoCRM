@@ -9,26 +9,49 @@ import type {
   EvolutionWebhookEvent,
 } from "@/lib/types";
 import { normalizePhone } from "@/lib/utils";
+import { buildWhatsAppInstanceName } from "@/lib/whatsapp-instances";
 import { createSupabaseServiceRoleClient } from "./supabase";
 
 type EvolutionServerConfig = {
   apiUrl: string;
   apiKey: string;
-  instanceName?: string;
   webhookKey?: string;
 };
 
+export type WhatsAppInstanceRecord = {
+  id: string;
+  organization_id: string;
+  created_by_user_id: string | null;
+  instance_name: string;
+  provider: string;
+  status: string;
+  phone_number: string | null;
+  profile_name: string | null;
+  last_webhook_at: string | null;
+  last_error: string | null;
+  connected_at: string | null;
+  disconnected_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 export function getEvolutionServerConfig(): EvolutionServerConfig | null {
-  const apiUrl = process.env.EVOLUTION_API_URL;
-  const apiKey = process.env.EVOLUTION_API_KEY;
+  const apiUrl = process.env.EVOLUTION_API_URL?.trim();
+  const apiKey = process.env.EVOLUTION_API_KEY?.trim();
 
   if (!apiUrl || !apiKey) return null;
+
+  try {
+    const parsedUrl = new URL(apiUrl);
+    if (!['http:', 'https:'].includes(parsedUrl.protocol)) return null;
+  } catch {
+    return null;
+  }
 
   return {
     apiUrl: apiUrl.replace(/\/+$/, ""),
     apiKey,
-    instanceName: process.env.EVOLUTION_INSTANCE_NAME,
-    webhookKey: process.env.EVOLUTION_WEBHOOK_KEY,
+    webhookKey: process.env.EVOLUTION_WEBHOOK_KEY?.trim(),
   };
 }
 
@@ -36,17 +59,164 @@ export function isEvolutionServerConfigured() {
   return Boolean(getEvolutionServerConfig());
 }
 
-export function getEvolutionInstanceEndpoint(path: string) {
-  const config = getEvolutionServerConfig();
-  if (!config?.instanceName) return null;
+export function getEvolutionInstanceEndpointForName(path: string, instanceName: string) {
+  if (!instanceName.trim()) return null;
 
   const normalizedPath = path.startsWith("/") ? path : `/${path}`;
-  return `${normalizedPath}/${encodeURIComponent(config.instanceName)}`;
+  return `${normalizedPath}/${encodeURIComponent(instanceName.trim())}`;
+}
+
+export async function getWhatsAppInstanceByOrganization(organizationId: string) {
+  const supabase = createSupabaseServiceRoleClient();
+  if (!supabase) return { instance: null, error: "SUPABASE_SERVICE_ROLE_KEY não configurada." };
+
+  const { data, error } = await supabase
+    .from("whatsapp_instances")
+    .select("*")
+    .eq("organization_id", organizationId)
+    .eq("provider", "evolution")
+    .maybeSingle();
+
+  if (error) return { instance: null, error: error.message };
+  return { instance: (data as WhatsAppInstanceRecord | null) ?? null, error: null };
+}
+
+export async function getWhatsAppInstanceByName(instanceName: string) {
+  const supabase = createSupabaseServiceRoleClient();
+  if (!supabase) return { instance: null, error: "SUPABASE_SERVICE_ROLE_KEY não configurada." };
+
+  const { data, error } = await supabase
+    .from("whatsapp_instances")
+    .select("*")
+    .eq("instance_name", instanceName)
+    .maybeSingle();
+
+  if (error) return { instance: null, error: error.message };
+  return { instance: (data as WhatsAppInstanceRecord | null) ?? null, error: null };
+}
+
+export async function ensureWhatsAppInstanceForOrganization(input: {
+  organizationId: string;
+  userId: string;
+}) {
+  const supabase = createSupabaseServiceRoleClient();
+  if (!supabase) return { instance: null, error: "SUPABASE_SERVICE_ROLE_KEY não configurada." };
+
+  const existing = await getWhatsAppInstanceByOrganization(input.organizationId);
+  if (existing.error && existing.error.includes("whatsapp_instances")) {
+    return { instance: null, error: "Aplique supabase/whatsapp_instances_migration.sql." };
+  }
+  if (existing.instance) {
+    if (["created", "error", "provisioning"].includes(existing.instance.status)) {
+      const provision = await provisionEvolutionInstance(existing.instance.instance_name);
+      if (!provision.success) {
+        return { instance: existing.instance, error: provision.error };
+      }
+
+      return {
+        instance: { ...existing.instance, status: "created", last_error: null },
+        error: null,
+      };
+    }
+
+    return { instance: existing.instance, error: null };
+  }
+
+  const instanceName = buildWhatsAppInstanceName(input.organizationId);
+  const now = new Date().toISOString();
+  const { data, error } = await supabase
+    .from("whatsapp_instances")
+    .insert({
+      organization_id: input.organizationId,
+      created_by_user_id: input.userId,
+      instance_name: instanceName,
+      provider: "evolution",
+      status: "created",
+      updated_at: now,
+    })
+    .select("*")
+    .single();
+
+  if (error) return { instance: null, error: error.message };
+
+  const instance = data as WhatsAppInstanceRecord;
+  const provision = await provisionEvolutionInstance(instance.instance_name);
+  return {
+    instance: provision.success ? { ...instance, status: "created", last_error: null } : instance,
+    error: provision.error,
+  };
+}
+
+export async function provisionEvolutionInstance(instanceName: string): Promise<{
+  success: boolean;
+  error: string | null;
+}> {
+  await updateWhatsAppInstance(instanceName, { status: "provisioning", last_error: null });
+
+  const createResponse = await callEvolutionApi<Record<string, unknown>>(
+    "/instance/create",
+    {
+      instanceName,
+      qrcode: false,
+      integration: "WHATSAPP-BAILEYS",
+    },
+    "POST",
+  );
+
+  if (createResponse.error && !createResponse.error.toLowerCase().includes("already")) {
+    await updateWhatsAppInstance(instanceName, { status: "error", last_error: createResponse.error });
+    return { success: false, error: createResponse.error };
+  }
+
+  await updateWhatsAppInstance(instanceName, { status: "created", last_error: null });
+
+  const appUrl = process.env.APP_URL?.replace(/\/+$/, "");
+  if (!appUrl) return { success: true, error: null };
+
+  const webhookResponse = await callEvolutionApi<Record<string, unknown>>(
+    getEvolutionInstanceEndpointForName("/webhook/set", instanceName) ?? "",
+    {
+      enabled: true,
+      url: `${appUrl}/api/webhooks/evolution`,
+      webhook_by_events: false,
+      webhook_base64: false,
+      events: [
+        "MESSAGES_UPSERT",
+        "MESSAGES_UPDATE",
+        "CONNECTION_UPDATE",
+        "QRCODE_UPDATED",
+      ],
+    },
+    "POST",
+  );
+
+  if (webhookResponse.error) {
+    await updateWhatsAppInstance(instanceName, { last_error: webhookResponse.error });
+    return { success: false, error: webhookResponse.error };
+  }
+
+  return { success: true, error: null };
+}
+
+export async function updateWhatsAppInstance(
+  instanceName: string,
+  patch: Partial<Pick<
+    WhatsAppInstanceRecord,
+    "status" | "phone_number" | "profile_name" | "last_webhook_at" | "last_error" | "connected_at" | "disconnected_at"
+  >>,
+) {
+  const supabase = createSupabaseServiceRoleClient();
+  if (!supabase) return;
+
+  await supabase
+    .from("whatsapp_instances")
+    .update({ ...patch, updated_at: new Date().toISOString() })
+    .eq("instance_name", instanceName);
 }
 
 export async function callEvolutionApi<T>(
   endpoint: string,
-  data?: Record<string, unknown>,
+  data: Record<string, unknown> | null,
   method: "GET" | "POST" | "PUT" | "DELETE" = "POST",
 ): Promise<EvolutionApiResponse<T>> {
   const config = getEvolutionServerConfig();
@@ -54,7 +224,7 @@ export async function callEvolutionApi<T>(
   if (!config) {
     return {
       status: 500,
-      error: "Evolution API nao configurada",
+      error: "Evolution API não configurada",
     };
   }
 
@@ -62,27 +232,36 @@ export async function callEvolutionApi<T>(
   const timeout = setTimeout(() => controller.abort(), 15000);
 
   try {
-    const response = await fetch(`${config.apiUrl}${endpoint}`, {
+    const canSendBody = method !== "GET";
+    const requestInit: RequestInit = {
       method,
       headers: {
         "Content-Type": "application/json",
         apikey: config.apiKey,
       },
-      body: data ? JSON.stringify(data) : undefined,
       cache: "no-store",
       signal: controller.signal,
-    });
+    };
+
+    if (canSendBody && data && Object.keys(data).length > 0) {
+      requestInit.body = JSON.stringify(data);
+    }
+
+    const response = await fetch(`${config.apiUrl}${endpoint}`, requestInit);
 
     const responseData = (await response.json().catch(() => null)) as
-      | (T & { message?: string })
+      | (T & { message: string })
       | null;
 
     if (!response.ok) {
+      const responseMessage =
+        responseData && typeof (responseData as Record<string, unknown>).message === "string"
+          ? String((responseData as Record<string, unknown>).message)
+          : `Erro ${response.status}`;
+
       return {
         status: response.status,
-        error:
-          (responseData as Record<string, unknown> | null)?.message?.toString() ??
-          `Erro ${response.status}`,
+        error: responseMessage,
       };
     }
 
@@ -91,14 +270,27 @@ export async function callEvolutionApi<T>(
       data: responseData as T,
     };
   } catch (error) {
+    const transportError = describeEvolutionTransportError(error);
+    let apiHost = "invalid-url";
+    try {
+      apiHost = new URL(config.apiUrl).host;
+    } catch {
+      // Configuration validation already handles malformed URLs.
+    }
+    console.error("[evolution] request failed", {
+      apiHost,
+      endpoint,
+      method,
+      code: transportError.code,
+      message: transportError.technicalMessage,
+    });
+
     return {
       status: error instanceof DOMException && error.name === "AbortError" ? 504 : 500,
       error:
         error instanceof DOMException && error.name === "AbortError"
           ? "Tempo limite ao consultar a Evolution API"
-          : error instanceof Error
-            ? error.message
-            : "Erro desconhecido",
+          : transportError.userMessage,
     };
   } finally {
     clearTimeout(timeout);
@@ -123,13 +315,17 @@ export function validateEvolutionWebhook(signature: string) {
 export async function logWhatsAppEvent(
   eventType: EvolutionWebhookEvent | "webhook.error" | string,
   payload: Record<string, unknown>,
-  userId?: string | null,
+  userId: string | null,
+  organizationId: string | null,
+  whatsappInstanceId: string | null = null,
 ) {
   const supabase = createSupabaseServiceRoleClient();
   if (!supabase) return;
 
   await supabase.from("whatsapp_logs").insert({
     user_id: userId ?? null,
+    organization_id: organizationId ?? null,
+    whatsapp_instance_id: whatsappInstanceId,
     event_type: eventType,
     status: eventType === "webhook.error" ? "error" : "success",
     payload,
@@ -141,6 +337,8 @@ export async function logWhatsAppEvent(
 export async function recordOutboundWhatsAppMessage(input: {
   leadId: string;
   userId: string;
+  organizationId: string | null;
+  whatsappInstanceId?: string | null;
   messageId: string;
   phoneNumber: string;
   content: string;
@@ -152,6 +350,8 @@ export async function recordOutboundWhatsAppMessage(input: {
   await supabase.from("whatsapp_messages").insert({
     lead_id: input.leadId,
     user_id: input.userId,
+    organization_id: input.organizationId ?? null,
+    whatsapp_instance_id: input.whatsappInstanceId ?? null,
     message_id: input.messageId,
     phone_number: input.phoneNumber,
     direction: "outbound",
@@ -161,19 +361,62 @@ export async function recordOutboundWhatsAppMessage(input: {
 
   await upsertWhatsAppConversation({
     userId: input.userId,
+    organizationId: input.organizationId,
     leadId: input.leadId,
     phoneNumber: input.phoneNumber,
+    remoteJid: null,
+    contactName: null,
+    contactAvatarUrl: null,
     lastMessage: input.content,
     direction: "outbound",
     status: "responded",
+    whatsappInstanceId: input.whatsappInstanceId ?? null,
   });
 }
 
-export async function fetchContactProfilePictureUrl(phoneNumber: string) {
-  const endpoint = getEvolutionInstanceEndpoint("/chat/fetchProfilePictureUrl");
+function describeEvolutionTransportError(error: unknown) {
+  const cause = error instanceof Error && error.cause && typeof error.cause === "object"
+    ? (error.cause as { code?: string; message?: string })
+    : null;
+  const code = cause?.code ?? "UNKNOWN";
+  const technicalMessage = cause?.message ?? (error instanceof Error ? error.message : "Unknown transport error");
+
+  if (code === "ENOTFOUND" || code === "EAI_AGAIN") {
+    return {
+      code,
+      technicalMessage,
+      userMessage: "O endereço da Evolution não foi encontrado. Revise EVOLUTION_API_URL na Vercel.",
+    };
+  }
+  if (code === "ECONNREFUSED") {
+    return {
+      code,
+      technicalMessage,
+      userMessage: "A Evolution recusou a conexão. Confirme se a API está pública e em execução.",
+    };
+  }
+  if (code.includes("CERT") || code.includes("TLS")) {
+    return {
+      code,
+      technicalMessage,
+      userMessage: "A conexão segura com a Evolution falhou. Verifique o certificado HTTPS da API.",
+    };
+  }
+
+  return {
+    code,
+    technicalMessage,
+    userMessage: "Não foi possível acessar a Evolution. Confirme a URL pública HTTPS e a disponibilidade da API.",
+  };
+}
+
+export async function fetchContactProfilePictureUrl(phoneNumber: string, instanceName?: string | null) {
+  if (!instanceName) return null;
+
+  const endpoint = getEvolutionInstanceEndpointForName("/chat/fetchProfilePictureUrl", instanceName);
   if (!endpoint) return null;
 
-  const response = await callEvolutionApi<{ profilePictureUrl?: string }>(
+  const response = await callEvolutionApi<{ profilePictureUrl: string }>(
     endpoint,
     { number: normalizePhone(phoneNumber) },
     "POST",
@@ -196,16 +439,32 @@ export async function updateStoredWhatsAppMessageStatus(
     .eq("message_id", messageId);
 }
 
+export function extractEvolutionInstanceName(payload: unknown) {
+  const record = asRecord(payload);
+  const data = asRecord(record?.data);
+  const instance =
+    getString(record, "instance") ??
+    getString(record, "instanceName") ??
+    getString(record, "instance_name") ??
+    getString(data, "instance") ??
+    getString(data, "instanceName") ??
+    getString(data, "instance_name");
+
+  return instance?.trim() || null;
+}
+
 export async function upsertWhatsAppConversation(input: {
   userId: string;
+  organizationId: string | null;
   phoneNumber: string;
-  leadId?: string | null;
-  remoteJid?: string | null;
-  contactName?: string | null;
-  contactAvatarUrl?: string | null;
-  lastMessage?: string | null;
-  direction?: "inbound" | "outbound" | null;
-  status?: "open" | "unread" | "waiting" | "responded" | "converted" | "archived";
+  leadId: string | null;
+  remoteJid: string | null;
+  contactName: string | null;
+  contactAvatarUrl: string | null;
+  lastMessage: string | null;
+  direction: "inbound" | "outbound" | null;
+  status?: "open" | "unread" | "waiting" | "responded" | "converted" | "resolved" | "archived";
+  whatsappInstanceId?: string | null;
 }) {
   const supabase = createSupabaseServiceRoleClient();
   if (!supabase) return;
@@ -214,6 +473,8 @@ export async function upsertWhatsAppConversation(input: {
   const phoneNumber = normalizePhone(input.phoneNumber);
   const payload: Record<string, unknown> = {
     user_id: input.userId,
+    organization_id: input.organizationId ?? null,
+    whatsapp_instance_id: input.whatsappInstanceId ?? null,
     phone_number: phoneNumber,
     status: input.status ?? (input.direction === "inbound" ? "unread" : "responded"),
     updated_at: now,
@@ -234,20 +495,25 @@ export async function upsertWhatsAppConversation(input: {
   }
 
   await supabase.from("whatsapp_conversations").upsert(payload, {
-    onConflict: "user_id,phone_number",
+    onConflict: input.organizationId ? "organization_id,phone_number" : "user_id,phone_number",
   });
 }
 
-export async function recordIncomingWhatsAppMessage(message: EvolutionIncomingMessage) {
+export async function recordIncomingWhatsAppMessage(
+  message: EvolutionIncomingMessage,
+  context: { instanceName?: string | null } = {},
+) {
   const supabase = createSupabaseServiceRoleClient();
   if (!supabase) return;
   const normalizedMessage = normalizeIncomingWebhookMessage(message);
+  const instanceName = context.instanceName ?? extractEvolutionInstanceName(message);
+  const { instance } = instanceName ? await getWhatsAppInstanceByName(instanceName) : { instance: null };
 
   if (!normalizedMessage.remoteJid || !normalizedMessage.messageId) {
     await logWhatsAppEvent("messages.upsert.ignored", {
       reason: "missing_remote_jid_or_message_id",
       message: message as unknown as Record<string, unknown>,
-    });
+    }, null, null);
     return;
   }
 
@@ -256,15 +522,21 @@ export async function recordIncomingWhatsAppMessage(message: EvolutionIncomingMe
       remoteJid: normalizedMessage.remoteJid,
       messageId: normalizedMessage.messageId,
       reason: "group_message",
-    });
+    }, null, null);
     return;
   }
 
   const phoneNumber = normalizePhone(normalizedMessage.remoteJid);
   const messageContent = normalizedMessage.content;
-  const lead = await findLeadByWhatsAppPhone(phoneNumber);
-  const ownerUserId = lead?.user_id ?? (await resolveWebhookOwnerUserId());
-  const avatarUrl = await fetchContactProfilePictureUrl(phoneNumber);
+  const lead = await findLeadByWhatsAppPhone(phoneNumber, instance?.organization_id ?? null);
+  const owner = lead
+    ? { userId: lead.user_id, organizationId: lead.organization_id ?? null }
+    : instance
+      ? await resolveInstanceOwner(instance)
+      : await resolveWebhookOwner();
+  const ownerUserId = owner?.userId ?? null;
+  const organizationId = lead?.organization_id ?? instance?.organization_id ?? owner?.organizationId ?? null;
+  const avatarUrl = await fetchContactProfilePictureUrl(phoneNumber, instance?.instance_name);
 
   if (!ownerUserId) {
     await logWhatsAppEvent("messages.upsert.unmatched", {
@@ -272,7 +544,7 @@ export async function recordIncomingWhatsAppMessage(message: EvolutionIncomingMe
       messageId: normalizedMessage.messageId,
       remoteJid: normalizedMessage.remoteJid,
       reason: "missing_lead_and_owner_user",
-    });
+    }, null, organizationId, instance?.id ?? null);
     return;
   }
 
@@ -281,7 +553,8 @@ export async function recordIncomingWhatsAppMessage(message: EvolutionIncomingMe
       phoneNumber,
       messageId: normalizedMessage.messageId,
       ownerUserId,
-    });
+      organizationId,
+    }, ownerUserId, organizationId, instance?.id ?? null);
   }
 
   const now = new Date().toISOString();
@@ -290,6 +563,8 @@ export async function recordIncomingWhatsAppMessage(message: EvolutionIncomingMe
     {
       lead_id: lead?.id ?? null,
       user_id: ownerUserId,
+      organization_id: organizationId,
+      whatsapp_instance_id: instance?.id ?? null,
       message_id: normalizedMessage.messageId,
       remote_jid: normalizedMessage.remoteJid,
       phone_number: phoneNumber,
@@ -307,6 +582,8 @@ export async function recordIncomingWhatsAppMessage(message: EvolutionIncomingMe
 
   await upsertWhatsAppConversation({
     userId: ownerUserId,
+    organizationId,
+    whatsappInstanceId: instance?.id ?? null,
     leadId: lead?.id ?? null,
     phoneNumber,
     remoteJid: normalizedMessage.remoteJid,
@@ -321,6 +598,7 @@ export async function recordIncomingWhatsAppMessage(message: EvolutionIncomingMe
       supabase.from("interactions").insert({
         lead_id: lead.id,
         user_id: lead.user_id,
+        organization_id: lead.organization_id ?? null,
         note: `Lead respondeu: ${messageContent || "mensagem recebida"}`,
         message: messageContent,
         type: "note",
@@ -336,14 +614,21 @@ export async function recordIncomingWhatsAppMessage(message: EvolutionIncomingMe
         .eq("id", lead.id),
     ]);
   }
+
+  if (instance?.instance_name) {
+    await updateWhatsAppInstance(instance.instance_name, {
+      last_webhook_at: now,
+      last_error: null,
+    });
+  }
 }
 
 function normalizeIncomingWebhookMessage(message: unknown) {
-  const record = asRecord(message);
-  const key = asRecord(record?.key);
-  const nestedData = asRecord(record?.data);
-  const nestedKey = asRecord(nestedData?.key);
-  const messageBody = asRecord(record?.message) ?? asRecord(nestedData?.message);
+  const record = asRecord(message) ?? {};
+  const key = asRecord(record.key) ?? {};
+  const nestedData = asRecord(record.data) ?? {};
+  const nestedKey = asRecord(nestedData.key) ?? {};
+  const messageBody = asRecord(record.message) ?? asRecord(nestedData.message);
 
   const remoteJid =
     getString(key, "remoteJid") ??
@@ -361,28 +646,39 @@ function normalizeIncomingWebhookMessage(message: unknown) {
     getString(nestedData, "id") ??
     getString(nestedData, "keyId") ??
     getString(nestedData, "messageId");
-  const fromMe = Boolean(key?.fromMe ?? nestedKey?.fromMe ?? record?.fromMe ?? nestedData?.fromMe);
+  const fromMe = Boolean(key.fromMe ?? nestedKey.fromMe ?? record.fromMe ?? nestedData.fromMe);
+
+  const rawContactName = getString(record, "pushName") ?? getString(nestedData, "pushName") ?? null;
 
   return {
     remoteJid,
     messageId,
     fromMe,
-    contactName: getString(record, "pushName") ?? getString(nestedData, "pushName") ?? null,
+    contactName: fromMe ? null : rawContactName,
     content: extractIncomingMessageContent(messageBody),
-    status: record?.status ?? nestedData?.status,
+    status: record.status ?? nestedData.status,
   };
 }
 
 function extractIncomingMessageContent(messageBody: Record<string, unknown> | null) {
   const extendedTextMessage = asRecord(messageBody?.extendedTextMessage);
   const imageMessage = asRecord(messageBody?.imageMessage);
+  const audioMessage = asRecord(messageBody?.audioMessage);
   const documentMessage = asRecord(messageBody?.documentMessage);
+  const videoMessage = asRecord(messageBody?.videoMessage);
+  const stickerMessage = asRecord(messageBody?.stickerMessage);
 
   return (
     getString(messageBody, "conversation") ??
     getString(extendedTextMessage, "text") ??
     getString(imageMessage, "caption") ??
+    (imageMessage ? "Imagem recebida" : null) ??
+    (audioMessage ? "Áudio recebido" : null) ??
+    getString(videoMessage, "caption") ??
+    (videoMessage ? "Vídeo recebido" : null) ??
     getString(documentMessage, "fileName") ??
+    (documentMessage ? "Documento recebido" : null) ??
+    (stickerMessage ? "Sticker recebido" : null) ??
     ""
   );
 }
@@ -396,44 +692,67 @@ function getString(record: Record<string, unknown> | null | undefined, key: stri
   return typeof value === "string" && value.trim() ? value : null;
 }
 
-async function resolveWebhookOwnerUserId() {
+async function resolveWebhookOwner() {
   const configuredOwner = process.env.ORIGOCRM_OWNER_USER_ID || process.env.CRM_OWNER_USER_ID;
-  if (configuredOwner) return configuredOwner;
+  if (configuredOwner) return { userId: configuredOwner, organizationId: null as string | null };
 
   const supabase = createSupabaseServiceRoleClient();
   if (!supabase) return null;
 
   for (const table of ["leads", "message_templates", "interactions"]) {
-    const { data } = await supabase.from(table).select("user_id").limit(1).maybeSingle();
-    const userId = (data as { user_id?: string } | null)?.user_id;
-    if (userId) return userId;
+    const { data } = await supabase.from(table).select("user_id,organization_id").limit(1).maybeSingle();
+    const row = data as { user_id: string; organization_id: string | null } | null;
+    if (row?.user_id) return { userId: row.user_id, organizationId: row.organization_id ?? null };
   }
 
   const { data } = await supabase.auth.admin.listUsers({ page: 1, perPage: 1 });
-  return data.users[0]?.id ?? null;
+  const fallbackUserId = data.users[0]?.id ?? null;
+  return fallbackUserId ? { userId: fallbackUserId, organizationId: null as string | null } : null;
 }
 
-async function findLeadByWhatsAppPhone(phoneNumber: string) {
+async function resolveInstanceOwner(instance: WhatsAppInstanceRecord) {
+  if (instance.created_by_user_id) {
+    return { userId: instance.created_by_user_id, organizationId: instance.organization_id };
+  }
+
+  const supabase = createSupabaseServiceRoleClient();
+  if (!supabase) return null;
+
+  const { data } = await supabase
+    .from("organizations")
+    .select("owner_user_id")
+    .eq("id", instance.organization_id)
+    .maybeSingle();
+
+  const ownerUserId = typeof data?.owner_user_id === "string" ? data.owner_user_id : null;
+  return ownerUserId ? { userId: ownerUserId, organizationId: instance.organization_id } : null;
+}
+
+async function findLeadByWhatsAppPhone(phoneNumber: string, organizationId?: string | null) {
   const supabase = createSupabaseServiceRoleClient();
   if (!supabase) return null;
 
   const candidates = getBrazilianPhoneCandidates(phoneNumber);
 
-  const { data } = await supabase
+  let exactQuery = supabase
     .from("leads")
-    .select("id,user_id,phone,created_at")
-    .in("phone", candidates)
-    .order("created_at", { ascending: false })
-    .limit(1);
+    .select("id,user_id,organization_id,phone,created_at")
+    .in("phone", candidates);
 
-  const exactLead = (data?.[0] as { id: string; user_id: string } | undefined) ?? null;
+  if (organizationId) exactQuery = exactQuery.eq("organization_id", organizationId);
+
+  const { data } = await exactQuery.order("created_at", { ascending: false }).limit(1);
+
+  const exactLead = (data?.[0] as { id: string; user_id: string; organization_id: string | null } | undefined) ?? null;
   if (exactLead) return exactLead;
 
-  const { data: fallbackData } = await supabase
+  let fallbackQuery = supabase
     .from("leads")
-    .select("id,user_id,phone,created_at")
-    .order("created_at", { ascending: false })
-    .limit(200);
+    .select("id,user_id,organization_id,phone,created_at");
+
+  if (organizationId) fallbackQuery = fallbackQuery.eq("organization_id", organizationId);
+
+  const { data: fallbackData } = await fallbackQuery.order("created_at", { ascending: false }).limit(200);
 
   const fallbackLead = fallbackData?.find((lead) => {
     const normalizedLeadPhone = normalizePhone(String(lead.phone ?? ""));
@@ -446,7 +765,7 @@ async function findLeadByWhatsAppPhone(phoneNumber: string) {
     );
   });
 
-  return (fallbackLead as { id: string; user_id: string } | undefined) ?? null;
+  return (fallbackLead as { id: string; user_id: string; organization_id: string | null } | undefined) ?? null;
 }
 
 function getBrazilianPhoneCandidates(phoneNumber: string) {

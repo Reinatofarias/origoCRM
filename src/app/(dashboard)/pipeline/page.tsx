@@ -1,11 +1,5 @@
-/**
- * Página do Pipeline Kanban
- */
+import { CrmApp } from "@/components/crm-app";
+
 export default function PipelinePage() {
-  return (
-    <div>
-      {/* TODO: Implementar pipeline com drag-and-drop */}
-      <h1>Pipeline</h1>
-    </div>
-  );
+  return <CrmApp initialView="pipeline" />;
 }

@@ -1,6 +1,6 @@
 export const APP_CONFIG = {
-  name: "ORIGOCRM",
-  description: "CRM de prospeccao via WhatsApp",
+  name: "OrigoCRM",
+  description: "Converse, organize e feche pelo WhatsApp",
   version: "0.1.0",
 
   urls: {

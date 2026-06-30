@@ -2,41 +2,56 @@ import { NextResponse } from "next/server";
 
 import {
   callEvolutionApi,
-  getEvolutionInstanceEndpoint,
+  ensureWhatsAppInstanceForOrganization,
+  getEvolutionInstanceEndpointForName,
   getEvolutionServerConfig,
+  provisionEvolutionInstance,
+  updateWhatsAppInstance,
 } from "@/lib/server/evolution";
-import { createSupabaseServerClient } from "@/lib/server/supabase";
+import { getAuthenticatedOrganizationContext, requireServerPermission, requireServerPlanFeature } from "@/lib/server/auth";
+import { enforceRateLimit, rateLimitJson } from "@/lib/server/security";
 
 export const dynamic = "force-dynamic";
 
 type EvolutionConnectionStateResponse = {
   instance?: {
+    ownerJid?: string;
+    profileName?: string;
     state?: string;
   };
+  ownerJid?: string;
+  profileName?: string;
+  number?: string;
   state?: string;
 };
 
-async function requireUser() {
-  const supabase = await createSupabaseServerClient();
-  if (!supabase) return null;
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  return user ?? null;
-}
-
-export async function GET() {
-  const user = await requireUser();
-  if (!user) {
-    return NextResponse.json({ configured: false, error: "Nao autenticado" }, { status: 401 });
+export async function GET(request: Request) {
+  const auth = await getAuthenticatedOrganizationContext();
+  if ("error" in auth) {
+    return NextResponse.json({ configured: false, error: "Não autenticado" }, { status: 401 });
   }
 
-  const config = getEvolutionServerConfig();
-  const endpoint = getEvolutionInstanceEndpoint("/instance/connectionState");
+  const permissionError = requireServerPermission(auth, "settings:manage");
+  if (permissionError) {
+    return NextResponse.json({ configured: true, connected: false, state: "forbidden", error: permissionError }, { status: 403 });
+  }
 
-  if (!config || !endpoint) {
+  const planError = await requireServerPlanFeature(auth, "conversations");
+  if (planError) {
+    return NextResponse.json({ configured: true, connected: false, state: "plan_blocked", error: planError }, { status: 402 });
+  }
+
+  const rateLimit = await enforceRateLimit({
+    request,
+    scope: "evolution.status",
+    identifier: auth.organizationId ?? auth.user.id,
+    limit: 30,
+    windowSeconds: 60,
+  });
+  if (!rateLimit.allowed) return rateLimitJson(rateLimit);
+
+  const config = getEvolutionServerConfig();
+  if (!config || !auth.organizationId) {
     return NextResponse.json({
       configured: false,
       connected: false,
@@ -44,33 +59,75 @@ export async function GET() {
     });
   }
 
-  const response = await callEvolutionApi<EvolutionConnectionStateResponse>(
-    endpoint,
-    undefined,
-    "GET",
-  );
+  const { instance, error: instanceError } = await ensureWhatsAppInstanceForOrganization({
+    organizationId: auth.organizationId,
+    userId: auth.user.id,
+  });
+  if (!instance) {
+    return NextResponse.json({
+      configured: true,
+      connected: false,
+      state: "not_created",
+      error: instanceError ?? null,
+    });
+  }
+
+  const endpoint = getEvolutionInstanceEndpointForName("/instance/connectionState", instance.instance_name);
+  if (!endpoint) {
+    return NextResponse.json({ configured: true, connected: false, state: "invalid_instance" }, { status: 400 });
+  }
+
+  let response = await callEvolutionApi<EvolutionConnectionStateResponse>(endpoint, {}, "GET");
+
+  if (response.status === 404) {
+    const provision = await provisionEvolutionInstance(instance.instance_name);
+    if (provision.success) {
+      response = await callEvolutionApi<EvolutionConnectionStateResponse>(endpoint, {}, "GET");
+    } else {
+      response = { status: 502, error: provision.error ?? "Erro ao criar instância na Evolution" };
+    }
+  }
 
   if (response.error || !response.data) {
+    await updateWhatsAppInstance(instance.instance_name, { status: "error", last_error: response.error ?? "Erro ao consultar Evolution" });
     return NextResponse.json(
       {
         configured: true,
         connected: false,
-        instanceName: config.instanceName?.trim() ?? "",
+        instanceName: instance.instance_name,
         state: "error",
-        error: response.error ?? "Nao foi possivel consultar a Evolution",
+        error: response.error ?? "Não foi possível consultar a Evolution",
       },
       { status: response.status >= 400 ? response.status : 502 },
     );
   }
 
-  const state = (response.data.instance?.state ?? response.data.state ?? "unknown")
-    .trim()
-    .toLowerCase();
+  const state = (response.data.instance?.state ?? response.data.state ?? "unknown").trim().toLowerCase();
+  const phoneNumber = normalizeOwnerPhone(
+    response.data.instance?.ownerJid ?? response.data.ownerJid ?? response.data.number ?? "",
+  );
+  const profileName = response.data.instance?.profileName ?? response.data.profileName ?? null;
+  const connected = ["open", "connected"].includes(state);
+
+  await updateWhatsAppInstance(instance.instance_name, {
+    status: connected ? "connected" : state,
+    phone_number: phoneNumber,
+    profile_name: profileName,
+    last_error: null,
+    connected_at: connected ? new Date().toISOString() : instance.connected_at,
+  });
 
   return NextResponse.json({
     configured: true,
-    connected: ["open", "connected"].includes(state),
-    instanceName: config.instanceName?.trim() ?? "",
+    connected,
+    instanceName: instance.instance_name,
+    phoneNumber,
+    profileName,
     state,
   });
+}
+
+function normalizeOwnerPhone(value: string) {
+  if (!value) return null;
+  return value.split("@")[0].replace(/\D/g, "") || null;
 }

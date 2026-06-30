@@ -1,8 +1,12 @@
 @import "tailwindcss";
 
 :root {
-  --background: #0b0b0f;
-  --foreground: #f8fafc;
+  --background: #09090d;
+  --foreground: #f5f3ff;
+  --brand-purple: #8b5cf6;
+  --brand-purple-strong: #6d28d9;
+  --brand-silver: #d9d6e7;
+  --brand-panel: #121119;
 }
 
 @theme inline {
@@ -20,10 +24,375 @@ body {
 
 * {
   scrollbar-width: thin;
-  scrollbar-color: #27272a #0b0b0f;
+  scrollbar-color: #3b2a63 #09090d;
 }
 
 ::selection {
-  background: #7c3aed;
+  background: #8b5cf6;
   color: white;
+}
+
+@keyframes origo-fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(18px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes origo-float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-10px);
+  }
+}
+
+@keyframes origo-glow {
+  0%,
+  100% {
+    opacity: 0.58;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.92;
+    transform: scale(1.04);
+  }
+}
+
+@keyframes origo-shine {
+  0% {
+    transform: translateX(-150%) skewX(-18deg);
+  }
+  45%,
+  100% {
+    transform: translateX(240%) skewX(-18deg);
+  }
+}
+
+@keyframes origo-bar {
+  from {
+    width: 0;
+  }
+  to {
+    width: var(--bar-width, 60%);
+  }
+}
+
+.reveal-up {
+  animation: origo-fade-up 720ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation-delay: var(--delay, 0ms);
+}
+
+.scroll-reveal {
+  animation: origo-fade-up 720ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.float-slow {
+  animation: origo-float 7s ease-in-out infinite;
+}
+
+.glow-breathe {
+  animation: origo-glow 10s ease-in-out infinite;
+  transform-origin: center;
+}
+
+.shine-cta {
+  isolation: isolate;
+  position: relative;
+  overflow: hidden;
+}
+
+.shine-cta::after {
+  animation: origo-shine 3.8s ease-in-out infinite;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.35), transparent);
+  content: "";
+  inset: 0 auto 0 -35%;
+  pointer-events: none;
+  position: absolute;
+  width: 32%;
+  z-index: 0;
+}
+
+.shine-cta > * {
+  position: relative;
+  z-index: 1;
+}
+
+.animate-bar {
+  animation: origo-bar 950ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation-delay: var(--delay, 0ms);
+}
+
+@supports (animation-timeline: view()) {
+  .scroll-reveal {
+    opacity: 0;
+    animation-timeline: view();
+    animation-range: entry 8% cover 26%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reveal-up,
+  .scroll-reveal,
+  .float-slow,
+  .glow-breathe,
+  .shine-cta::after,
+  .animate-bar {
+    animation: none !important;
+  }
+}
+
+.crm-shell :is(section, article).rounded-lg,
+.crm-shell :is(section, article).rounded-xl,
+.crm-shell :is(section, article).rounded-2xl {
+  backdrop-filter: blur(16px);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.18);
+}
+
+.crm-shell :is(section, article).rounded-lg:hover,
+.crm-shell :is(section, article).rounded-xl:hover,
+.crm-shell :is(section, article).rounded-2xl:hover {
+  border-color: rgba(139, 92, 246, 0.22);
+}
+
+.crm-shell input,
+.crm-shell select,
+.crm-shell textarea {
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.025);
+}
+
+.crm-shell button,
+.crm-shell a {
+  -webkit-tap-highlight-color: transparent;
+}
+
+.crm-shell [class*="bg-white/[0.03]"],
+.crm-shell [class*="bg-white/[0.035]"],
+.crm-shell [class*="bg-white/[0.04]"] {
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.018), rgba(255, 255, 255, 0));
+}
+
+.crm-shell.crm-theme-light {
+  background: #f6f3ff;
+  color: #191426;
+}
+
+.crm-theme-light .crm-content {
+  background:
+    radial-gradient(ellipse at 18% 0%, rgba(139, 92, 246, 0.14), transparent 35%),
+    radial-gradient(ellipse at 92% 8%, rgba(37, 211, 102, 0.09), transparent 28%),
+    #f7f4ff;
+  color: #191426;
+}
+
+.crm-theme-light .crm-sidebar {
+  background:
+    radial-gradient(ellipse at 18% 8%, rgba(139, 92, 246, 0.22), transparent 34%),
+    #07070b !important;
+  color: #f5f3ff;
+}
+
+.crm-theme-light .crm-sidebar :is(.text-zinc-400, .text-zinc-500, .text-zinc-600) {
+  color: #a1a1aa !important;
+}
+
+.crm-theme-light .crm-content-header {
+  background: rgba(255, 255, 255, 0.7) !important;
+  border-color: rgba(39, 33, 52, 0.12) !important;
+}
+
+.crm-theme-light .crm-content-body {
+  color: #191426;
+}
+
+.crm-theme-light .crm-content :is(section, article, div).rounded-lg,
+.crm-theme-light .crm-content :is(section, article, div).rounded-xl,
+.crm-theme-light .crm-content :is(section, article, div).rounded-2xl {
+  border-color: rgba(39, 33, 52, 0.12);
+  box-shadow: 0 10px 24px rgba(42, 32, 64, 0.055);
+}
+
+.crm-theme-light .crm-content [class*="bg-black/"],
+.crm-theme-light .crm-content [class*="bg-white/[0.02"],
+.crm-theme-light .crm-content [class*="bg-white/[0.03"],
+.crm-theme-light .crm-content [class*="bg-white/[0.04"],
+.crm-theme-light .crm-content [class*="bg-[#121119]"] {
+  background-color: rgba(255, 255, 255, 0.78) !important;
+}
+
+.crm-theme-light .crm-content :is(input, select, textarea) {
+  background: rgba(255, 255, 255, 0.86) !important;
+  border-color: rgba(39, 33, 52, 0.14) !important;
+  color: #191426 !important;
+}
+
+.crm-theme-light .crm-content :is(.text-white, .text-zinc-100, .text-zinc-200, .text-zinc-300) {
+  color: #191426 !important;
+}
+
+.crm-theme-light .crm-content :is(.text-zinc-400, .text-zinc-500, .text-zinc-600) {
+  color: #665d76 !important;
+}
+
+.crm-theme-light .crm-content [class*="text-[#9AF0B8]"],
+.crm-theme-light .crm-content [class*="text-[#25D366]"] {
+  color: #047857 !important;
+}
+
+.crm-theme-light .crm-content [class*="text-[#DDD6FE]"],
+.crm-theme-light .crm-content [class*="text-[#C4B5FD]"],
+.crm-theme-light .crm-content [class*="text-[#A78BFA]"] {
+  color: #6d28d9 !important;
+}
+
+.crm-theme-light .crm-content :is(.text-amber-100, .text-amber-200, .text-amber-300) {
+  color: #92400e !important;
+}
+
+.crm-theme-light .crm-content :is(.text-red-100, .text-red-200, .text-red-300) {
+  color: #b91c1c !important;
+}
+
+.crm-theme-light .crm-content [class*="text-[#0EA5E9]"] {
+  color: #0369a1 !important;
+}
+
+.crm-theme-light .crm-content [class~="bg-[#8B5CF6]"],
+.crm-theme-light .crm-content [class~="bg-red-500"] {
+  color: #ffffff !important;
+}
+
+.crm-theme-light .crm-content [class~="bg-[#25D366]"] {
+  color: #04130a !important;
+}
+
+.crm-theme-light .crm-content [class*="bg-red-500/10"] {
+  background-color: rgba(254, 226, 226, 0.82) !important;
+}
+
+.crm-theme-light .crm-content [class*="bg-amber-500/10"],
+.crm-theme-light .crm-content [class*="bg-amber-400/10"] {
+  background-color: rgba(254, 243, 199, 0.86) !important;
+}
+
+.crm-theme-light .crm-content [class*="bg-[#25D366]/10"] {
+  background-color: rgba(220, 252, 231, 0.86) !important;
+}
+
+.crm-theme-light .crm-content [class*="bg-[#8B5CF6]/10"],
+.crm-theme-light .crm-content [class*="bg-[#8B5CF6]/15"],
+.crm-theme-light .crm-content [class*="bg-[#8B5CF6]/20"] {
+  background-color: rgba(237, 233, 254, 0.9) !important;
+}
+
+.crm-theme-light .crm-content :is(.divide-white\/10 > :not([hidden]) ~ :not([hidden])) {
+  border-color: rgba(39, 33, 52, 0.11) !important;
+}
+
+.crm-theme-light .crm-modal-surface {
+  background: rgba(15, 15, 22, 0.96) !important;
+  border-color: rgba(139, 92, 246, 0.32) !important;
+  color: #f8fafc !important;
+}
+
+.crm-theme-light .crm-modal-surface :is(h2, label, .text-white, .text-zinc-100, .text-zinc-200, .text-zinc-300) {
+  color: #f8fafc !important;
+}
+
+.crm-theme-light .crm-modal-surface :is(.text-zinc-400, .text-zinc-500, .text-zinc-600) {
+  color: #a1a1aa !important;
+}
+
+.crm-theme-light .crm-modal-surface :is(input, select, textarea) {
+  background: rgba(5, 5, 10, 0.78) !important;
+  border-color: rgba(255, 255, 255, 0.14) !important;
+  color: #f8fafc !important;
+}
+
+.crm-theme-light .crm-modal-surface :is(input, textarea)::placeholder {
+  color: #71717a !important;
+}
+
+.crm-theme-light .crm-modal-surface option {
+  background: #0f0f16;
+  color: #f8fafc;
+}
+
+.crm-conversations {
+  background:
+    radial-gradient(ellipse at 62% 6%, rgba(139, 92, 246, 0.08), transparent 34%),
+    #0b0b10;
+}
+
+.crm-conversations-list,
+.crm-conversations-detail,
+.crm-conversations-toolbar {
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.crm-conversations-chat {
+  background:
+    radial-gradient(ellipse at 50% 18%, rgba(139, 92, 246, 0.08), transparent 35%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.025), rgba(0, 0, 0, 0.08));
+}
+
+.crm-theme-light .crm-conversations {
+  background:
+    radial-gradient(ellipse at 18% 0%, rgba(139, 92, 246, 0.1), transparent 35%),
+    radial-gradient(ellipse at 92% 6%, rgba(37, 211, 102, 0.07), transparent 30%),
+    #f7f4ff;
+}
+
+.crm-theme-light .crm-conversations-list,
+.crm-theme-light .crm-conversations-detail,
+.crm-theme-light .crm-conversations-toolbar {
+  background: rgba(255, 255, 255, 0.9) !important;
+  border-color: rgba(39, 33, 52, 0.12) !important;
+}
+
+.crm-theme-light .crm-conversations-chat {
+  background:
+    radial-gradient(ellipse at 50% 12%, rgba(139, 92, 246, 0.08), transparent 32%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.68), rgba(247, 244, 255, 0.92)) !important;
+}
+
+.crm-theme-light .crm-conversations .border-white\/10 {
+  border-color: rgba(39, 33, 52, 0.12) !important;
+}
+
+.crm-theme-light .crm-conversations [class*="hover:bg-white/"]:hover {
+  background-color: rgba(139, 92, 246, 0.07) !important;
+}
+
+.crm-theme-light .crm-conversations [class*="bg-[#25D366]"] {
+  color: #052e16 !important;
+}
+
+.crm-theme-light .crm-pipeline-metric,
+.crm-theme-light .crm-pipeline-actions,
+.crm-theme-light .crm-pipeline-column {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.88), rgba(255, 255, 255, 0.74)) !important;
+  border-color: rgba(39, 33, 52, 0.1) !important;
+  box-shadow: 0 8px 22px rgba(42, 32, 64, 0.045) !important;
+}
+
+.crm-theme-light .crm-pipeline-column {
+  min-height: 28rem;
+}
+
+.crm-theme-light .crm-lead-card {
+  background: rgba(255, 255, 255, 0.92) !important;
+  border-color: rgba(39, 33, 52, 0.12) !important;
+  box-shadow: 0 8px 18px rgba(42, 32, 64, 0.055) !important;
+}
+
+.crm-theme-light .crm-lead-card:hover {
+  box-shadow: 0 12px 26px rgba(42, 32, 64, 0.08) !important;
 }

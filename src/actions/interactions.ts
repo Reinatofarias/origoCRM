@@ -2,36 +2,24 @@
 
 import { revalidatePath } from "next/cache";
 
-import { createSupabaseServerClient } from "@/lib/server/supabase";
-
-async function getAuthenticatedSupabase() {
-  const supabase = await createSupabaseServerClient();
-  if (!supabase) return { error: "Supabase nao configurado" };
-
-  const {
-    data: { user },
-    error,
-  } = await supabase.auth.getUser();
-
-  if (error || !user) return { error: "Sessao expirada. Entre novamente." };
-
-  return { supabase, user };
-}
+import { getAuthenticatedOrganizationContext, requireServerPermission, withOrganizationId } from "@/lib/server/auth";
 
 export async function createInteraction(leadId: string, note: string) {
-  const auth = await getAuthenticatedSupabase();
+  const auth = await getAuthenticatedOrganizationContext();
   if ("error" in auth) return { success: false, error: auth.error };
+  const permissionError = requireServerPermission(auth, "lead:update");
+  if (permissionError) return { success: false, error: permissionError };
 
   const { data, error } = await auth.supabase
     .from("interactions")
-    .insert({
+    .insert(withOrganizationId({
       lead_id: leadId,
       user_id: auth.user.id,
       note,
       message: note,
       type: "note",
       channel: "whatsapp",
-    })
+    }, auth.organizationId))
     .select()
     .single();
 
@@ -42,14 +30,19 @@ export async function createInteraction(leadId: string, note: string) {
 }
 
 export async function deleteInteraction(interactionId: string) {
-  const auth = await getAuthenticatedSupabase();
+  const auth = await getAuthenticatedOrganizationContext();
   if ("error" in auth) return { success: false, error: auth.error };
+  const permissionError = requireServerPermission(auth, "lead:update");
+  if (permissionError) return { success: false, error: permissionError };
 
-  const { error } = await auth.supabase
+  let query = auth.supabase
     .from("interactions")
     .delete()
-    .eq("id", interactionId)
-    .eq("user_id", auth.user.id);
+    .eq("id", interactionId);
+
+  query = auth.organizationId ? query.eq("organization_id", auth.organizationId) : query.eq("user_id", auth.user.id);
+
+  const { error } = await query;
 
   if (error) return { success: false, error: error.message };
 
