@@ -106,7 +106,21 @@ export async function ensureWhatsAppInstanceForOrganization(input: {
   if (existing.error && existing.error.includes("whatsapp_instances")) {
     return { instance: null, error: "Aplique supabase/whatsapp_instances_migration.sql." };
   }
-  if (existing.instance) return { instance: existing.instance, error: null };
+  if (existing.instance) {
+    if (["created", "error", "provisioning"].includes(existing.instance.status)) {
+      const provision = await provisionEvolutionInstance(existing.instance.instance_name);
+      if (!provision.success) {
+        return { instance: existing.instance, error: provision.error };
+      }
+
+      return {
+        instance: { ...existing.instance, status: "created", last_error: null },
+        error: null,
+      };
+    }
+
+    return { instance: existing.instance, error: null };
+  }
 
   const instanceName = buildWhatsAppInstanceName(input.organizationId);
   const now = new Date().toISOString();
@@ -126,11 +140,19 @@ export async function ensureWhatsAppInstanceForOrganization(input: {
   if (error) return { instance: null, error: error.message };
 
   const instance = data as WhatsAppInstanceRecord;
-  await provisionEvolutionInstance(instance.instance_name);
-  return { instance, error: null };
+  const provision = await provisionEvolutionInstance(instance.instance_name);
+  return {
+    instance: provision.success ? { ...instance, status: "created", last_error: null } : instance,
+    error: provision.error,
+  };
 }
 
-async function provisionEvolutionInstance(instanceName: string) {
+export async function provisionEvolutionInstance(instanceName: string): Promise<{
+  success: boolean;
+  error: string | null;
+}> {
+  await updateWhatsAppInstance(instanceName, { status: "provisioning", last_error: null });
+
   const createResponse = await callEvolutionApi<Record<string, unknown>>(
     "/instance/create",
     {
@@ -143,15 +165,15 @@ async function provisionEvolutionInstance(instanceName: string) {
 
   if (createResponse.error && !createResponse.error.toLowerCase().includes("already")) {
     await updateWhatsAppInstance(instanceName, { status: "error", last_error: createResponse.error });
-    return;
+    return { success: false, error: createResponse.error };
   }
 
   await updateWhatsAppInstance(instanceName, { status: "created", last_error: null });
 
   const appUrl = process.env.APP_URL?.replace(/\/+$/, "");
-  if (!appUrl) return;
+  if (!appUrl) return { success: true, error: null };
 
-  await callEvolutionApi<Record<string, unknown>>(
+  const webhookResponse = await callEvolutionApi<Record<string, unknown>>(
     getEvolutionInstanceEndpointForName("/webhook/set", instanceName) ?? "",
     {
       enabled: true,
@@ -167,6 +189,13 @@ async function provisionEvolutionInstance(instanceName: string) {
     },
     "POST",
   );
+
+  if (webhookResponse.error) {
+    await updateWhatsAppInstance(instanceName, { last_error: webhookResponse.error });
+    return { success: false, error: webhookResponse.error };
+  }
+
+  return { success: true, error: null };
 }
 
 export async function updateWhatsAppInstance(

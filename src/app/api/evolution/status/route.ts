@@ -5,6 +5,7 @@ import {
   ensureWhatsAppInstanceForOrganization,
   getEvolutionInstanceEndpointForName,
   getEvolutionServerConfig,
+  provisionEvolutionInstance,
   updateWhatsAppInstance,
 } from "@/lib/server/evolution";
 import { getAuthenticatedOrganizationContext, requireServerPermission, requireServerPlanFeature } from "@/lib/server/auth";
@@ -76,7 +77,16 @@ export async function GET(request: Request) {
     return NextResponse.json({ configured: true, connected: false, state: "invalid_instance" }, { status: 400 });
   }
 
-  const response = await callEvolutionApi<EvolutionConnectionStateResponse>(endpoint, {}, "GET");
+  let response = await callEvolutionApi<EvolutionConnectionStateResponse>(endpoint, {}, "GET");
+
+  if (response.status === 404) {
+    const provision = await provisionEvolutionInstance(instance.instance_name);
+    if (provision.success) {
+      response = await callEvolutionApi<EvolutionConnectionStateResponse>(endpoint, {}, "GET");
+    } else {
+      response = { status: 502, error: provision.error ?? "Erro ao criar instância na Evolution" };
+    }
+  }
 
   if (response.error || !response.data) {
     await updateWhatsAppInstance(instance.instance_name, { status: "error", last_error: response.error ?? "Erro ao consultar Evolution" });
