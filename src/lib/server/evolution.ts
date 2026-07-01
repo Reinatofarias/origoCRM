@@ -257,7 +257,17 @@ export async function callEvolutionApi<T>(
       const responseMessage =
         responseData && typeof (responseData as Record<string, unknown>).message === "string"
           ? String((responseData as Record<string, unknown>).message)
-          : `Erro ${response.status}`;
+          : response.status === 401
+            ? "A Evolution recusou a chave da API. Configure EVOLUTION_API_KEY com a chave global AUTHENTICATION_API_KEY do servidor Evolution, não com o token de uma instância."
+            : response.status === 403
+              ? "A chave configurada não tem permissão para executar esta ação na Evolution."
+              : `Erro ${response.status}`;
+
+      console.error("[evolution] API rejected request", {
+        endpoint,
+        method,
+        status: response.status,
+      });
 
       return {
         status: response.status,
