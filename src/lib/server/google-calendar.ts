@@ -138,7 +138,7 @@ export function buildGoogleCalendarAuthorizationUrl(state: string) {
     state,
   });
 
-  return `https://accounts.google.com/o/oauth2/v2/auth${params.toString()}`;
+  return `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`;
 }
 
 export async function exchangeGoogleAuthorizationCode(code: string) {
