@@ -38,25 +38,28 @@ export function useConversationInbox(organizationId: string | null, selectedPhon
         return;
       }
 
+      if (!organizationId) {
+        setMessages([]);
+        setStoredConversations([]);
+        setCurrentInstanceId(null);
+        setRealtimeStatus("disabled");
+        setLoading(false);
+        return;
+      }
+
       if (!silent) setLoading(true);
       let instanceId: string | null = null;
-      if (organizationId) {
-        const { data: instanceData } = await supabase
-          .from("whatsapp_instances")
-          .select("id")
-          .eq("organization_id", organizationId)
-          .eq("provider", "evolution")
-          .maybeSingle();
-        instanceId = typeof instanceData?.id === "string" ? instanceData.id : null;
-      }
+      const { data: instanceData } = await supabase
+        .from("whatsapp_instances")
+        .select("id")
+        .eq("organization_id", organizationId)
+        .eq("provider", "evolution")
+        .maybeSingle();
+      instanceId = typeof instanceData?.id === "string" ? instanceData.id : null;
       setCurrentInstanceId(instanceId);
 
-      let messageQuery = organizationId
-        ? supabase.from("whatsapp_messages").select("*").eq("organization_id", organizationId)
-        : supabase.from("whatsapp_messages").select("*");
-      let conversationQuery = organizationId
-        ? supabase.from("whatsapp_conversations").select("*").eq("organization_id", organizationId)
-        : supabase.from("whatsapp_conversations").select("*");
+      let messageQuery = supabase.from("whatsapp_messages").select("*").eq("organization_id", organizationId);
+      let conversationQuery = supabase.from("whatsapp_conversations").select("*").eq("organization_id", organizationId);
 
       if (instanceId) {
         messageQuery = messageQuery.eq("whatsapp_instance_id", instanceId);
@@ -83,6 +86,7 @@ export function useConversationInbox(organizationId: string | null, selectedPhon
 
   useEffect(() => {
     if (!supabase) return;
+    if (!organizationId) return;
 
     let mounted = true;
     let reconnectTimer: number | null = null;
@@ -117,10 +121,10 @@ export function useConversationInbox(organizationId: string | null, selectedPhon
       setRealtimeStatus("fallback");
       scheduleReconnect();
     };
-    const realtimeFilter = organizationId ? `organization_id=eq.${organizationId}` : undefined;
+    const realtimeFilter = `organization_id=eq.${organizationId}`;
 
     const messageChannel = supabase
-      .channel(`whatsapp-messages:${organizationId ?? "all"}:${realtimeRetryKey}`)
+      .channel(`whatsapp-messages:${organizationId}:${realtimeRetryKey}`)
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "whatsapp_messages", filter: realtimeFilter },
@@ -147,7 +151,7 @@ export function useConversationInbox(organizationId: string | null, selectedPhon
       .subscribe((status) => updateChannelStatus("messages", status));
 
     const conversationChannel = supabase
-      .channel(`whatsapp-conversations:${organizationId ?? "all"}:${realtimeRetryKey}`)
+      .channel(`whatsapp-conversations:${organizationId}:${realtimeRetryKey}`)
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "whatsapp_conversations", filter: realtimeFilter },
