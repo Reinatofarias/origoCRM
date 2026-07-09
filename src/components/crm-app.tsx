@@ -3391,6 +3391,7 @@ function Conversations({
   const [sending, setSending] = useState(false);
   const [savingLead, setSavingLead] = useState(false);
   const [conversationActionLoading, setConversationActionLoading] = useState<"resolved" | "archived" | null>(null);
+  const [bulkConversationLoading, setBulkConversationLoading] = useState(false);
   const [replyMoveStatus, setReplyMoveStatus] = useState<LeadStatus>("");
   const [replyFollowupDays, setReplyFollowupDays] = useState("");
   const [actionError, setActionError] = useState("");
@@ -3753,6 +3754,70 @@ function Conversations({
     });
   }
 
+  async function archiveVisibleConversations() {
+    const targets = filteredConversations.filter((conversation) => conversation.status !== "archived");
+    if (targets.length === 0) return;
+
+    const confirmed = window.confirm(
+      `Arquivar ${targets.length} conversa(s) visíveis agora? Elas sairão da inbox principal, mas o histórico continuará salvo e poderá ser visto em Arquivadas.`,
+    );
+    if (!confirmed) return;
+
+    const previous = storedConversations;
+    const now = new Date().toISOString();
+    setActionError("");
+    setBulkConversationLoading(true);
+    setStoredConversations((items) =>
+      targets.reduce(
+        (current, conversation) =>
+          upsertLocalConversation(current, {
+            id: conversation.storedConversation?.id ?? newId("conversation"),
+            user_id: conversation.storedConversation?.user_id ?? "",
+            organization_id: conversation.storedConversation?.organization_id ?? organizationId,
+            lead_id: conversation.activeLead?.id ?? conversation.storedConversation?.lead_id ?? null,
+            phone_number: conversation.phone,
+            remote_jid: conversation.storedConversation?.remote_jid ?? null,
+            contact_name: conversation.contactName,
+            contact_avatar_url: conversation.avatarUrl,
+            status: "archived",
+            unread_count: 0,
+            last_message: getWhatsAppMessageDisplay(conversation.lastMessage),
+            last_message_direction: conversation.lastMessage.direction,
+            last_message_at: conversation.lastMessage.created_at,
+            last_read_at: now,
+            created_at: conversation.storedConversation?.created_at ?? now,
+            updated_at: now,
+          }),
+        items,
+      ),
+    );
+
+    const results = await Promise.all(
+      targets.map((conversation) => updateWhatsAppConversationStatus(conversation.phone, "archived")),
+    );
+    setBulkConversationLoading(false);
+
+    const failed = results.filter((result) => !result.success);
+    if (failed.length > 0) {
+      setStoredConversations(previous);
+      setActionError(failed[0]?.error ?? "Não foi possível arquivar as conversas visíveis");
+      return;
+    }
+
+    if (selectedPhone && targets.some((conversation) => conversation.phone === selectedPhone)) {
+      setSelectedPhone(null);
+      setDetailsOpen(false);
+    }
+
+    await onAudit({
+      entity_type: "whatsapp",
+      entity_id: null,
+      action: "whatsapp.conversations_bulk_archived",
+      summary: `${targets.length} conversa(s) arquivadas pela limpeza da inbox`,
+      metadata: { phones: targets.map((conversation) => conversation.phone), filter: statusFilter },
+    });
+  }
+
   async function updateConversationLeadStatus(status: LeadStatus) {
     if (!selectedConversationLead) return;
 
@@ -3883,6 +3948,14 @@ function Conversations({
                 type="button"
               >
                 Limpar filtros
+              </button>
+              <button
+                className="h-11 rounded-xl border border-red-400/20 bg-red-500/10 px-3 text-xs font-semibold text-red-200 transition hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-40 2xl:w-36"
+                disabled={bulkConversationLoading || filteredConversations.filter((conversation) => conversation.status !== "archived").length === 0}
+                onClick={() => void archiveVisibleConversations()}
+                type="button"
+              >
+                {bulkConversationLoading ? "Limpando..." : "Arquivar visíveis"}
               </button>
               </div>
             </div>
