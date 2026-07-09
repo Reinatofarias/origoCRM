@@ -97,6 +97,9 @@ type GoogleEventListResponse = {
   };
 };
 
+const GOOGLE_CALENDAR_RECONNECT_MESSAGE =
+  "Sessão Google expirada ou revogada. Clique em Reconectar Google Calendar para autorizar novamente.";
+
 export type GoogleCalendarEventInput = {
   title: string;
   description: string | null;
@@ -185,6 +188,40 @@ async function refreshGoogleAccessToken(refreshToken: string) {
   }
 
   return data.access_token;
+}
+
+export function isGoogleCalendarReconnectError(message: string | null | undefined) {
+  if (!message) return false;
+  const normalized = message.toLowerCase();
+  return (
+    normalized.includes("invalid_grant") ||
+    normalized.includes("expired or revoked") ||
+    normalized.includes("token has been expired") ||
+    normalized.includes("token has expired") ||
+    normalized.includes("revoked")
+  );
+}
+
+export function getGoogleCalendarDisplayError(message: string | null | undefined) {
+  if (isGoogleCalendarReconnectError(message)) return GOOGLE_CALENDAR_RECONNECT_MESSAGE;
+  return message || "Erro no Google Calendar";
+}
+
+async function markGoogleConnectionNeedsReconnect(
+  supabase: GenericSupabaseClient,
+  connectionId: string,
+  message: string,
+) {
+  await supabase
+    .from("google_calendar_connections")
+    .update({
+      status: "disconnected",
+      refresh_token_encrypted: null,
+      last_error: getGoogleCalendarDisplayError(message),
+      disconnected_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", connectionId);
 }
 
 export async function revokeGoogleRefreshToken(refreshToken: string) {
@@ -379,9 +416,10 @@ export async function syncTaskToGoogleCalendar(input: {
 }) {
   const config = getGoogleCalendarConfig();
   if (!config) return { synced: false, reason: "missing_config" };
+  let connection: GoogleCalendarConnection | null = null;
 
   try {
-    const connection = await getConnection(input.supabase, input.userId, input.organizationId);
+    connection = await getConnection(input.supabase, input.userId, input.organizationId);
     if (!connection?.refresh_token_encrypted) return { synced: false, reason: "not_connected" };
 
     const refreshToken = decryptGoogleToken(connection.refresh_token_encrypted);
@@ -417,10 +455,14 @@ export async function syncTaskToGoogleCalendar(input: {
     return { synced: true, eventId: data.id, htmlLink: data.htmlLink };
   } catch (error) {
     const message = error instanceof Error ? error.message : "Erro desconhecido ao sincronizar Google Calendar";
+    const displayMessage = getGoogleCalendarDisplayError(message);
+    if (connection && isGoogleCalendarReconnectError(message)) {
+      await markGoogleConnectionNeedsReconnect(input.supabase, connection.id, message).catch(() => undefined);
+    }
     await updateTaskGoogleFields(input.supabase, input.task.id, input.userId, input.organizationId, {
-      google_sync_error: message,
+      google_sync_error: displayMessage,
     }).catch(() => undefined);
-    return { synced: false, reason: message };
+    return { synced: false, reason: displayMessage };
   }
 }
 
@@ -501,16 +543,21 @@ export async function listGoogleCalendarEvents(input: {
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : "Erro ao ler Google Calendar";
+    const displayMessage = getGoogleCalendarDisplayError(message);
     try {
-      await input.supabase
-        .from("google_calendar_connections")
-        .update({ status: "error", last_error: message, updated_at: new Date().toISOString() })
-        .eq("id", connection.id);
+      if (isGoogleCalendarReconnectError(message)) {
+        await markGoogleConnectionNeedsReconnect(input.supabase, connection.id, message);
+      } else {
+        await input.supabase
+          .from("google_calendar_connections")
+          .update({ status: "error", last_error: displayMessage, updated_at: new Date().toISOString() })
+          .eq("id", connection.id);
+      }
     } catch {
       // Best-effort diagnostics; the UI still receives the original Calendar error.
     }
 
-    return { configured: true, connected: true, events: [], error: message };
+    return { configured: true, connected: !isGoogleCalendarReconnectError(message), events: [], error: displayMessage };
   }
 }
 
@@ -562,12 +609,17 @@ export async function createGoogleCalendarEvent(input: {
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : "Erro ao criar evento no Google Calendar";
-    await input.supabase
-      .from("google_calendar_connections")
-      .update({ status: "error", last_error: message, updated_at: new Date().toISOString() })
-      .eq("id", connection.id);
+    const displayMessage = getGoogleCalendarDisplayError(message);
+    if (isGoogleCalendarReconnectError(message)) {
+      await markGoogleConnectionNeedsReconnect(input.supabase, connection.id, message);
+    } else {
+      await input.supabase
+        .from("google_calendar_connections")
+        .update({ status: "error", last_error: displayMessage, updated_at: new Date().toISOString() })
+        .eq("id", connection.id);
+    }
 
-    return { configured: true, connected: true, event: null, error: message };
+    return { configured: true, connected: !isGoogleCalendarReconnectError(message), event: null, error: displayMessage };
   }
 }
 
@@ -622,12 +674,17 @@ export async function updateGoogleCalendarEvent(input: {
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : "Erro ao editar evento no Google Calendar";
-    await input.supabase
-      .from("google_calendar_connections")
-      .update({ status: "error", last_error: message, updated_at: new Date().toISOString() })
-      .eq("id", connection.id);
+    const displayMessage = getGoogleCalendarDisplayError(message);
+    if (isGoogleCalendarReconnectError(message)) {
+      await markGoogleConnectionNeedsReconnect(input.supabase, connection.id, message);
+    } else {
+      await input.supabase
+        .from("google_calendar_connections")
+        .update({ status: "error", last_error: displayMessage, updated_at: new Date().toISOString() })
+        .eq("id", connection.id);
+    }
 
-    return { configured: true, connected: true, event: null, error: message };
+    return { configured: true, connected: !isGoogleCalendarReconnectError(message), event: null, error: displayMessage };
   }
 }
 
@@ -672,11 +729,16 @@ export async function deleteGoogleCalendarEvent(input: {
     return { configured: true, connected: true, deleted: true };
   } catch (error) {
     const message = error instanceof Error ? error.message : "Erro ao excluir evento no Google Calendar";
-    await input.supabase
-      .from("google_calendar_connections")
-      .update({ status: "error", last_error: message, updated_at: new Date().toISOString() })
-      .eq("id", connection.id);
+    const displayMessage = getGoogleCalendarDisplayError(message);
+    if (isGoogleCalendarReconnectError(message)) {
+      await markGoogleConnectionNeedsReconnect(input.supabase, connection.id, message);
+    } else {
+      await input.supabase
+        .from("google_calendar_connections")
+        .update({ status: "error", last_error: displayMessage, updated_at: new Date().toISOString() })
+        .eq("id", connection.id);
+    }
 
-    return { configured: true, connected: true, deleted: false, error: message };
+    return { configured: true, connected: !isGoogleCalendarReconnectError(message), deleted: false, error: displayMessage };
   }
 }

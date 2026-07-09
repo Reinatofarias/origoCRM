@@ -1,7 +1,11 @@
 import { NextResponse } from "next/server";
 
 import { getAuthenticatedOrganizationContext, requireServerPermission, requireServerPlanFeature } from "@/lib/server/auth";
-import { getGoogleCalendarConfig } from "@/lib/server/google-calendar";
+import {
+  getGoogleCalendarConfig,
+  getGoogleCalendarDisplayError,
+  isGoogleCalendarReconnectError,
+} from "@/lib/server/google-calendar";
 
 function isMissingGoogleTable(message: string | null) {
   if (!message) return false;
@@ -44,10 +48,31 @@ export async function GET() {
     return NextResponse.json({ configured, migrated: true, connected: false, error: error.message }, { status: 500 });
   }
 
+  const lastError = (data as { last_error?: string | null } | null)?.last_error ?? null;
+  const needsReconnect = isGoogleCalendarReconnectError(lastError);
+
+  if (data?.id && needsReconnect) {
+    await auth.supabase
+      .from("google_calendar_connections")
+      .update({
+        status: "disconnected",
+        refresh_token_encrypted: null,
+        last_error: getGoogleCalendarDisplayError(lastError),
+        disconnected_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", data.id)
+      .eq("user_id", auth.user.id);
+
+    data.status = "disconnected";
+    data.last_error = getGoogleCalendarDisplayError(lastError);
+  }
+
   return NextResponse.json({
     configured,
     migrated: true,
-    connected: data?.status === "connected",
+    connected: data?.status === "connected" && !needsReconnect,
+    error: needsReconnect ? getGoogleCalendarDisplayError(lastError) : undefined,
     connection: data ?? null,
   });
 }

@@ -288,7 +288,7 @@ type GoogleCalendarStatus = {
   configured: boolean;
   migrated: boolean;
   connected: boolean;
-  error: string;
+  error?: string;
   connection: {
     account_email: string | null;
     calendar_id: string | null;
@@ -5018,6 +5018,12 @@ function SettingsView({
     }
   }
 
+  const googleCalendarNeedsReconnect = Boolean(
+    !googleCalendarStatus?.connected &&
+      googleCalendarStatus?.connection &&
+      (googleCalendarStatus.error || googleCalendarStatus.connection.last_error),
+  );
+
   return (
     <div className="space-y-5">
       <div className="flex flex-wrap gap-2 rounded-lg border border-white/10 bg-white/[0.025] p-2">
@@ -5514,7 +5520,11 @@ function SettingsView({
           </div>
 
           {(googleCalendarFeedback || googleCalendarStatus?.error || googleCalendarStatus?.connection?.last_error) && (
-            <p className="mt-4 rounded-lg border border-white/10 bg-black/20 p-3 text-sm text-zinc-300">
+            <p className={`mt-4 rounded-lg border p-3 text-sm ${
+              googleCalendarNeedsReconnect
+                ? "border-amber-400/20 bg-amber-400/10 text-amber-100"
+                : "border-white/10 bg-black/20 text-zinc-300"
+            }`}>
               {googleCalendarFeedback || googleCalendarStatus?.error || googleCalendarStatus?.connection?.last_error}
             </p>
           )}
@@ -5547,7 +5557,7 @@ function SettingsView({
                 type="button"
               >
                 <ExternalLink className="h-4 w-4" />
-                Conectar Google Calendar
+                {googleCalendarNeedsReconnect ? "Reconectar Google Calendar" : "Conectar Google Calendar"}
               </button>
             )}
             <button
