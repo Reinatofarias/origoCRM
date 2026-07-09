@@ -80,7 +80,7 @@ export function formatLeadForDisplay(lead: Lead): {
   nextFollowupFormatted: string;
 } {
   return {
-    nameAndCompany: `${lead.name} • ${lead.company || "Sem empresa"}`,
+    nameAndCompany: `${lead.name} â€¢ ${lead.company || "Sem empresa"}`,
     status: lead.status.charAt(0).toUpperCase() + lead.status.slice(1),
     lastContactFormatted: lead.last_contact_at
       ? new Date(lead.last_contact_at).toLocaleDateString("pt-BR")

@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import {
   AlertTriangle,
@@ -2690,6 +2690,8 @@ function buildDashboardActivityDays({
 }
 
 
+// Legacy view kept temporarily while TasksWorkspace owns the active tasks route.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function TasksView({
   tasks,
   leads,
@@ -3728,6 +3730,7 @@ function Conversations({
         id: selectedConversation.storedConversation?.id ?? newId("conversation"),
         user_id: selectedConversation.storedConversation?.user_id ?? "",
         organization_id: selectedConversation.storedConversation?.organization_id ?? organizationId,
+        whatsapp_instance_id: selectedConversation.storedConversation?.whatsapp_instance_id ?? null,
         lead_id: selectedConversationLead?.id ?? selectedConversation.storedConversation?.lead_id ?? null,
         phone_number: selectedConversation.phone,
         remote_jid: selectedConversation.storedConversation?.remote_jid ?? null,
@@ -3782,6 +3785,7 @@ function Conversations({
             id: conversation.storedConversation?.id ?? newId("conversation"),
             user_id: conversation.storedConversation?.user_id ?? "",
             organization_id: conversation.storedConversation?.organization_id ?? organizationId,
+            whatsapp_instance_id: conversation.storedConversation?.whatsapp_instance_id ?? null,
             lead_id: conversation.activeLead?.id ?? conversation.storedConversation?.lead_id ?? null,
             phone_number: conversation.phone,
             remote_jid: conversation.storedConversation?.remote_jid ?? null,

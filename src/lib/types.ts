@@ -367,6 +367,7 @@ export type WhatsAppMessage = {
   lead_id: string | null;
   user_id: string;
   organization_id: string | null;
+  whatsapp_instance_id: string | null;
   message_id: string;        // ID da mensagem no WhatsApp (Evolution)
   remote_jid: string | null;
   phone_number: string;
@@ -384,6 +385,7 @@ export type WhatsAppConversation = {
   id: string;
   user_id: string;
   organization_id: string | null;
+  whatsapp_instance_id: string | null;
   lead_id: string | null;
   phone_number: string;
   remote_jid: string | null;

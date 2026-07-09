@@ -18,6 +18,7 @@ export function useConversationInbox(organizationId: string | null, selectedPhon
   const supabase = useMemo(() => createSupabaseClient(), []);
   const [messages, setMessages] = useState<WhatsAppMessage[]>([]);
   const [storedConversations, setStoredConversations] = useState<WhatsAppConversation[]>([]);
+  const [currentInstanceId, setCurrentInstanceId] = useState<string | null>(null);
   const [loading, setLoading] = useState(Boolean(supabase));
   const [readPhones, setReadPhones] = useState<Set<string>>(() => new Set());
   const [realtimeStatus, setRealtimeStatus] = useState<ConversationRealtimeStatus>(
@@ -38,12 +39,29 @@ export function useConversationInbox(organizationId: string | null, selectedPhon
       }
 
       if (!silent) setLoading(true);
-      const messageQuery = organizationId
+      let instanceId: string | null = null;
+      if (organizationId) {
+        const { data: instanceData } = await supabase
+          .from("whatsapp_instances")
+          .select("id")
+          .eq("organization_id", organizationId)
+          .eq("provider", "evolution")
+          .maybeSingle();
+        instanceId = typeof instanceData?.id === "string" ? instanceData.id : null;
+      }
+      setCurrentInstanceId(instanceId);
+
+      let messageQuery = organizationId
         ? supabase.from("whatsapp_messages").select("*").eq("organization_id", organizationId)
         : supabase.from("whatsapp_messages").select("*");
-      const conversationQuery = organizationId
+      let conversationQuery = organizationId
         ? supabase.from("whatsapp_conversations").select("*").eq("organization_id", organizationId)
         : supabase.from("whatsapp_conversations").select("*");
+
+      if (instanceId) {
+        messageQuery = messageQuery.eq("whatsapp_instance_id", instanceId);
+        conversationQuery = conversationQuery.eq("whatsapp_instance_id", instanceId);
+      }
 
       const [messageResult, conversationResult] = await Promise.all([
         messageQuery.order("created_at", { ascending: false }).limit(MESSAGE_HISTORY_LIMIT),
@@ -110,6 +128,7 @@ export function useConversationInbox(organizationId: string | null, selectedPhon
           if (!mounted) return;
           const nextMessage = payload.new as WhatsAppMessage;
           if (payload.eventType !== "DELETE" && organizationId && nextMessage.organization_id !== organizationId) return;
+          if (payload.eventType !== "DELETE" && currentInstanceId && nextMessage.whatsapp_instance_id !== currentInstanceId) return;
           if (
             payload.eventType === "INSERT" &&
             nextMessage.direction === "inbound" &&
@@ -136,6 +155,7 @@ export function useConversationInbox(organizationId: string | null, selectedPhon
           if (!mounted) return;
           const nextConversation = payload.new as WhatsAppConversation;
           if (payload.eventType !== "DELETE" && organizationId && nextConversation.organization_id !== organizationId) return;
+          if (payload.eventType !== "DELETE" && currentInstanceId && nextConversation.whatsapp_instance_id !== currentInstanceId) return;
           setStoredConversations((current) => applyConversationRealtimeEvent(current, payload));
         },
       )
@@ -147,7 +167,7 @@ export function useConversationInbox(organizationId: string | null, selectedPhon
       void supabase.removeChannel(messageChannel);
       void supabase.removeChannel(conversationChannel);
     };
-  }, [organizationId, realtimeRetryKey, refresh, supabase]);
+  }, [currentInstanceId, organizationId, realtimeRetryKey, refresh, supabase]);
 
   useEffect(() => {
     if (!supabase) return;

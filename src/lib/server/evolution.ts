@@ -481,10 +481,16 @@ export async function upsertWhatsAppConversation(input: {
 
   const now = new Date().toISOString();
   const phoneNumber = normalizePhone(input.phoneNumber);
+  let whatsappInstanceId = input.whatsappInstanceId ?? null;
+  if (input.organizationId && !whatsappInstanceId) {
+    const { instance } = await getWhatsAppInstanceByOrganization(input.organizationId);
+    whatsappInstanceId = instance?.id ?? null;
+  }
+
   const payload: Record<string, unknown> = {
     user_id: input.userId,
     organization_id: input.organizationId ?? null,
-    whatsapp_instance_id: input.whatsappInstanceId ?? null,
+    whatsapp_instance_id: whatsappInstanceId,
     phone_number: phoneNumber,
     status: input.status ?? (input.direction === "inbound" ? "unread" : "responded"),
     updated_at: now,
@@ -505,7 +511,9 @@ export async function upsertWhatsAppConversation(input: {
   }
 
   await supabase.from("whatsapp_conversations").upsert(payload, {
-    onConflict: "user_id,phone_number",
+    onConflict: input.organizationId && whatsappInstanceId
+      ? "organization_id,whatsapp_instance_id,phone_number"
+      : "user_id,phone_number",
   });
 }
 
