@@ -5,10 +5,20 @@ export type TaskInput = {
   type: Task["type"];
   title: string;
   notes: string | null;
+  priority?: NonNullable<Task["priority"]>;
+  workflow_status?: NonNullable<Task["workflow_status"]>;
+  start_at?: string | null;
+  position?: number | null;
   due_at: string;
 };
 
 export type TaskScope = "open" | "overdue" | "today" | "upcoming" | "completed";
+
+export type TaskViewMode = "list" | "board" | "calendar";
+export type TaskGroupMode = "none" | "status" | "owner" | "lead";
+export type TaskSortMode = "due" | "priority" | "status" | "owner";
+export type TaskWorkflowStatus = NonNullable<Task["workflow_status"]>;
+export type TaskPriority = NonNullable<Task["priority"]>;
 
 export type GoogleCalendarEvent = {
   id: string;

@@ -201,6 +201,7 @@ import {
   GoogleEventEditorModal,
   TaskEditorModal,
 } from "@/components/crm/task-modals";
+import { TasksWorkspace } from "@/components/crm/tasks-workspace";
 import { Templates } from "@/components/crm/templates-view";
 import type {
   GoogleCalendarEvent,
@@ -1213,6 +1214,10 @@ function Workspace({
       type: "followup",
       title: `Follow-up com ${lead.name}`,
       notes: null,
+      priority: "medium",
+      workflow_status: "todo",
+      start_at: null,
+      position: 0,
       due_at: nextFollowupAt,
       status: "open",
       completed_at: null,
@@ -1250,6 +1255,10 @@ function Workspace({
             type: task.type,
             title: task.title,
             notes: task.notes,
+            priority: task.priority ?? "medium",
+            workflow_status: task.workflow_status ?? "todo",
+            start_at: task.start_at ?? null,
+            position: task.position ?? 0,
             due_at: task.due_at,
           },
           { cancelOpenFollowups: false },
@@ -1281,6 +1290,10 @@ function Workspace({
       type: input.type,
       title: input.title.trim(),
       notes: input.notes?.trim() || null,
+      priority: input.priority ?? "medium",
+      workflow_status: input.workflow_status ?? "todo",
+      start_at: input.start_at ?? null,
+      position: input.position ?? 0,
       due_at: input.due_at,
       status: "open",
       completed_at: null,
@@ -1322,6 +1335,10 @@ function Workspace({
           type: task.type,
           title: task.title,
           notes: task.notes,
+          priority: task.priority ?? "medium",
+          workflow_status: task.workflow_status ?? "todo",
+          start_at: task.start_at ?? null,
+          position: task.position ?? 0,
           due_at: task.due_at,
         },
         { cancelOpenFollowups: false },
@@ -1406,6 +1423,10 @@ function Workspace({
         type: task.type,
         title: task.title,
         notes: task.notes ?? null,
+        priority: task.priority ?? "medium",
+        workflow_status: task.workflow_status ?? "todo",
+        start_at: task.start_at ?? null,
+        position: task.position ?? 0,
         due_at: nextRecurringDueAt,
       });
     }
@@ -1488,6 +1509,10 @@ function Workspace({
               type: input.type,
               title: input.title.trim(),
               notes: input.notes?.trim() || null,
+              priority: input.priority ?? item.priority ?? "medium",
+              workflow_status: input.workflow_status ?? item.workflow_status ?? "todo",
+              start_at: input.start_at ?? item.start_at ?? null,
+              position: input.position ?? item.position ?? 0,
               due_at: input.due_at,
               updated_at: now,
             }
@@ -1507,6 +1532,10 @@ function Workspace({
         type: input.type,
         title: input.title.trim(),
         notes: input.notes?.trim() || null,
+        priority: input.priority ?? "medium",
+        workflow_status: input.workflow_status ?? "todo",
+        start_at: input.start_at ?? null,
+        position: input.position ?? 0,
         due_at: input.due_at,
       });
       const interactionError = interaction
@@ -1859,7 +1888,7 @@ function Workspace({
                     />
                   ))}
                 {view === "tasks" && (
-                  <TasksView
+                  <TasksWorkspace
                     leads={leads}
                     onCompleteTask={completeTask}
                     onCreateTask={createTask}
