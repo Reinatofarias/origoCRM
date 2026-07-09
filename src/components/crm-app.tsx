@@ -3452,9 +3452,14 @@ function Conversations({
       );
   }, [messages, leads, readPhones, storedConversations]);
 
+  const activeConversations = useMemo(
+    () => conversations.filter((conversation) => conversation.status !== "archived" && conversation.status !== "resolved"),
+    [conversations],
+  );
+
   const conversationCounts = useMemo(
     () => ({
-      all: conversations.length,
+      all: activeConversations.length,
       unread: conversations.filter((conversation) => conversation.status === "unread").length,
       waiting: conversations.filter((conversation) => conversation.status === "waiting").length,
       responded: conversations.filter((conversation) => conversation.status === "responded").length,
@@ -3462,7 +3467,7 @@ function Conversations({
       resolved: conversations.filter((conversation) => conversation.status === "resolved").length,
       archived: conversations.filter((conversation) => conversation.status === "archived").length,
     }),
-    [conversations],
+    [activeConversations.length, conversations],
   );
 
   const filteredConversations = useMemo(() => {
@@ -3470,7 +3475,10 @@ function Conversations({
     return conversations
       .filter((conversation) => {
         const activeLead = conversation.activeLead;
-        const matchesStatus = statusFilter === "all" || conversation.status === statusFilter;
+        const matchesStatus =
+          statusFilter === "all"
+            ? conversation.status !== "archived" && conversation.status !== "resolved"
+            : conversation.status === statusFilter;
         const matchesLead =
           leadFilter === "all" ||
           (leadFilter === "without" && !conversation.lead && !conversation.existingLead) ||
@@ -3884,7 +3892,7 @@ function Conversations({
               <div className="flex h-9 items-center gap-2 rounded-full border border-white/10 bg-black/15 px-3 text-xs text-zinc-500">
                 <MessageCircle className="h-3.5 w-3.5 text-[#8B5CF6]" />
                 <span>
-                  {conversationCounts.unread} não lidas de {conversations.length} conversas
+                  {conversationCounts.unread} não lidas de {conversationCounts.all} conversas ativas
                 </span>
               </div>
               <span className={`flex h-9 items-center gap-2 rounded-full border px-3 text-xs font-semibold ${realtimeBadge.className}`}>
