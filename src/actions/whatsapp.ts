@@ -13,6 +13,7 @@ import {
   upsertWhatsAppConversation,
 } from "@/lib/server/evolution";
 import { getAuthenticatedOrganizationContext, requireServerPermission, requireServerPlanFeature, withOrganizationId } from "@/lib/server/auth";
+import { createSupabaseServiceRoleClient } from "@/lib/server/supabase";
 import type {
   EvolutionSendTextRequest,
   EvolutionSendTextResponse,
@@ -467,7 +468,8 @@ export async function updateWhatsAppConversationStatus(
   const phone = normalizePhone(phoneNumber);
   if (!phone) return { success: false, error: "Numero de telefone invalido" };
 
-  const { error } = await auth.supabase
+  const supabase = createSupabaseServiceRoleClient() ?? auth.supabase;
+  const { error } = await supabase
     .from("whatsapp_conversations")
     .upsert(withOrganizationId({
       user_id: auth.user.id,
