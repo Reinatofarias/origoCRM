@@ -505,7 +505,7 @@ export async function upsertWhatsAppConversation(input: {
   }
 
   await supabase.from("whatsapp_conversations").upsert(payload, {
-    onConflict: input.organizationId ? "organization_id,phone_number" : "user_id,phone_number",
+    onConflict: "user_id,phone_number",
   });
 }
 
