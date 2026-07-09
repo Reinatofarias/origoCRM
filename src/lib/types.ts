@@ -71,6 +71,10 @@ export type Task = {
   type: "followup" | "call" | "email" | "whatsapp" | "meeting" | "other";
   title: string;
   notes: string | null;
+  priority: "low" | "medium" | "high" | "urgent" | null;
+  workflow_status: "todo" | "in_progress" | "waiting" | "review" | "completed" | "blocked" | null;
+  start_at: string | null;
+  position: number | null;
   due_at: string;
   status: "open" | "completed" | "canceled";
   completed_at: string | null;
@@ -189,6 +193,10 @@ export type TaskInput = {
   type: Task["type"];
   title: string;
   notes: string | null;
+  priority?: NonNullable<Task["priority"]>;
+  workflow_status?: NonNullable<Task["workflow_status"]>;
+  start_at?: string | null;
+  position?: number | null;
   due_at: string;
 };
 

@@ -56,6 +56,10 @@ export async function createTask(input: TaskInput, options: { cancelOpenFollowup
       type: input.type,
       title: input.title,
       notes: input.notes ?? null,
+      priority: input.priority ?? "medium",
+      workflow_status: input.workflow_status ?? "todo",
+      start_at: input.start_at ?? null,
+      position: input.position ?? 0,
       due_at: input.due_at,
       status: "open",
     }, auth.organizationId))
@@ -151,6 +155,10 @@ export async function updateTask(taskId: string, input: TaskInput) {
       type: input.type,
       title: input.title,
       notes: input.notes ?? null,
+      priority: input.priority ?? "medium",
+      workflow_status: input.workflow_status ?? "todo",
+      start_at: input.start_at ?? null,
+      position: input.position ?? 0,
       due_at: input.due_at,
       updated_at: new Date().toISOString(),
     })

@@ -15,7 +15,9 @@ import { Input, Modal } from "@/components/crm/ui";
 import type {
   GoogleCalendarEvent,
   GoogleCalendarEventDraft,
+  TaskPriority,
   TaskInput,
+  TaskWorkflowStatus,
 } from "@/components/crm/tasks-types";
 import type { Lead, Task } from "@/lib/types";
 
@@ -36,6 +38,11 @@ export function TaskEditorModal({
   const [type, setType] = useState<Task["type"]>(task?.type ?? draft?.type ?? "other");
   const [title, setTitle] = useState(task?.title ?? draft?.title ?? "");
   const [notes, setNotes] = useState(stripTaskMetadata(task?.notes ?? draft?.notes ?? null));
+  const [priority, setPriority] = useState<TaskPriority>(task?.priority ?? draft?.priority ?? "medium");
+  const [workflowStatus, setWorkflowStatus] = useState<TaskWorkflowStatus>(
+    task?.workflow_status ?? draft?.workflow_status ?? "todo",
+  );
+  const [startAt, setStartAt] = useState(toDateTimeLocal(task?.start_at ?? draft?.start_at ?? ""));
   const [dueAt, setDueAt] = useState(toDateTimeLocal(task?.due_at ?? draft?.due_at ?? new Date().toISOString()));
   const [repeat, setRepeat] = useState<TaskRepeat>(task ? getTaskRepeat(task) : "none");
 
@@ -51,12 +58,31 @@ export function TaskEditorModal({
             type,
             title: title.trim(),
             notes: buildTaskNotes(notes, repeat),
+            priority,
+            workflow_status: workflowStatus,
+            start_at: startAt ? fromDateTimeLocal(startAt) : null,
+            position: task?.position ?? draft?.position ?? 0,
             due_at: fromDateTimeLocal(dueAt),
           });
         }}
       >
         <div className="grid gap-3 sm:grid-cols-2">
           <Input label="Título" onChange={setTitle} required value={title} />
+          <label className="block text-sm text-zinc-300">
+            Status
+            <select
+              className="mt-2 h-11 w-full rounded-lg border border-white/10 bg-black/30 px-3 text-sm text-zinc-100 outline-none transition focus:border-[#8B5CF6]"
+              onChange={(event) => setWorkflowStatus(event.target.value as TaskWorkflowStatus)}
+              value={workflowStatus}
+            >
+              <option value="todo">A fazer</option>
+              <option value="in_progress">Em andamento</option>
+              <option value="waiting">Aguardando</option>
+              <option value="review">Em revisão</option>
+              <option value="blocked">Bloqueado</option>
+              <option value="completed">Concluído</option>
+            </select>
+          </label>
           <label className="block text-sm text-zinc-300">
             Tipo
             <select
@@ -73,6 +99,19 @@ export function TaskEditorModal({
             </select>
           </label>
           <label className="block text-sm text-zinc-300">
+            Prioridade
+            <select
+              className="mt-2 h-11 w-full rounded-lg border border-white/10 bg-black/30 px-3 text-sm text-zinc-100 outline-none transition focus:border-[#8B5CF6]"
+              onChange={(event) => setPriority(event.target.value as TaskPriority)}
+              value={priority}
+            >
+              <option value="low">Baixa</option>
+              <option value="medium">Média</option>
+              <option value="high">Alta</option>
+              <option value="urgent">Urgente</option>
+            </select>
+          </label>
+          <label className="block text-sm text-zinc-300">
             Lead vinculado
             <select
               className="mt-2 h-11 w-full rounded-lg border border-white/10 bg-black/30 px-3 text-sm text-zinc-100 outline-none transition focus:border-[#8B5CF6]"
@@ -86,6 +125,15 @@ export function TaskEditorModal({
                 </option>
               ))}
             </select>
+          </label>
+          <label className="block text-sm text-zinc-300">
+            Início
+            <input
+              className="mt-2 h-11 w-full rounded-lg border border-white/10 bg-black/30 px-3 text-sm text-zinc-100 outline-none transition focus:border-[#8B5CF6]"
+              onChange={(event) => setStartAt(event.target.value)}
+              type="datetime-local"
+              value={startAt}
+            />
           </label>
           <label className="block text-sm text-zinc-300">
             Quando
