@@ -3413,6 +3413,7 @@ function Conversations({
         const lead = leads.find((item) => item.id === (storedConversation?.lead_id ?? linkedLeadId));
         const existingLead = lead ?? findLeadByPhone(leads, phone);
         const activeLead = lead ?? existingLead;
+        const hasInboundMessage = items.some((item) => item.direction === "inbound");
         const contactMessage = [...items]
           .reverse()
           .find((item) => item.direction === "inbound" && getSafeConversationContactName(item.contact_name, repeatedOutboundNames));
@@ -3439,8 +3440,10 @@ function Conversations({
           failedCount,
           status,
           statusLabel: conversationStatusLabel(status),
+          isGenuine: hasInboundMessage || Boolean(activeLead),
         };
       })
+      .filter((conversation) => conversation.isGenuine)
       .sort(
         (a, b) =>
           new Date(b.lastMessage.created_at).getTime() -
