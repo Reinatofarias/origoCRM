@@ -546,14 +546,23 @@ export async function recordIncomingWhatsAppMessage(
 
   const phoneNumber = normalizePhone(normalizedMessage.remoteJid);
   const messageContent = normalizedMessage.content;
+  if (!instance) {
+    await logWhatsAppEvent("messages.upsert.ignored", {
+      phoneNumber,
+      messageId: normalizedMessage.messageId,
+      remoteJid: normalizedMessage.remoteJid,
+      instanceName,
+      reason: "unknown_or_missing_instance",
+    }, null, null);
+    return;
+  }
+
   const lead = await findLeadByWhatsAppPhone(phoneNumber, instance?.organization_id ?? null);
   const owner = lead
     ? { userId: lead.user_id, organizationId: lead.organization_id ?? null }
-    : instance
-      ? await resolveInstanceOwner(instance)
-      : await resolveWebhookOwner();
+    : await resolveInstanceOwner(instance);
   const ownerUserId = owner?.userId ?? null;
-  const organizationId = lead?.organization_id ?? instance?.organization_id ?? owner?.organizationId ?? null;
+  const organizationId = lead?.organization_id ?? instance.organization_id ?? owner?.organizationId ?? null;
   const avatarUrl = await fetchContactProfilePictureUrl(phoneNumber, instance?.instance_name);
 
   if (!ownerUserId) {
@@ -562,7 +571,7 @@ export async function recordIncomingWhatsAppMessage(
       messageId: normalizedMessage.messageId,
       remoteJid: normalizedMessage.remoteJid,
       reason: "missing_lead_and_owner_user",
-    }, null, organizationId, instance?.id ?? null);
+    }, null, organizationId, instance.id);
     return;
   }
 
@@ -572,6 +581,7 @@ export async function recordIncomingWhatsAppMessage(
       messageId: normalizedMessage.messageId,
       ownerUserId,
       organizationId,
+      whatsappInstanceId: instance.id,
     }, ownerUserId, organizationId, instance?.id ?? null);
   }
 
@@ -582,7 +592,7 @@ export async function recordIncomingWhatsAppMessage(
       lead_id: lead?.id ?? null,
       user_id: ownerUserId,
       organization_id: organizationId,
-      whatsapp_instance_id: instance?.id ?? null,
+      whatsapp_instance_id: instance.id,
       message_id: normalizedMessage.messageId,
       remote_jid: normalizedMessage.remoteJid,
       phone_number: phoneNumber,
@@ -601,7 +611,7 @@ export async function recordIncomingWhatsAppMessage(
   await upsertWhatsAppConversation({
     userId: ownerUserId,
     organizationId,
-    whatsappInstanceId: instance?.id ?? null,
+    whatsappInstanceId: instance.id,
     leadId: lead?.id ?? null,
     phoneNumber,
     remoteJid: normalizedMessage.remoteJid,
@@ -633,12 +643,10 @@ export async function recordIncomingWhatsAppMessage(
     ]);
   }
 
-  if (instance?.instance_name) {
-    await updateWhatsAppInstance(instance.instance_name, {
-      last_webhook_at: now,
-      last_error: null,
-    });
-  }
+  await updateWhatsAppInstance(instance.instance_name, {
+    last_webhook_at: now,
+    last_error: null,
+  });
 }
 
 function normalizeIncomingWebhookMessage(message: unknown) {
@@ -708,24 +716,6 @@ function asRecord(value: unknown) {
 function getString(record: Record<string, unknown> | null | undefined, key: string) {
   const value = record?.[key];
   return typeof value === "string" && value.trim() ? value : null;
-}
-
-async function resolveWebhookOwner() {
-  const configuredOwner = process.env.ORIGOCRM_OWNER_USER_ID || process.env.CRM_OWNER_USER_ID;
-  if (configuredOwner) return { userId: configuredOwner, organizationId: null as string | null };
-
-  const supabase = createSupabaseServiceRoleClient();
-  if (!supabase) return null;
-
-  for (const table of ["leads", "message_templates", "interactions"]) {
-    const { data } = await supabase.from(table).select("user_id,organization_id").limit(1).maybeSingle();
-    const row = data as { user_id: string; organization_id: string | null } | null;
-    if (row?.user_id) return { userId: row.user_id, organizationId: row.organization_id ?? null };
-  }
-
-  const { data } = await supabase.auth.admin.listUsers({ page: 1, perPage: 1 });
-  const fallbackUserId = data.users[0]?.id ?? null;
-  return fallbackUserId ? { userId: fallbackUserId, organizationId: null as string | null } : null;
 }
 
 async function resolveInstanceOwner(instance: WhatsAppInstanceRecord) {
