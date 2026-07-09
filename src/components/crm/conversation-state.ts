@@ -253,14 +253,25 @@ export function applyConversationRealtimeEvent(current: WhatsAppConversation[], 
 }
 
 export function upsertLocalConversation(current: WhatsAppConversation[], next: WhatsAppConversation) {
-  const exists = current.some((conversation) => conversation.id === next.id || conversation.phone_number === next.phone_number);
+  const exists = current.some((conversation) => isSameConversation(conversation, next));
   const items = exists
     ? current.map((conversation) =>
-        conversation.id === next.id || conversation.phone_number === next.phone_number ? next : conversation,
+        isSameConversation(conversation, next) ? next : conversation,
       )
     : [next, ...current];
 
   return items.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
+}
+
+function isSameConversation(current: WhatsAppConversation, next: WhatsAppConversation) {
+  if (current.id === next.id) return true;
+  if (current.phone_number !== next.phone_number) return false;
+
+  if (current.whatsapp_instance_id || next.whatsapp_instance_id) {
+    return current.whatsapp_instance_id === next.whatsapp_instance_id;
+  }
+
+  return current.organization_id === next.organization_id;
 }
 
 export function sortWhatsAppMessages(a: WhatsAppMessage, b: WhatsAppMessage) {

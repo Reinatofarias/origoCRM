@@ -2,7 +2,7 @@ import type { Lead, LeadInput, Interaction } from "@/lib/types";
 import { newId } from "@/lib/utils";
 
 /**
- * Cria uma nova interação para um lead
+ * Cria uma nova interação local para um lead.
  */
 export function makeInteraction(
   leadId: string,
@@ -23,46 +23,30 @@ export function makeInteraction(
 }
 
 /**
- * Encontra o próximo lead para contato após enviar mensagem para o atual
+ * Encontra o próximo lead para contato depois do envio atual.
  */
 export function getNextLeadAfterSend(
   currentLead: Lead,
   leads: Lead[],
   priorityLeads: Lead[],
 ): Lead | null {
-  // Primeiro tenta pegar um lead de prioridade que não seja o atual
   const priority = priorityLeads.filter((lead) => lead.id !== currentLead.id);
   if (priority[0]) return priority[0];
 
-  // Depois tenta outro lead na mesma coluna do pipeline
   const currentColumn = leads.filter(
     (lead) => lead.status === currentLead.status && lead.id !== currentLead.id,
   );
   if (currentColumn[0]) return currentColumn[0];
 
-  // Por fim, tenta qualquer lead que não seja fechado
-  return (
-    leads.find((lead) => lead.id !== currentLead.id && lead.status !== "fechado") ?? null
-  );
+  return leads.find((lead) => lead.id !== currentLead.id && lead.status !== "fechado") ?? null;
 }
 
-/**
- * Valida se um lead tem todos os dados necessários
- */
 export function validateLead(input: LeadInput): { valid: boolean; errors: string[] } {
   const errors: string[] = [];
 
-  if (!input.name.trim()) {
-    errors.push("Nome é obrigatório");
-  }
-
-  if (!input.phone.trim()) {
-    errors.push("Telefone é obrigatório");
-  }
-
-  if (!input.company.trim()) {
-    errors.push("Empresa é obrigatória");
-  }
+  if (!input.name.trim()) errors.push("Nome é obrigatório");
+  if (!input.phone.trim()) errors.push("Telefone é obrigatório");
+  if (!input.company.trim()) errors.push("Empresa é obrigatória");
 
   return {
     valid: errors.length === 0,
@@ -70,9 +54,6 @@ export function validateLead(input: LeadInput): { valid: boolean; errors: string
   };
 }
 
-/**
- * Formata lead para exibição
- */
 export function formatLeadForDisplay(lead: Lead): {
   nameAndCompany: string;
   status: string;
@@ -80,7 +61,7 @@ export function formatLeadForDisplay(lead: Lead): {
   nextFollowupFormatted: string;
 } {
   return {
-    nameAndCompany: `${lead.name} â€¢ ${lead.company || "Sem empresa"}`,
+    nameAndCompany: `${lead.name} - ${lead.company || "Sem empresa"}`,
     status: lead.status.charAt(0).toUpperCase() + lead.status.slice(1),
     lastContactFormatted: lead.last_contact_at
       ? new Date(lead.last_contact_at).toLocaleDateString("pt-BR")

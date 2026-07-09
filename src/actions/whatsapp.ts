@@ -78,7 +78,7 @@ export async function sendWhatsAppMessage(
   if (planError) return { success: false, error: planError };
 
   if (!phoneNumber.trim()) {
-    return { success: false, error: "Numero de telefone invalido" };
+    return { success: false, error: "Número de telefone inválido" };
   }
 
   if (!message.trim()) {
@@ -181,7 +181,7 @@ export async function sendWhatsAppConversationMessage(
   const planError = await requireServerPlanFeature(auth, "conversations");
   if (planError) return { success: false, error: planError };
 
-  if (!phoneNumber.trim()) return { success: false, error: "Numero de telefone invalido" };
+  if (!phoneNumber.trim()) return { success: false, error: "Número de telefone inválido" };
   if (!message.trim()) return { success: false, error: "Mensagem vazia" };
   if (message.length > 1024) {
     return { success: false, error: "Mensagem muito longa (max 1024 caracteres)" };
@@ -304,7 +304,7 @@ export async function checkWhatsAppNumbers(phoneNumbers: string[]): Promise<{
   if (planError) return { success: false, error: planError };
 
   const numbers = Array.from(new Set(phoneNumbers.map(normalizePhone).filter(Boolean))).slice(0, 30);
-  if (numbers.length === 0) return { success: false, error: "Nenhum numero para validar" };
+  if (numbers.length === 0) return { success: false, error: "Nenhum número para validar" };
 
   const evolution = await resolveOrganizationEvolutionEndpoint(auth, "/chat/whatsappNumbers");
   const endpoint = evolution.endpoint;
@@ -313,7 +313,7 @@ export async function checkWhatsAppNumbers(phoneNumbers: string[]): Promise<{
   const response = await callEvolutionApi<WhatsAppNumberCheckResponse>(endpoint, { numbers }, "POST");
 
   if (response.error || response.status >= 400 || !response.data) {
-    return { success: false, error: response.error || "Erro ao validar numeros no WhatsApp" };
+    return { success: false, error: response.error || "Erro ao validar números no WhatsApp" };
   }
 
   const rawNumbers = Array.isArray(response.data) ? response.data : response.data.numbers ?? [];
@@ -350,7 +350,11 @@ export async function saveWhatsAppConversationAsLead(input: {
   if (planError) return { success: false, error: planError };
 
   const phone = normalizePhone(input.phoneNumber);
-  if (!phone) return { success: false, error: "Numero de telefone invalido" };
+  if (!phone) return { success: false, error: "Número de telefone inválido" };
+  const instanceResult = auth.organizationId
+    ? await ensureWhatsAppInstanceForOrganization({ organizationId: auth.organizationId, userId: auth.user.id })
+    : { instance: null };
+  const whatsappInstanceId = instanceResult.instance?.id ?? null;
 
   const fallbackName = input.name?.trim() || phone;
   const status = input.status ?? "novo";
@@ -429,6 +433,7 @@ export async function saveWhatsAppConversationAsLead(input: {
   messageUpdateQuery = auth.organizationId
     ? messageUpdateQuery.eq("organization_id", auth.organizationId)
     : messageUpdateQuery.eq("user_id", auth.user.id);
+  if (whatsappInstanceId) messageUpdateQuery = messageUpdateQuery.eq("whatsapp_instance_id", whatsappInstanceId);
 
   const { error } = await messageUpdateQuery;
 
@@ -445,6 +450,7 @@ export async function saveWhatsAppConversationAsLead(input: {
     lastMessage: null,
     direction: null,
     status: "converted",
+    whatsappInstanceId,
   });
 
   revalidatePath("/");
@@ -466,7 +472,7 @@ export async function updateWhatsAppConversationStatus(
   if (planError) return { success: false, error: planError };
 
   const phone = normalizePhone(phoneNumber);
-  if (!phone) return { success: false, error: "Numero de telefone invalido" };
+  if (!phone) return { success: false, error: "Número de telefone inválido" };
 
   const instanceResult = auth.organizationId
     ? await ensureWhatsAppInstanceForOrganization({ organizationId: auth.organizationId, userId: auth.user.id })
