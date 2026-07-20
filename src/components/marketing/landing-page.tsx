@@ -15,6 +15,7 @@ import Image from "next/image";
 import Link from "next/link";
 import type { ComponentType, CSSProperties } from "react";
 
+import { PasswordRecoveryPanel } from "./password-recovery-panel";
 import { PricingSection } from "./pricing-section";
 
 const capabilities = [
@@ -71,6 +72,7 @@ const prospectingHighlights = [
 export function LandingPage() {
   return (
     <main className="relative min-h-screen overflow-hidden bg-[#08080C] text-white">
+      <PasswordRecoveryPanel />
       <div className="glow-breathe absolute inset-x-0 top-0 h-[42rem] bg-[radial-gradient(ellipse_at_28%_0%,rgba(139,92,246,0.34),transparent_44%),radial-gradient(ellipse_at_86%_10%,rgba(37,211,102,0.16),transparent_38%)]" />
       <div className="glow-breathe absolute inset-x-0 top-[34rem] h-40 bg-[linear-gradient(90deg,transparent,rgba(139,92,246,0.16),rgba(37,211,102,0.08),transparent)] blur-3xl" />
       <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.025)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.018)_1px,transparent_1px)] bg-[size:72px_72px] opacity-30" />
