@@ -322,20 +322,41 @@ export function CrmApp({
       return;
     }
 
-    supabase.auth.getUser().then(({ data }) => {
-      setUser(data.user ? { id: data.user.id, email: data.user.email ?? "" } : null);
-      setAuthLoading(false);
-    });
+    let mounted = true;
+    const authTimeout = window.setTimeout(() => {
+      if (mounted) setAuthLoading(false);
+    }, 6000);
+
+    supabase.auth
+      .getUser()
+      .then(({ data }) => {
+        if (!mounted) return;
+        setUser(data.user ? { id: data.user.id, email: data.user.email ?? "" } : null);
+      })
+      .catch(() => {
+        if (!mounted) return;
+        setUser(null);
+      })
+      .finally(() => {
+        if (!mounted) return;
+        window.clearTimeout(authTimeout);
+        setAuthLoading(false);
+      });
 
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
+      setAuthLoading(false);
       setUser(
         session?.user ? { id: session.user.id, email: session.user.email ?? "" } : null,
       );
     });
 
-    return () => subscription.unsubscribe();
+    return () => {
+      mounted = false;
+      window.clearTimeout(authTimeout);
+      subscription.unsubscribe();
+    };
   }, [supabase]);
 
   if (authLoading) {
