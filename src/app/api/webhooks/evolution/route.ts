@@ -20,29 +20,25 @@ import type {
 export async function POST(request: NextRequest): Promise<NextResponse> {
   try {
     if (isPayloadTooLarge(request, 1_000_000)) {
-      await logWhatsAppEvent("webhook.payload_too_large", {
-        contentLength: request.headers.get("content-length"),
-        timestamp: new Date().toISOString(),
-      }, null, null);
+      // Requisição ainda não autenticada: registra só no log do servidor, sem gravar no banco.
+      console.warn("[evolution-webhook] payload_too_large", request.headers.get("content-length"));
       return NextResponse.json({ status: "received" });
+    }
+
+    const signatures = [
+      request.headers.get("x-evolution-signature"),
+      request.headers.get("x-webhook-signature"),
+      request.headers.get("authorization"),
+      // Compatibilidade com webhooks configurados com ?token= na URL. Prefira o header.
+      request.nextUrl.searchParams.get("token"),
+    ].filter((value): value is string => Boolean(value));
+
+    if (!signatures.some(validateEvolutionWebhook)) {
+      console.warn("[evolution-webhook] invalid_signature");
+      return NextResponse.json({ status: "unauthorized" }, { status: 401 });
     }
 
     const payload = (await request.json()) as EvolutionWebhookPayload;
-    const signature =
-      request.nextUrl.searchParams.get("token") ??
-      request.headers.get("x-evolution-signature") ??
-      request.headers.get("x-webhook-signature") ??
-      request.headers.get("authorization") ??
-      "";
-
-    if (!validateEvolutionWebhook(signature)) {
-      await logWhatsAppEvent("webhook.invalid_signature", {
-        event: payload.event,
-        timestamp: new Date().toISOString(),
-      }, null, null);
-      return NextResponse.json({ status: "received" });
-    }
-
     await handleWebhookEvent(payload.event, payload.data, extractEvolutionInstanceName(payload));
     return NextResponse.json({ status: "received" });
   } catch (error) {
@@ -84,7 +80,11 @@ async function handleWebhookEvent(
       await logWhatsAppEvent("webhook.unhandled_event", { eventType, normalizedEvent, data, instanceName }, null, instance?.organization_id ?? null, instance?.id ?? null);
   }
 
-  await logWhatsAppEvent(normalizedEvent, { data, instanceName }, null, instance?.organization_id ?? null, instance?.id ?? null);
+  // Mensagens já ficam em whatsapp_messages; no log guardamos só um resumo, sem conteúdo nem números.
+  const logData = normalizedEvent === "messages.upsert" || normalizedEvent === "messages.update"
+    ? { items: extractWebhookItems<unknown>(data).length }
+    : data;
+  await logWhatsAppEvent(normalizedEvent, { data: logData, instanceName }, null, instance?.organization_id ?? null, instance?.id ?? null);
 }
 
 async function handleConnectionUpdate(data: unknown, instanceName: string | null) {

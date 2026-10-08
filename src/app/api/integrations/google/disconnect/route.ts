@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { getAuthenticatedOrganizationContext, requireServerPermission } from "@/lib/server/auth";
+import { enforceRateLimit, rateLimitJson } from "@/lib/server/security";
 import {
   decryptGoogleToken,
   revokeGoogleRefreshToken,
@@ -12,11 +13,19 @@ function isMissingGoogleTable(message: string | null) {
   return normalized.includes("google_calendar_connections") || normalized.includes("schema cache") || normalized.includes("relation");
 }
 
-export async function DELETE() {
+export async function DELETE(request: Request) {
   const auth = await getAuthenticatedOrganizationContext();
   if ("error" in auth) return NextResponse.json({ error: auth.error }, { status: 401 });
   const permissionError = requireServerPermission(auth, "task:manage");
   if (permissionError) return NextResponse.json({ error: permissionError }, { status: 403 });
+  const rateLimit = await enforceRateLimit({
+    request,
+    scope: "google.disconnect",
+    identifier: auth.organizationId ?? auth.user.id,
+    limit: 8,
+    windowSeconds: 60,
+  });
+  if (!rateLimit.allowed) return rateLimitJson(rateLimit);
 
   let selectQuery = auth.supabase
     .from("google_calendar_connections")

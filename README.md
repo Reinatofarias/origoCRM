@@ -33,7 +33,10 @@ NEXT_PUBLIC_SUPABASE_URL=
 NEXT_PUBLIC_SUPABASE_ANON_KEY=
 SUPABASE_SERVICE_ROLE_KEY=
 NEXT_PUBLIC_APP_URL=
+APP_URL=
 ```
+
+A lista completa (Stripe, Google Agenda, SerpAPI) está em `.env.example`.
 
 Opcionais para WhatsApp/Evolution:
 
@@ -41,9 +44,10 @@ Opcionais para WhatsApp/Evolution:
 NEXT_PUBLIC_EVOLUTION_ENABLED=true
 EVOLUTION_API_URL=
 EVOLUTION_API_KEY=
-EVOLUTION_INSTANCE_NAME=origo-crm
 EVOLUTION_WEBHOOK_KEY=
 ```
+
+Para subir uma Evolution API propria (Docker + HTTPS), siga `deploy/evolution/README.md`.
 
 Nao use `NEXT_PUBLIC_` em chaves privadas da Evolution. Elas rodam apenas no servidor.
 
@@ -64,13 +68,16 @@ O webhook da Evolution deve apontar para:
 https://seu-dominio.vercel.app/api/webhooks/evolution
 ```
 
-Envie a chave definida em `EVOLUTION_WEBHOOK_KEY` no header `x-evolution-signature` ou `Authorization: Bearer <chave>`.
+Envie a chave definida em `EVOLUTION_WEBHOOK_KEY` no header `x-evolution-signature` ou `Authorization: Bearer <chave>`. Quando a instância é criada pela própria app (com `APP_URL` definido), o webhook já é registrado com esse header. Ainda é aceito `?token=<chave>` na URL por compatibilidade, mas evite: a URL aparece em logs.
 
 ## Scripts
 
 ```bash
 npm run dev
 npm run lint
+npm run test
 npm run build
 npm run start
 ```
+
+O GitHub Actions roda lint, checagem de tipos e testes em todo push e pull request (`.github/workflows/ci.yml`).
