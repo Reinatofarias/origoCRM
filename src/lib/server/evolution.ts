@@ -176,19 +176,22 @@ export async function provisionEvolutionInstance(instanceName: string): Promise<
   const webhookResponse = await callEvolutionApi<Record<string, unknown>>(
     getEvolutionInstanceEndpointForName("/webhook/set", instanceName) ?? "",
     {
-      enabled: true,
-      url: `${appUrl}/api/webhooks/evolution`,
-      ...(process.env.EVOLUTION_WEBHOOK_KEY
-        ? { headers: { authorization: `Bearer ${process.env.EVOLUTION_WEBHOOK_KEY}` } }
-        : {}),
-      webhook_by_events: false,
-      webhook_base64: false,
-      events: [
-        "MESSAGES_UPSERT",
-        "MESSAGES_UPDATE",
-        "CONNECTION_UPDATE",
-        "QRCODE_UPDATED",
-      ],
+      // Evolution v2: a configuração vai dentro de "webhook" (o formato plano da v1 é recusado).
+      webhook: {
+        enabled: true,
+        url: `${appUrl}/api/webhooks/evolution`,
+        ...(process.env.EVOLUTION_WEBHOOK_KEY
+          ? { headers: { authorization: `Bearer ${process.env.EVOLUTION_WEBHOOK_KEY}` } }
+          : {}),
+        byEvents: false,
+        base64: false,
+        events: [
+          "MESSAGES_UPSERT",
+          "MESSAGES_UPDATE",
+          "CONNECTION_UPDATE",
+          "QRCODE_UPDATED",
+        ],
+      },
     },
     "POST",
   );

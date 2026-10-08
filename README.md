@@ -47,6 +47,8 @@ EVOLUTION_API_KEY=
 EVOLUTION_WEBHOOK_KEY=
 ```
 
+Para subir uma Evolution API propria (Docker + HTTPS), siga `deploy/evolution/README.md`.
+
 Nao use `NEXT_PUBLIC_` em chaves privadas da Evolution. Elas rodam apenas no servidor.
 
 ## Deploy na Vercel
