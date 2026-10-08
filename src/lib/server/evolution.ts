@@ -178,6 +178,9 @@ export async function provisionEvolutionInstance(instanceName: string): Promise<
     {
       enabled: true,
       url: `${appUrl}/api/webhooks/evolution`,
+      ...(process.env.EVOLUTION_WEBHOOK_KEY
+        ? { headers: { authorization: `Bearer ${process.env.EVOLUTION_WEBHOOK_KEY}` } }
+        : {}),
       webhook_by_events: false,
       webhook_base64: false,
       events: [
@@ -312,8 +315,6 @@ export function validateEvolutionWebhook(signature: string) {
   if (!webhookKey || !signature) return false;
 
   const normalizedSignature = signature.replace(/^Bearer\s+/i, "");
-  if (normalizedSignature === webhookKey) return true;
-
   const expectedHash = crypto.createHash("sha256").update(webhookKey).digest();
   const receivedHash = crypto.createHash("sha256").update(normalizedSignature).digest();
 

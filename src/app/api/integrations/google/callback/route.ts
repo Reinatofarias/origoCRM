@@ -11,6 +11,7 @@ import {
   exchangeGoogleAuthorizationCode,
   getGoogleCalendarConfig,
 } from "@/lib/server/google-calendar";
+import { enforceRateLimit } from "@/lib/server/security";
 
 export async function GET(request: NextRequest) {
   const appUrl = process.env.APP_URL || "https://origocrm.vercel.app";
@@ -41,6 +42,16 @@ export async function GET(request: NextRequest) {
   const planError = await requireServerPlanFeature(auth, "googleCalendar");
   if (planError) {
     return NextResponse.redirect(new URL("/settings?googleCalendar=plan_required", appUrl));
+  }
+  const rateLimit = await enforceRateLimit({
+    request,
+    scope: "google.callback",
+    identifier: auth.organizationId ?? auth.user.id,
+    limit: 8,
+    windowSeconds: 60,
+  });
+  if (!rateLimit.allowed) {
+    return NextResponse.redirect(new URL("/settings?googleCalendar=rate_limited", appUrl));
   }
 
   try {

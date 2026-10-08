@@ -6,6 +6,7 @@ import {
   getGoogleCalendarDisplayError,
   isGoogleCalendarReconnectError,
 } from "@/lib/server/google-calendar";
+import { enforceRateLimit, rateLimitJson } from "@/lib/server/security";
 
 function isMissingGoogleTable(message: string | null) {
   if (!message) return false;
@@ -13,7 +14,7 @@ function isMissingGoogleTable(message: string | null) {
   return normalized.includes("google_calendar_connections") || normalized.includes("schema cache") || normalized.includes("relation");
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   const auth = await getAuthenticatedOrganizationContext();
   const configured = Boolean(getGoogleCalendarConfig());
 
@@ -24,6 +25,14 @@ export async function GET() {
   if (permissionError) return NextResponse.json({ configured, connected: false, error: permissionError }, { status: 403 });
   const planError = await requireServerPlanFeature(auth, "googleCalendar");
   if (planError) return NextResponse.json({ configured, connected: false, error: planError }, { status: 402 });
+  const rateLimit = await enforceRateLimit({
+    request,
+    scope: "google.status",
+    identifier: auth.organizationId ?? auth.user.id,
+    limit: 60,
+    windowSeconds: 60,
+  });
+  if (!rateLimit.allowed) return rateLimitJson(rateLimit);
 
   let query = auth.supabase
     .from("google_calendar_connections")
